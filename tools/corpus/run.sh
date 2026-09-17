@@ -99,14 +99,21 @@ while IFS= read -r f; do
   fi
   msgs="$(printf '%s\n' "$out" | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
 
-  if $ORACLE "$f" >/dev/null 2>&1; then bash_ok=1; else bash_ok=0; fi
+  # The verdict is the exit code; the message is for the reader. Some inputs
+  # make the oracle exit non-zero without printing anything at all.
+  oracle_msg="$($ORACLE "$f" 2>&1 >/dev/null)"
+  oracle_rc=$?
+  if [ "$oracle_rc" = "0" ]; then bash_ok=1; else bash_ok=0; fi
 
   if [ "$ours" = "Complete" ]; then
     if [ "$bash_ok" = "1" ]; then
       both_ok=$((both_ok + 1))
     else
       we_permissive=$((we_permissive + 1))
-      echo "$f" >>"$permissive_files"
+      # Keep the oracle's own words: most of this quadrant is the oracle doing
+      # partial evaluation (`zsh -n` reports division by zero, fd numbers and
+      # indirect assignments), and that has to be visible without a rerun.
+      printf '%s\n  oracle: %s\n' "$f" "$(printf '%s' "${oracle_msg:-（无原文，退出码非零）}" | head -1)" >>"$permissive_files"
     fi
   else
     if [ "$bash_ok" = "1" ]; then

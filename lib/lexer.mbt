@@ -61,6 +61,10 @@ pub(all) struct Lexer {
   /// element may itself start with `(`, and there it is a pattern: the `(` in
   /// `argv+=( (a|b) )` is word content, not a subshell.
   mut array_elems : Bool
+  /// Set while the parser is reading a case pattern, which is zsh's
+  /// `incasepat`. A pattern is a word, so `(net|open)bsd*` is one pattern whose
+  /// leading `(` is a glob group rather than the pattern list's own paren.
+  mut in_casepat : Bool
 }
 
 ///|
@@ -83,6 +87,7 @@ pub fn Lexer::with_dialect(src : String, dialect : Dialect) -> Lexer {
     cmd_pos: true,
     array_open: false,
     array_elems: false,
+    in_casepat: false,
   }
 }
 
@@ -291,7 +296,7 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
     // position it is the subshell operator in both shells.
     let paren_in_word = c == '(' &&
       self.dialect is Zsh &&
-      (!self.cmd_pos || self.array_elems) &&
+      (!self.cmd_pos || self.array_elems || self.in_casepat) &&
       !self.array_open &&
       self.peek_at(1) != Some(')')
     let numglob = c == '<' && self.dialect is Zsh && self.isnumglob_at()
@@ -314,10 +319,14 @@ fn Lexer::read_operator(self : Lexer) -> String {
     Some(';') =>
       if self.peek() == Some(';') {
         self.pos += 1
-        if self.peek() == Some('&') {
+        // bash spells "test the next pattern as well" as `;;&`; zsh spells it
+        // `;|` and refuses `;;&` outright (measured: parse error near `&`).
+        if self.peek() == Some('&') && self.dialect is Bash {
           self.pos += 1
         }
       } else if self.peek() == Some('&') {
+        self.pos += 1
+      } else if self.peek() == Some('|') && self.dialect is Zsh {
         self.pos += 1
       }
     Some('&') =>
@@ -606,8 +615,11 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
       }
       // zsh keeps `|` inside a group: `(a|b)` is one pattern, not a pipeline.
       // `;`, `&` and redirections still end the word there.
+      // Inside a group only `;`, `&` and redirections end the word. A numeric
+      // glob is a pattern even there: `case x in a:(s.<1-2>))` runs in zsh.
+      let numglob_here = self.dialect is Zsh && c == '<' && self.isnumglob_at()
       let ends_word = if in_group {
-        c == ';' || c == '&' || c == '<' || c == '>'
+        (c == ';' || c == '&' || c == '<' || c == '>') && !numglob_here
       } else if self.dialect is Zsh && c == '(' {
         // Mid-word zsh never treats `(` as an operator; the group was counted
         // above and already became word content.

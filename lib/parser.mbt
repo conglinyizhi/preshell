@@ -585,6 +585,26 @@ fn Parser::parse_for(self : Parser) -> Cmd {
       }
     _ => ()
   }
+  // zsh takes more than one loop name: `for a b in x y` splits the list two at
+  // a time, and `for a b` splits "$@" that way. bash refuses both, so this is
+  // the zsh dialect only (measured against both shells).
+  if self.lex.dialect is Zsh {
+    for ;; {
+      match self.cur {
+        TWord(w) =>
+          match w.plain() {
+            Some(s) =>
+              if s.length() > 0 && !is_command_word(s) {
+                self.advance()
+              } else {
+                break
+              }
+            None => break
+          }
+        _ => break
+      }
+    }
+  }
   let words : Array[Word] = []
   if self.cur is TOp("(") && self.next_is_adjacent("(") {
     // `for ((...))` requires arithmetic: bash errors out here instead of
@@ -666,16 +686,22 @@ fn Parser::parse_case(self : Parser) -> Cmd {
   }
   self.skip_newlines()
   if self.reserved() == Some("in") {
+    // From here the patterns are words: zsh reads `(net|open)bsd*)` as one
+    // pattern with a glob group in it, not as the pattern list's own paren
+    // followed by two alternatives.
+    self.lex.in_casepat = true
     self.advance()
   }
   let items : Array[CaseItem] = []
   for ;; {
     self.skip_newlines()
     if self.reserved() == Some("esac") {
+      self.lex.in_casepat = false
       self.advance()
       break
     }
     if self.cur is TEof {
+      self.lex.in_casepat = false
       break
     }
     let before = self.lex.pos
@@ -697,14 +723,18 @@ fn Parser::parse_case(self : Parser) -> Cmd {
         break
       }
     }
+    // The body is a command list again, so a `(` there is a subshell.
+    self.lex.in_casepat = false
     if self.cur is TOp(")") {
       self.advance()
     }
     let body = self.parse_seq_in(
-      { words: ["esac"], ops: [";;", ";&", ";;&"], },
+      { words: ["esac"], ops: [";;", ";&", ";;&", ";|"], },
       "case",
     )
     let mut ft = 0
+    // Whatever comes after the terminator is the next pattern list.
+    self.lex.in_casepat = true
     match self.cur {
       TOp(";;") => {
         ft = 0
@@ -714,7 +744,9 @@ fn Parser::parse_case(self : Parser) -> Cmd {
         ft = 1
         self.advance()
       }
-      TOp(";;&") => {
+      TOp(";;&") | TOp(";|") => {
+        // Both mean "keep testing the following patterns". bash spells it
+        // `;;&`, zsh `;|`; the lexer only ever produces one of them per dialect.
         ft = 2
         self.advance()
       }

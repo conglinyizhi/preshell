@@ -253,3 +253,72 @@ test "an array element may start with a parenthesis" {
   // And the array opener still leaves the following commands alone.
   debug_inspect(zstatus("a=(1 2); echo (x)"), content="Complete")
 }
+
+///|
+test "zsh spells case fallthrough ;| and refuses bash's ;;&" {
+  // Measured: `;|` keeps testing the following patterns (zsh's
+  // WC_CASE_TESTAND, the same job as bash's `;;&`), `;&` falls through without
+  // testing, and zsh rejects `;;&` outright.
+  debug_inspect(
+    zstatus("case gnu in\ngnu) echo A ;| linux) echo B ;;\nesac"),
+    content="Complete",
+  )
+  debug_inspect(
+    zstatus("case gnu in\ngnu) echo A ;& linux) echo B ;;\nesac"),
+    content="Complete",
+  )
+  debug_inspect(
+    zstatus("case gnu in\ngnu) echo A ;;& linux) echo B ;;\nesac"),
+    content="Unsupported",
+  )
+  // bash takes `;;&` and has no `;|`.
+  debug_inspect(
+    analyze("case gnu in\ngnu) echo A ;;& linux) echo B ;;\nesac").status,
+    content="Complete",
+  )
+  debug_inspect(
+    analyze("case gnu in\ngnu) echo A ;| linux) echo B ;;\nesac").status,
+    content="Unsupported",
+  )
+}
+
+///|
+test "a case pattern is a word, so its parens are a glob group" {
+  // zsh's `incasepat`: `(net|open)bsd*)` is one pattern. Reading the leading
+  // `(` as the pattern list's own paren split it in two and choked.
+  let cases : Array[String] = [
+    "case $x in\n  (net|open)bsd*) echo hi ;;\nesac", "case $x in\n  (un|)install) echo hi ;;\nesac",
+    "case $x in\n  (gnu) echo hi ;;\nesac", "case $x in\n  user:add:(^solaris2.<-10>)) echo hi ;;\nesac",
+  ]
+  for c in cases {
+    debug_inspect(zstatus(c), content="Complete")
+  }
+  // The body is a command list again, so a subshell there still parses.
+  debug_inspect(
+    zstatus("case $x in\n  gnu) (echo hi) ;;\nesac"),
+    content="Complete",
+  )
+  debug_inspect(
+    zstatus("(echo a); case $x in a) echo b;; esac"),
+    content="Complete",
+  )
+}
+
+///|
+test "zsh takes more than one loop name" {
+  // Measured: bash refuses both spellings; zsh splits the list two at a time.
+  let cases : Array[String] = [
+    "for a b in x y; do echo $a; done", "for a b c in x y z; do echo $a; done", "for a b; do echo $a; done",
+    "for pattern arg in \\\n  a b c; do\n  echo $pattern\ndone",
+  ]
+  for c in cases {
+    debug_inspect(zstatus(c), content="Complete")
+    debug_inspect(analyze(c).status, content="Unsupported")
+  }
+  // One name stays common ground.
+  debug_inspect(zstatus("for a in x y; do echo $a; done"), content="Complete")
+  debug_inspect(
+    analyze("for a in x y; do echo $a; done").status,
+    content="Complete",
+  )
+}
