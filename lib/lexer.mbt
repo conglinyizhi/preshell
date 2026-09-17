@@ -54,6 +54,13 @@ pub(all) struct Lexer {
   /// itself (`incmdpos`) and uses it to decide whether `(` opens a subshell or
   /// is just part of a word: `echo *(.)` is a glob, `(echo x)` is a subshell.
   mut cmd_pos : Bool
+  /// Set when a word ended at a `(` that opens an array assignment
+  /// (`argv+=(`), so the next token is read as the operator it is.
+  mut array_open : Bool
+  /// Set while the parser is reading the elements of an array assignment. An
+  /// element may itself start with `(`, and there it is a pattern: the `(` in
+  /// `argv+=( (a|b) )` is word content, not a subshell.
+  mut array_elems : Bool
 }
 
 ///|
@@ -74,6 +81,8 @@ pub fn Lexer::with_dialect(src : String, dialect : Dialect) -> Lexer {
     tok_start: 0,
     dialect,
     cmd_pos: true,
+    array_open: false,
+    array_elems: false,
   }
 }
 
@@ -158,11 +167,31 @@ fn Lexer::note_position(self : Lexer, tok : Tok) -> Unit {
         Some(text) => self.cmd_pos = is_command_word(text)
         None => self.cmd_pos = false
       }
-    TNewline => self.cmd_pos = true
+    TNewline => {
+      self.cmd_pos = true
+      self.array_open = false
+    }
     TOp(op) =>
-      // A redirection leaves us inside the same command; the word after it
-      // clears this again anyway.
       match op {
+        // The `(` that opens an array turns on element reading: the elements
+        // are words, so a `(` inside one is a pattern rather than a subshell.
+        // It stays on until the matching `)` is emitted.
+        "(" => {
+          if self.array_open {
+            self.array_elems = true
+          }
+          self.array_open = false
+          self.cmd_pos = true
+        }
+        ")" => {
+          if self.array_elems {
+            self.array_elems = false
+          }
+          self.array_open = false
+          self.cmd_pos = true
+        }
+        // A redirection leaves us inside the same command; the word after it
+        // clears this again anyway.
         ">"
         | "<"
         | ">>"
@@ -174,9 +203,12 @@ fn Lexer::note_position(self : Lexer, tok : Tok) -> Unit {
         | ">|"
         | "&>"
         | "&>>" => ()
-        _ => self.cmd_pos = true
+        _ => {
+          self.cmd_pos = true
+          self.array_open = false
+        }
       }
-    _ => ()
+    _ => self.array_open = false
   }
 }
 
@@ -259,9 +291,13 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
     // position it is the subshell operator in both shells.
     let paren_in_word = c == '(' &&
       self.dialect is Zsh &&
-      !self.cmd_pos &&
+      (!self.cmd_pos || self.array_elems) &&
+      !self.array_open &&
       self.peek_at(1) != Some(')')
     let numglob = c == '<' && self.dialect is Zsh && self.isnumglob_at()
+    // `array_open` is deliberately not cleared here: it was set while reading
+    // the word that just ended, and `note_position` is the one that consumes
+    // it, once the token that follows is known.
     if is_meta(c) && !prosub && !paren_in_word && !numglob {
       return TOp(self.read_operator())
     }
@@ -424,16 +460,44 @@ fn Lexer::read_numeric_glob(self : Lexer) -> String {
 /// or `name[index]`. In zsh `name=(a b)` is an array, while `=(cmd)` anywhere
 /// else in a word is process substitution writing to a temporary file, so the
 /// two have to be told apart before the `(` is read.
+fn looks_like_array_assign(
+  parts : Array[WordPart],
+  lit : StringBuilder,
+) -> Bool {
+  match word_text(parts, lit) {
+    Some(text) => looks_like_array_head_text(text, true)
+    None => false
+  }
+}
+
+///|
+/// Without the trailing `=`: the shapes where `=(` is an array assignment
+/// rather than zsh's `=( )` process substitution.
 fn looks_like_array_head(parts : Array[WordPart], lit : StringBuilder) -> Bool {
+  match word_text(parts, lit) {
+    Some(text) => looks_like_array_head_text(text, false)
+    None => false
+  }
+}
+
+///|
+/// The literal text read so far, or `None` if any part is not literal.
+fn word_text(parts : Array[WordPart], lit : StringBuilder) -> String? {
   let sb = StringBuilder()
   for p in parts {
     match p {
       Lit(s) => sb.write_string(s)
-      _ => return false
+      _ => return None
     }
   }
   sb.write_string(lit.to_string())
-  let text = sb.to_string()
+  Some(sb.to_string())
+}
+
+///|
+/// The shared body. `name`, `name+`, `name[index]`, and with `with_equals` the
+/// same followed by exactly one `=`.
+fn looks_like_array_head_text(text : String, with_equals : Bool) -> Bool {
   let n = text.length()
   if n == 0 {
     return false
@@ -473,6 +537,14 @@ fn looks_like_array_head(parts : Array[WordPart], lit : StringBuilder) -> Bool {
   if i < n && text.get_char(i) == Some('+') {
     i += 1
   }
+  if with_equals {
+    // `name=(` only: the `=` has to be there and be the last character, or a
+    // plain word followed by a pattern like `echo a(b)` would look like one.
+    if i >= n || text.get_char(i) != Some('=') {
+      return false
+    }
+    i += 1
+  }
   i == n
 }
 
@@ -493,6 +565,13 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
     }
     if unquoted && self.dialect is Zsh {
       if c == '(' {
+        // `name=(a b)` and `name+=(a b)`: this `(` opens an array, so the word
+        // ends here and the parser sees the operator. Without this the `(`
+        // became word content and the elements were read as commands.
+        if looks_like_array_assign(parts, lit) {
+          self.array_open = true
+          break
+        }
         // `()` is the function-definition token, not a pattern group.
         if self.peek_at(1) == Some(')') {
           break

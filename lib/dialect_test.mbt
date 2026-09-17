@@ -231,3 +231,25 @@ test "a brace inside an expansion nests only when zsh is not quoting" {
     content="Complete",
   )
 }
+
+///|
+test "an array element may start with a parenthesis" {
+  // The elements of `name=( ... )` are words, so a `(` inside one is a pattern.
+  // Measured: without that, `argv+=( (a|b) )` read the element as a subshell and
+  // then choked on the closing paren. 127 files in the corpus died this way,
+  // always reported at a line holding a lone `)`.
+  debug_inspect(zstatus("true; argv+=( (a|b) )"), content="Complete")
+  debug_inspect(
+    zstatus("if true; then\n  argv+=(\n    (a)\n  )\nfi"),
+    content="Complete",
+  )
+  debug_inspect(zstatus("argv+=( (a|b) )"), content="Complete")
+  debug_inspect(zstatus("a=(1 2)"), content="Complete")
+  debug_inspect(zstatus("a=()"), content="Complete")
+  // A plain word before a pattern must not look like an array head: this is
+  // what the trailing `=` check in the shape test is for.
+  debug_inspect(zstatus("echo a(b)"), content="Complete")
+  inspect(ztouched("echo a(b)"), content="U:a(b)")
+  // And the array opener still leaves the following commands alone.
+  debug_inspect(zstatus("a=(1 2); echo (x)"), content="Complete")
+}
