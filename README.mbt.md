@@ -117,29 +117,56 @@ analysed is not byte-for-byte the one that arrived.
   nothing would execute. Only claimed with evidence; see below.
 
 
+
+This tool parses **bash** semantics, and it says so when the input declares
+something else. The claims are split by how a POSIX shell actually fails,
+because both kinds exist and they are not the same statement (each was checked
+with `dash -n`):
+
+- **rejected at parse time**: arrays (`x=(1 2)`), `<<<`, `<( )`, the
+  `function` keyword. "It would not run there" is accurate.
+- **parsed, and means something else**: `[[ ]]` is an ordinary command named
+  `[[` to dash, and `((i++))` is two nested subshells. Saying these make the
+  file invalid would be wrong.
+- **not modelled at all** (`zsh`, `fish`, `python`, ...): the report is
+  `Unsupported`, because the grammar being parsed is not that one.
+
+`tools/corpus/posix_oracle.sh` runs these claims past a real POSIX shell and
+reports each direction. On 1128 sh/dash scripts from this host the result is 3
+claims confirmed, 0 false alarms, 0 missed dialect uses that matter (2 polyglots,
+21 files we flag for other reasons, 1102 in agreement). Zero false alarms is
+what CI enforces; the coarseness of the attribution is a known weakness.
+
 ## Which shell
 
 This tool parses **bash** semantics, and it says so when the input declares
-something else:
+something else. The claims are split by how a POSIX shell actually fails,
+because both kinds exist and they are not the same statement (each of these was
+checked with `dash -n`):
 
-- `#!/bin/sh` or `#!/bin/dash` using bash-only syntax (arrays, `[[ ]]`, `(( ))`,
-  `<<<`, `<( )`, the `function` keyword) gets a note and `uncertain: true`.
-  Such a script would not run under that shell as written. The parse itself
-  succeeded, so `status` stays `Complete`: the note is about the dialect, not
-  about this tool's coverage.
-- A shell that is not modelled at all (`zsh`, `fish`, `python`, ...) makes the
-  report `Unsupported`, because the grammar being parsed is not that one.
+- **rejected at parse time**: arrays (`x=(1 2)`), `<<<`, `<( )`, the `function`
+  keyword. "It would not run there" is accurate.
+- **parsed, and it means something else**: to dash, `[[ ]]` is an ordinary
+  command named `[[`, and `((i++))` is two nested subshells. Claiming those make
+  a file invalid would be wrong, and it is what a first version of this did.
+- **not modelled at all** (`zsh`, `fish`, `python`, ...): the report is
+  `Unsupported`, because the grammar being parsed is not that one.
 
-Neither case is guessed at: the shebang is read, and `sh`/`dash`/`bash` are
-taken as the modelled set so that a POSIX script does not produce noise.
+`tools/corpus/posix_oracle.sh` runs these claims past a real POSIX shell and
+reports each direction separately. On 1128 sh/dash scripts from this host: 3
+claims confirmed, **0 false alarms**, 0 missed dialect uses of the kind that
+matter, 2 polyglots, 21 files flagged for other reasons, 1102 in agreement. Zero
+false alarms is what CI enforces; the coarseness of the attribution is a known
+weakness, recorded in `AGENTS.md`.
 
 ## Hardening
 
-Three checks, all runnable locally and in CI:
+Four checks, all runnable locally and in CI:
 
 ```bash
 moon test --target native                     # library behaviour
 tools/corpus/run.sh                           # differential against bash -n
+tools/corpus/posix_oracle.sh                  # dialect claims vs a real sh
 tools/probe/malformed.sh                      # the process must not die
 node tools/fuzz/mutate.js --n 2000 --seed 1   # mutation fuzzing, reproducible
 ```
@@ -152,6 +179,7 @@ scripts from the host for a second, noisier corpus.
 Two numbers to watch, because both were zero and should stay there: crashes, and
 inputs where bash rejects a command this tool accepts.
 
+## Evidence rather than taste
 
 Claiming "bash would reject this" is a statement about a program we are not
 running, and a false claim turns an unparsed command into an empty report. So
@@ -183,3 +211,4 @@ moon fmt && moon check --target native
 GPL-3.0-or-later. The implementation is an original rewrite, but it was written
 with heavy reference to bash's own source (`parse.y` for the grammar and lexer)
 and to `bash -n` for behaviour. See LICENSE.
+

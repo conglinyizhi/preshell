@@ -73,11 +73,29 @@ test "bash-only syntax in a POSIX script is reported" {
 
 ///|
 test "bashisms are found through nested constructs" {
+  // dash refuses to parse these outright, so the claim "it would not run" holds
   inspect(
-    bashisms(parse("cat <(echo a)").0).join(","),
+    bashisms(parse("cat <(echo a)").0).rejects.join(","),
     content="<( ) process substitution",
   )
-  inspect(bashisms(parse("( [[ -f x ]] )").0).join(","), content="[[ ]]")
-  inspect(bashisms(parse("if ((1)); then :; fi").0).join(","), content="(( ))")
-  inspect(bashisms(parse("echo a | cat").0).join(","), content="")
+  inspect(
+    bashisms(parse("x=(1 2)").0).rejects.join(","),
+    content="array assignment",
+  )
+  inspect(bashisms(parse("cat <<< hi").0).rejects.join(","), content="<<<")
+  inspect(
+    bashisms(parse("function f { :; }").0).rejects.join(","),
+    content="function keyword",
+  )
+  // dash parses these and does something else, so they must not be called invalid
+  inspect(
+    bashisms(parse("( [[ -f x ]] )").0).differs.join(","),
+    content="[[ ]]",
+  )
+  inspect(
+    bashisms(parse("if ((1)); then :; fi").0).differs.join(","),
+    content="(( ))",
+  )
+  inspect(bashisms(parse("echo a | cat").0).differs.join(","), content="")
+  inspect(bashisms(parse("echo a | cat").0).rejects.join(","), content="")
 }
