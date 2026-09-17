@@ -143,3 +143,19 @@ test "a dollar sign before a closing quote is just a dollar sign" {
   debug_inspect(analyze("echo $\"loc\"").status, content="Complete")
   debug_inspect(analyze("echo $'ansi'").status, content="Complete")
 }
+
+///|
+test "a redirection without a target is not a command that runs" {
+  // Every shell that reads this syntax refuses it, so accepting `echo >` would
+  // report a command that cannot run. Found by probing after the zsh lexer
+  // work; six spellings of it were silently accepted.
+  let cases = ["echo >", "echo <", "echo > >", "echo >>", "cat < ; echo hi"]
+  for c in cases {
+    let r = analyze(c)
+    debug_inspect(r.status, content="Unsupported")
+    inspect(r.impact.uncertain, content="true")
+  }
+  // With a target on both sides nothing changes.
+  debug_inspect(analyze("cat x > out").status, content="Complete")
+  debug_inspect(analyze("echo hi >&2").status, content="Complete")
+}

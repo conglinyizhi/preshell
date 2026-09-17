@@ -911,7 +911,13 @@ fn Parser::parse_redirect(self : Parser, fd : Int?) -> Redirect {
       self.advance()
       w
     }
-    _ => empty_word(self.lex.line)
+    _ => {
+      // A redirection without a target is a syntax error in every shell that
+      // reads this syntax, so reporting a wordless redirect would be a claim
+      // that a command runs when it does not.
+      self.lex.fail("expected a word after the redirection operator")
+      empty_word(self.lex.line)
+    }
   }
   let r : Redirect = { fd, op, target, body: None, }
   r
