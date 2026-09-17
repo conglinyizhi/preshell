@@ -73,25 +73,37 @@ pub fn report_version() -> Int {
 /// does, then report. This is what a subprocess caller should use, since it is
 /// the only path that sees the bytes as sent.
 pub fn analyze_bytes(bytes : Bytes) -> Report {
-  let (text, notes) = decode_command(bytes)
-  let all = notes
-  for n in declared_shell_note(text) {
-    all.push(n)
-  }
-  add_notes(analyze_clean(strip_nuls(text).0), all)
+  let (text, decode_notes) = decode_command(bytes)
+  // Replaced bytes are a caveat, not a parse failure: the analysis ran.
+  let r = add_notes(analyze(text), decode_notes, kind=Note)
+  add_notes(r, declared_shell_note(text), kind=Gap)
 }
 
 ///|
 /// Fold input-normalisation notes into a report. Any note means the command we
 /// analysed is not byte-for-byte what arrived, so nothing here may come back
 /// looking clean.
-fn add_notes(r : Report, notes : Array[String]) -> Report {
+
+///|
+/// Fold extra notes into a report.
+///
+/// `kind` says what the note means: a `Gap` is something this parser could not
+/// handle (status becomes `Unsupported`), while a `Note` is a caveat about an
+/// analysis that did succeed — input bytes that were replaced, or a script
+/// declaring a shell this tool does not model. A `Note` keeps the status and
+/// only forces `uncertain`, which is what keeps "parser gap" a meaningful
+/// count.
+fn add_notes(
+  r : Report,
+  notes : Array[String],
+  kind? : IssueKind = Gap,
+) -> Report {
   if notes.length() == 0 {
     return r
   }
   let issues : Array[Issue] = []
   for n in notes {
-    issues.push({ kind: Gap, message: n, line: 0, })
+    issues.push({ kind, message: n, line: 0, })
   }
   for i in r.issues {
     issues.push(i)
@@ -102,9 +114,10 @@ fn add_notes(r : Report, notes : Array[String]) -> Report {
   } else {
     issues
   }
+  let status = if kind is Gap { Unsupported } else { r.status }
   {
     version: r.version,
-    status: Unsupported,
+    status,
     impact: r.impact.mark_uncertain(),
     issues: kept,
     issues_dropped: total - kept.length(),
@@ -129,12 +142,9 @@ fn max_issues() -> Int {
 pub fn analyze(src : String) -> Report {
   // argv can carry a NUL too, so this path strips it as well. The bytes path
   // goes through decode_command first and lands here with it already gone.
-  let (clean, notes) = strip_nuls(src)
-  let all = notes
-  for n in declared_shell_note(clean) {
-    all.push(n)
-  }
-  add_notes(analyze_clean(clean), all)
+  let (clean, nul_notes) = strip_nuls(src)
+  let r = add_notes(analyze_clean(clean), nul_notes, kind=Note)
+  add_notes(r, declared_shell_note(clean), kind=Gap)
 }
 
 ///|

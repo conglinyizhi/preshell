@@ -70,7 +70,9 @@ test "a null byte does not hide what follows it" {
   // `rm`. Truncating at the NUL instead used to report "Complete, nothing
   // touched" for a command that deletes everything.
   let r = analyze("true\u{0}; rm -rf /")
-  debug_inspect(r.status, content="Unsupported")
+  // The parse succeeded, so the status says so; the note and `uncertain` carry
+  // the caveat that the text we analysed is not the bytes that arrived.
+  debug_inspect(r.status, content="Complete")
   debug_inspect(r.impact.uncertain, content="true")
   let deletes : Array[String] = []
   for e in r.impact.effects {
@@ -79,20 +81,65 @@ test "a null byte does not hide what follows it" {
     }
   }
   debug_inspect(deletes, content="[\"/\"]")
+  inspect(
+    r.issues.any(fn(i) { i.kind is Note && i.message.contains("null byte") }),
+    content="true",
+  )
 }
 
 ///|
 test "bytes are decoded lossily and reported, never rejected" {
   // A stray invalid byte used to make the whole run fail: exit 1, no report.
   let r = analyze_bytes(b"\xff\xfe\xfd echo hi\n")
-  debug_inspect(r.status, content="Unsupported")
-  debug_inspect(r.issues.length() > 0, content="true")
+  debug_inspect(r.status, content="Complete")
+  debug_inspect(r.impact.uncertain, content="true")
+  inspect(r.issues.any(fn(i) { i.kind is Note }), content="true")
   // Valid multi-byte input still works, three- and four-byte forms included.
   debug_inspect(
     analyze_bytes(b"\xe4\xb8\xad\xe6\x96\x87").status,
     content="Complete",
   )
   debug_inspect(analyze_bytes(b"\xf0\x9f\x98\x80").status, content="Complete")
-  // A truncated sequence is replaced, not silently dropped.
-  debug_inspect(analyze_bytes(b"\xe4\xb8").status, content="Unsupported")
+  // A truncated sequence is reported, not silently dropped.
+  let t = analyze_bytes(b"\xe4\xb8")
+  debug_inspect(t.status, content="Complete")
+  debug_inspect(t.impact.uncertain, content="true")
+}
+
+///|
+test "characters outside the BMP do not end the scan" {
+  // MoonBit strings are UTF-16: an emoji is a surrogate pair, and stepping one
+  // code unit at a time landed inside it, where get_char returns None. The
+  // scanner read that as end of input, so `echo "🧐"` came back as an
+  // unterminated double quote.
+  let r = analyze("echo \"🧐\"")
+  debug_inspect(r.status, content="Complete")
+  debug_inspect(r.impact.uncertain, content="false")
+  debug_inspect(
+    analyze("echo \"汉字扩展 𠀀\"").status,
+    content="Complete",
+  )
+  // A path with an emoji survives into the effects.
+  let im = analyze("rm -rf \"📁 dir\"").impact
+  let targets : Array[String] = []
+  for e in im.effects {
+    if e.kind is Delete {
+      targets.push(e.target)
+    }
+  }
+  debug_inspect(targets, content="[\"📁 dir\"]")
+}
+
+///|
+test "a dollar sign before a closing quote is just a dollar sign" {
+  // `"A$x$"` is text ending in a dollar sign, not the start of a `$"..."`:
+  // bash reads it that way, and so must this. Treating it as a translation
+  // string swallowed the rest of the file, which is how five real scripts came
+  // back as "unterminated double quote".
+  debug_inspect(analyze("echo \"A[[:digit:]]\\+$\"").status, content="Complete")
+  debug_inspect(analyze("echo \"D$x'y'\"").status, content="Complete")
+  debug_inspect(analyze("echo \"C$'ansi'\"").status, content="Complete")
+  // At word level they are real quoting constructs.
+  debug_inspect(analyze("echo $\"loc\"").status, content="Complete")
+  debug_inspect(analyze("echo $'ansi'").status, content="Complete")
 }

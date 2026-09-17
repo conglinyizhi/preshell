@@ -145,6 +145,7 @@ pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
 /// instead is unfinished, and bash rejects it: accepting it silently is how
 /// `(echo a` used to come back as Complete.
 pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
+  let started_at = self.lex.line
   let items : Array[AndOr] = []
   for ;; {
     self.skip_newlines()
@@ -178,7 +179,9 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
   }
   if (stop.ops.length() > 0 || stop.words.length() > 0) && self.cur is TEof {
     let what = if label == "" { "construct" } else { label }
-    self.lex.fail("unexpected end of input in " + what)
+    // Point at where the construct opened: end of input is where the parser
+    // noticed, not where the problem is.
+    self.lex.fail_at("unexpected end of input in " + what, started_at)
   }
   { items, }
 }

@@ -80,8 +80,16 @@ fn Lexer::peek_at(self : Lexer, n : Int) -> Char? {
 /// "which line is the problem" is the first thing a caller asks, and without it
 /// tracking a parse failure down means bisecting the input by hand.
 fn Lexer::fail(self : Lexer, message : String) -> Unit {
+  self.fail_at(message, self.line)
+}
+
+///|
+/// Report against a specific line. Construct-level complaints (an unclosed
+/// `if`, an unterminated quote) are only useful if they point at where the
+/// construct *started*; pointing at end of input says nothing.
+fn Lexer::fail_at(self : Lexer, message : String, line : Int) -> Unit {
   self.errors.push(message)
-  self.error_lines.push(self.line)
+  self.error_lines.push(line)
 }
 
 ///|
@@ -97,13 +105,25 @@ fn Lexer::slice(self : Lexer, a : Int, b : Int) -> String {
 }
 
 ///|
+
+///|
+/// Step over `n` *characters*, not code units.
+///
+/// MoonBit strings are UTF-16, so a character outside the BMP (an emoji, an
+/// extended CJK ideograph) occupies two units. Stepping one unit at a time
+/// lands inside the surrogate pair, where `get_char` returns None, and the
+/// scanner then reads that as end of input: `echo "🧐"` came back as an
+/// unterminated double quote.
 fn Lexer::advance(self : Lexer, n : Int) -> Unit {
   for _ in 0..<n {
     match self.peek() {
-      Some('\n') => self.line += 1
-      _ => ()
+      None => return
+      Some('\n') => {
+        self.line += 1
+        self.pos += 1
+      }
+      Some(c) => self.pos += if c > '\u{ffff}' { 2 } else { 1 }
     }
-    self.pos += 1
   }
 }
 
@@ -259,23 +279,25 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
             }
         }
       '\'' if unquoted => {
+        let opened_at = self.line
         self.advance(1)
         let s = self.read_until('\'')
         if self.peek() == Some('\'') {
           self.advance(1)
         } else {
-          self.fail("unterminated single quote")
+          self.fail_at("unterminated single quote", opened_at)
         }
         flush_lit(parts, lit)
         parts.push(SQuote(s))
       }
       '"' => {
+        let opened_at = self.line
         self.advance(1)
         let inner = self.read_parts(false)
         if self.peek() == Some('"') {
           self.advance(1)
         } else {
-          self.fail("unterminated double quote")
+          self.fail_at("unterminated double quote", opened_at)
         }
         flush_lit(parts, lit)
         parts.push(DQuote(inner))
@@ -286,7 +308,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         flush_lit(parts, lit)
         parts.push(CmdSub(self.backquote_seq(body)))
       }
-      '$' => self.read_dollar(parts, lit)
+      '$' => self.read_dollar(parts, lit, !unquoted)
       '<' | '>' if self.peek_at(1) == Some('(') => {
         let dir = c
         self.advance(2)
@@ -570,7 +592,19 @@ fn Lexer::read_dollar(
   self : Lexer,
   parts : Array[WordPart],
   lit : StringBuilder,
+  in_dquote : Bool,
 ) -> Unit {
+  // Inside double quotes a dollar sign before a quote is just a dollar sign:
+  // bash reads `"...$"` as the text ending in `$`, not as the start of a
+  // `$"..."` translation string. Treating it as one swallowed the rest of the
+  // file, which is how five real scripts ended up with "unterminated double
+  // quote".
+  let nxt = self.peek_at(1)
+  if in_dquote && (nxt == Some('"') || nxt == Some('\'')) {
+    self.advance(1)
+    lit.write_char('$')
+    return
+  }
   match self.peek_at(1) {
     Some('(') =>
       if self.peek_at(2) == Some('(') {
