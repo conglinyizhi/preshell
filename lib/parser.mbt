@@ -421,6 +421,10 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
     TWord(w) =>
       match w.plain() {
         Some("if") => self.parse_if()
+        // zsh's `repeat N { body }` and `repeat N do ... done`. The count is a
+        // word like any other and is carried as the loop's word list: what
+        // matters for an audit is that the body runs.
+        Some("repeat") => self.parse_repeat()
         Some("while") => self.parse_loop(false)
         Some("until") => self.parse_loop(true)
         Some("for") => self.parse_for()
@@ -557,6 +561,37 @@ fn Parser::parse_if(self : Parser) -> Cmd {
 }
 
 ///|
+fn Parser::parse_repeat(self : Parser) -> Cmd {
+  self.advance()
+  let count = match self.cur {
+    TWord(w) => {
+      self.advance()
+      w
+    }
+    _ => empty_word(self.lex.line)
+  }
+  self.skip_newlines()
+  let body = if self.reserved() == Some("do") {
+    self.advance()
+    let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
+    if self.reserved() == Some("done") {
+      self.advance()
+    }
+    b
+  } else if self.reserved() == Some("{") {
+    self.advance()
+    let b = self.parse_seq_in({ words: ["}"], ops: [], }, "loop")
+    if self.reserved() == Some("}") {
+      self.advance()
+    }
+    b
+  } else {
+    Seq::empty()
+  }
+  Cmd::For(name="", words=[count], body~)
+}
+
+///|
 fn Parser::parse_loop(self : Parser, until : Bool) -> Cmd {
   self.advance()
   let cond = self.parse_seq_in({ words: ["do"], ops: [], }, "loop")
@@ -579,6 +614,12 @@ fn Parser::parse_for(self : Parser) -> Cmd {
       match w.plain() {
         Some(s) => {
           name = s
+          // zsh's csh form is `for x ( a b ) body`: those parens belong to the
+          // word list. Set before advancing, since advancing is what reads the
+          // `(` token.
+          if self.lex.dialect is Zsh {
+            self.lex.in_for_words = true
+          }
           self.advance()
         }
         None => self.advance()
@@ -637,7 +678,24 @@ fn Parser::parse_for(self : Parser) -> Cmd {
       self.advance()
     }
   } else {
-    if self.reserved() == Some("in") {
+    if self.lex.dialect is Zsh && self.cur is TOp("(") {
+      // `for x ( a b )`: the parens belong to the word list.
+      self.advance()
+      for ;; {
+        match self.cur {
+          TWord(w) => {
+            words.push(w)
+            self.advance()
+          }
+          TOp(")") => {
+            self.advance()
+            break
+          }
+          TEof => break
+          _ => self.advance()
+        }
+      }
+    } else if self.reserved() == Some("in") {
       self.advance()
       for ;; {
         match self.cur {
@@ -653,6 +711,7 @@ fn Parser::parse_for(self : Parser) -> Cmd {
       self.advance()
     }
   }
+  self.lex.in_for_words = false
   self.skip_newlines()
   let body = if self.reserved() == Some("do") {
     self.advance()

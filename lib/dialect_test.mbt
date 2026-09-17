@@ -322,3 +322,29 @@ test "zsh takes more than one loop name" {
     content="Complete",
   )
 }
+
+///|
+test "zsh's csh forms for and repeat run their body for real" {
+  // `for x ( a b ) body` and `repeat N body` are zsh only; bash refuses both.
+  // The point of these assertions is that the body is *audited*: before this,
+  // `repeat 3 { rm -rf /tmp/x }` reported the word `repeat` and nothing else.
+  debug_inspect(zstatus("for x ( a b ); do echo $x; done"), content="Complete")
+  debug_inspect(zstatus("for x (a b) { echo $x }"), content="Complete")
+  debug_inspect(zstatus("repeat 3 { echo hi }"), content="Complete")
+  debug_inspect(zstatus("repeat $n do echo hi done"), content="Unsupported")
+  inspect(ztouched("repeat 3 { rm -rf /tmp/x }"), content="D:/tmp/x")
+  inspect(ztouched("for x ( a b ); do rm -rf $x; done"), content="D:$x U:$x")
+  // bash has neither form.
+  debug_inspect(
+    analyze("for x ( a b ); do :; done").status,
+    content="Unsupported",
+  )
+  debug_inspect(analyze("repeat 3 { echo hi }").status, content="Unsupported")
+  // The classic shapes stay common ground.
+  debug_inspect(zstatus("for x in a b; do echo $x; done"), content="Complete")
+  debug_inspect(zstatus("for ((i=0;i<3;i++)); do :; done"), content="Complete")
+  debug_inspect(
+    analyze("for x in a b; do echo $x; done").status,
+    content="Complete",
+  )
+}

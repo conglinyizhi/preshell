@@ -65,6 +65,10 @@ pub(all) struct Lexer {
   /// `incasepat`. A pattern is a word, so `(net|open)bsd*` is one pattern whose
   /// leading `(` is a glob group rather than the pattern list's own paren.
   mut in_casepat : Bool
+  /// Set while the parser is reading a `for` loop's names, where zsh allows the
+  /// csh form `for x ( a b )`. There the `(` is the word list's own paren, not
+  /// a glob group.
+  mut in_for_words : Bool
 }
 
 ///|
@@ -88,6 +92,7 @@ pub fn Lexer::with_dialect(src : String, dialect : Dialect) -> Lexer {
     array_open: false,
     array_elems: false,
     in_casepat: false,
+    in_for_words: false,
   }
 }
 
@@ -297,6 +302,7 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
     let paren_in_word = c == '(' &&
       self.dialect is Zsh &&
       (!self.cmd_pos || self.array_elems || self.in_casepat) &&
+      !self.in_for_words &&
       !self.array_open &&
       self.peek_at(1) != Some(')')
     let numglob = c == '<' && self.dialect is Zsh && self.isnumglob_at()
