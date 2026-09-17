@@ -375,6 +375,63 @@ fn Lexer::read_word(self : Lexer) -> Word {
 }
 
 ///|
+/// Whether the text read so far is an array-assignment head: `name`, `name+`
+/// or `name[index]`. In zsh `name=(a b)` is an array, while `=(cmd)` anywhere
+/// else in a word is process substitution writing to a temporary file, so the
+/// two have to be told apart before the `(` is read.
+fn looks_like_array_head(parts : Array[WordPart], lit : StringBuilder) -> Bool {
+  let sb = StringBuilder()
+  for p in parts {
+    match p {
+      Lit(s) => sb.write_string(s)
+      _ => return false
+    }
+  }
+  sb.write_string(lit.to_string())
+  let text = sb.to_string()
+  let n = text.length()
+  if n == 0 {
+    return false
+  }
+  match text.get_char(0) {
+    Some(c) => if !is_name_start(c) { return false }
+    None => return false
+  }
+  let mut i = 1
+  for ;; {
+    if i >= n {
+      break
+    }
+    match text.get_char(i) {
+      Some(c) => if is_name_char(c) { i += 1 } else { break }
+      None => break
+    }
+  }
+  if i < n && text.get_char(i) == Some('[') {
+    let mut depth = 0
+    for ;; {
+      if i >= n {
+        return false
+      }
+      match text.get_char(i) {
+        Some('[') => depth += 1
+        Some(']') => depth -= 1
+        Some('\\') => i += 1
+        _ => ()
+      }
+      i += 1
+      if depth == 0 {
+        break
+      }
+    }
+  }
+  if i < n && text.get_char(i) == Some('+') {
+    i += 1
+  }
+  i == n
+}
+
+///|
 /// Read word fragments until the context ends. `unquoted` is false inside a
 /// double-quoted string, where only `"` stops the scan and `\` only escapes
 /// a few characters.
@@ -506,6 +563,17 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
             self.advance(1)
           }
         }
+      }
+      '=' if unquoted &&
+        self.dialect is Zsh &&
+        self.peek_at(1) == Some('(') &&
+        !looks_like_array_head(parts, lit) => {
+        // zsh's `=(cmd)` is not a pipe: it writes the command's output to a
+        // real file and substitutes the path. Read in word position, where
+        // bash has no construct at all.
+        self.advance(2)
+        flush_lit(parts, lit)
+        parts.push(ProcSub('=', self.sub_seq("=( ) process substitution")))
       }
       '[' if self.looks_like_subscript() => {
         flush_lit(parts, lit)

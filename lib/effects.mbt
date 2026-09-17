@@ -460,6 +460,7 @@ fn Collector::scan_assign_part(
       let saved = self.saved_cwd()
       self.walk_seq(seq)
       self.restore_cwd(saved)
+      self.note_temp_file(p, line)
     }
     Param(_) | ArithSub(_) => self.push(Unknown, "${" + name + "}", true, line)
     DQuote(inner) | Subscript(inner) =>
@@ -539,6 +540,26 @@ fn Collector::walk_word(self : Collector, w : Word) -> Unit {
     let saved = self.saved_cwd()
     self.walk_seq(seq)
     self.restore_cwd(saved)
+  }
+  for p in w.parts {
+    self.note_temp_file(p, w.line)
+  }
+}
+
+///|
+/// zsh's `=(cmd)` writes the command's output to a real file under $TMPPREFIX
+/// and substitutes its path, so a file does appear on disk. That is a write,
+/// and it is reported even though the name cannot be known in advance: the
+/// target is the template zsh fills in, marked uncertain like any other value
+/// we cannot resolve. `<(cmd)` and `>(cmd)` are pipes and name no path.
+fn Collector::note_temp_file(
+  self : Collector,
+  p : WordPart,
+  line : Int,
+) -> Unit {
+  match p {
+    ProcSub('=', _) => self.push(Write, "/tmp/zshXXXXXX", true, line)
+    _ => ()
   }
 }
 

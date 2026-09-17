@@ -58,7 +58,17 @@ fn part_text(p : WordPart) -> String {
     }
     CmdSub(_) => sb.write_string("$()")
     ArithSub(_) => sb.write_string("$(())")
-    ProcSub(_) => sb.write_string("()")
+    // The shape, not a bare `()`: the word expands to a path this tool cannot
+    // name (a pipe, or zsh's temporary file), and printing `()` would read as
+    // a file actually called that.
+    ProcSub(c, _) =>
+      match c {
+        '=' => sb.write_string("=()")
+        _ => {
+          sb.write_char(c)
+          sb.write_string("()")
+        }
+      }
     Subscript(inner) => {
       sb.write_char('[')
       for q in inner {

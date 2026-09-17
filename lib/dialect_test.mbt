@@ -158,3 +158,27 @@ test "syntax evidence is per dialect" {
   inspect(syntax_evidence(Bash).length(), content="1")
   inspect(syntax_evidence(Zsh).length(), content="0")
 }
+
+///|
+test "zsh's =() writes a temporary file, and its command still runs" {
+  // Measured: `cat =(echo hi)` runs echo, leaves a real file under /tmp named
+  // zshXXXXXX, and passes that path to cat. The name cannot be known in
+  // advance, so the template is reported and flagged uncertain.
+  debug_inspect(zstatus("cat =(echo hi)"), content="Complete")
+  inspect(ztouched("cat =(echo hi)"), content="W:/tmp/zshXXXXXX R:=() U:=()")
+  inspect(
+    analyze_dialect("cat =(echo hi)", Zsh).impact.write_roots.join(" "),
+    content="/tmp",
+  )
+  // An assignment takes the same path: the file is created either way.
+  inspect(ztouched("x==(echo hi)"), content="W:/tmp/zshXXXXXX")
+  // `name=(a b)` is an array, not a process substitution, so nothing is written.
+  inspect(ztouched("a=(1 2)"), content="")
+  debug_inspect(zstatus("a=(1 2)"), content="Complete")
+  // Quoted, it is literal text in zsh too.
+  inspect(ztouched("echo \"=(echo hi)\""), content="")
+  // A pipe is not a file, so `<( )` reports the shape and no write.
+  inspect(ztouched("cat <(echo hi)"), content="R:<() U:<()")
+  // bash has no construct here at all.
+  debug_inspect(analyze("cat =(echo hi)").status, content="Unsupported")
+}
