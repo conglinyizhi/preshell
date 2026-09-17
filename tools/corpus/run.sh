@@ -23,7 +23,7 @@
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-bin="$root/_build/native/release/build/cmd/shaudit/shaudit.exe"
+bin="$root/_build/native/release/build/cmd/mbby/mbby.exe"
 
 corpus="${1:-${BASH_TESTS:-}}"
 if [ -z "$corpus" ]; then
