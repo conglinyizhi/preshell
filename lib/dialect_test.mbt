@@ -207,3 +207,27 @@ test "zsh's numeric glob is a pattern, not a redirection" {
     content="Unsupported",
   )
 }
+
+///|
+test "a brace inside an expansion nests only when zsh is not quoting" {
+  // Measured, same text in both shells and both quotings:
+  //   zsh  ${a//b/X{Y}/Z}     the expansion runs to the last }
+  //   zsh  "${a//b/X{Y}/Z}"   it ends at the first one
+  //   bash both spellings     it ends at the first one
+  // Getting this wrong is not cosmetic: the wrong branch swallows the closing
+  // quote and turns a working script into a reported gap.
+  debug_inspect(zstatus("echo \"${a//b/X{Y}/Z}\""), content="Complete")
+  debug_inspect(zstatus("echo ${a//b/X{Y}/Z}"), content="Complete")
+  debug_inspect(zstatus("echo ${a:-{}}"), content="Complete")
+  debug_inspect(analyze("echo ${a//b/X{Y}/Z}").status, content="Complete")
+  // Both branches are pinned by a line from the corpus: this one comes from
+  // Completion/Base/Completer/_expand, is unquoted, and has an escaped brace
+  // inside a pattern group. Without the brace counting it ends early and the
+  // rest of the pattern is read as shell syntax.
+  debug_inspect(
+    zstatus(
+      "tmp=${tmp//(#b)\\\\\\$\\\\\\{(([^\\{\\}]|\\\\\\\\{|\\\\\\\\})#)([^\\\\])\\\\\\}/\\\\$\\\\\\\\{${match[1]}${match[3]}\\\\\\\\}}",
+    ),
+    content="Complete",
+  )
+}

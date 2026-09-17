@@ -918,7 +918,7 @@ fn Lexer::read_dollar(
     Some('{') => {
       self.advance(2)
       flush_lit(parts, lit)
-      parts.push(Param(self.read_braced()))
+      parts.push(Param(self.read_braced(in_dquote)))
     }
     Some('[') => {
       self.advance(2)
@@ -970,9 +970,18 @@ fn Lexer::read_dollar(
 
 ///|
 /// `${ ... }` with nesting: `${a:-${b}}` is one parameter expansion.
-fn Lexer::read_braced(self : Lexer) -> String {
+fn Lexer::read_braced(self : Lexer, in_dquote : Bool) -> String {
   let start = self.pos
   let mut depth = 0
+  // zsh counts a plain `{` as nesting inside a bare expansion but not inside a
+  // double-quoted one; bash never counts it. Measured, same text in both
+  // shells and both quotings:
+  //   zsh  ${a//b/X{Y}/Z}     the expansion runs to the last `}`
+  //   zsh  "${a//b/X{Y}/Z}"   it ends at the first one
+  //   bash both spellings     it ends at the first one
+  // Two real scripts in the corpus need one branch each, so this is not a
+  // detail that can be rounded off.
+  let count_braces = self.dialect is Zsh && !in_dquote
   for ;; {
     match self.peek() {
       None => {
@@ -980,9 +989,20 @@ fn Lexer::read_braced(self : Lexer) -> String {
         break
       }
       Some('{') => {
-        depth += 1
+        if count_braces {
+          depth += 1
+        }
         self.advance(1)
       }
+      Some('$') =>
+        // A nested `${` always has to be scanned through, in both shells and
+        // however the outer expansion is quoted.
+        if self.peek_at(1) == Some('{') {
+          depth += 1
+          self.advance(2)
+        } else {
+          self.advance(1)
+        }
       Some('}') =>
         if depth == 0 {
           break
