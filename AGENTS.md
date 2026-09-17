@@ -81,6 +81,28 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   下合法，而 `bash -n` 不执行 shopt 所以它拒。这是 oracle 的局限
 - `exportfunc1.sub`：超过 bash 的 here-doc 数量上限（bash 实现限制）
 
+## 真实脚本语料（第一步加固）
+
+`tools/corpus/find_scripts.sh` 采集机器上真实脚本，`run.sh --list` 拿它们做差分。
+实测 1384 个文件（/usr/bin /usr/share /etc /opt + 本仓库）：
+
+- 两边都通过 1326（95.8%）
+- 我们的缺口 29
+- 我们太宽松 6，全部已归类：2 个是 polyglot（\`#!/bin/sh\` 开头、正文是 Scheme，
+  bash -n 拒是因为它把整文件当 shell），4 个是 extglob（bash -n 不执行 shopt）
+- 崩溃/超时 0
+
+差分脚本必须用 stdin 喂文件，不能用 argv：libtool、configure 这类几百 KB 的脚本
+会撞 ARG_MAX，看起来像崩溃其实是 E2BIG。这条踩过一次。
+
+## 真实语料的首要缺口：相邻 `))\` 被错误合并
+
+`arr=($(echo a))`、`echo "$(a $(b))"`、`case x in *) echo "($(date))";; esac` 现在都失败，
+根因是词法器把相邻的 `))\` 无条件合并成一个 token，命令替换因此找不到自己的闭括号。
+`((`/`))` 只在算术上下文里才有意义，正确做法是词法器不合并，由解析器按相邻位置
+（cur_start/la_start 已有）在算术命令与 `for ((...))` 头部识别。这一类占了真实语料
+缺口报错的大头（40 条 unexpected token after command、14 条 command substitution）。
+
 ## 定位失败时怎么查
 
 - issue 带行号：`preshell --scan "$(cat f.sh)"` 每条都带 `(line N)`

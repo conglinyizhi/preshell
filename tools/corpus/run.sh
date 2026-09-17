@@ -1,44 +1,58 @@
 #!/usr/bin/env bash
-# 对比 preshell 与 `bash -n` 在 bash 自带语法语料上的表现，产出四象限表。
+# 对比 preshell 与 `bash -n`，产出四象限表并强制一条不变量。
 #
 # 为什么需要它：preshell 只有在**有证据**时才允许把一条报错标成 "bash 也会拒绝"
 # （ParseStatus::Invalid）。没有证据时一律算自己的缺口（Unsupported）。
-# 这个脚本就是产证据的地方，并强制一条不变量：
+# 这个脚本就是产证据的地方，并强制：
 #
 #   凡是被 lib/status.mbt 列为「已佐证语法错」的报错原文，
 #   在「我们的缺口」象限里必须出现 0 次。
 #
-# 为什么是原文级别而不是别的：同一条原文可能两种情形都有。实测中
-# `unterminated here-document` 既出现在「bash 也报错」的文件里，也出现在
-# 「bash 能解析、我们不能」的文件里（here-doc 套命令替换）。所以按原文升级
-# 只有在它彻底退出缺口象限之后才成立——这条不变量就是这个意思。
-# 语料不是全集，因此这条保证的强度上限就是语料本身。
+# 同一条原文可能两种情形都有（实测 known 的 unterminated here-document 就是），
+# 所以按原文升级只有在它彻底退出缺口象限之后才成立。语料不是全集，
+# 这条保证的强度上限就是语料本身。
 #
-# 用法：tools/corpus/run.sh [语料目录]
-# 默认：$BASH_TESTS，或 ~/Downloads、/tmp 里解开的 bash-*/tests
+# 用法：
+#   tools/corpus/run.sh                      # 默认拿 bash 源码的 tests/*.sub
+#   tools/corpus/run.sh <目录>                # 该目录下的 *.sub
+#   tools/corpus/run.sh --list <文件列表>      # 任意脚本列表（见 find_scripts.sh）
 #
-# 已知口径偏差：命令行传参走 `$(cat f)`，会吃掉文件末尾的换行，
-# 因此以 EOF 结尾的 here-doc 用例（comsub-eof*.sub）两边都可能被误判。
+# 输入一律走 stdin，不走 argv：那是 CLI 推荐的入口，没有 ARG_MAX 限制
+# （libtool、configure 这类几百 KB 的脚本用 argv 传会直接 E2BIG），
+# 也不会像命令替换那样吃掉文件末尾的换行。
 
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bin="$root/_build/native/release/build/cmd/preshell/preshell.exe"
 
-corpus="${1:-${BASH_TESTS:-}}"
-if [ -z "$corpus" ]; then
-  for cand in "$HOME/Downloads"/bash-*/tests /tmp/*/bash-src/bash-*/tests; do
-    [ -d "$cand" ] && corpus="$cand" && break
+mode="dir"
+target=""
+if [ "${1:-}" = "--list" ]; then
+  mode="list"
+  target="${2:?--list 需要文件列表}"
+elif [ -n "${1:-}" ]; then
+  target="$1"
+else
+  for cand in "${BASH_TESTS:-}" "$HOME/Downloads"/bash-*/tests /tmp/*/bash-src/bash-*/tests; do
+    [ -d "$cand" ] && target="$cand" && break
   done
 fi
-if [ ! -d "$corpus" ]; then
-  echo "找不到语料目录，用法：tools/corpus/run.sh <bash 源码 tests 目录>" >&2
+
+if [ "$mode" = "dir" ] && [ ! -d "$target" ]; then
+  echo "找不到语料目录，用法：tools/corpus/run.sh [目录|--list 文件]" >&2
+  exit 2
+fi
+if [ "$mode" = "list" ] && [ ! -f "$target" ]; then
+  echo "找不到文件列表：$target" >&2
   exit 2
 fi
 
 if [ ! -x "$bin" ]; then
   ( cd "$root" && moon build --release --target native >/dev/null ) || exit 1
 fi
+
+max_line=20   # 每个象限最多打印多少条文件名
 
 # 从 lib/status.mbt 里抽出已佐证的原文清单，作为不变量的一端。
 table_msgs="$(mktemp)"
@@ -53,15 +67,28 @@ gap_msgs="$(mktemp)"
 ok_msgs="$(mktemp)"
 permissive_files="$(mktemp)"
 gap_files="$(mktemp)"
+crash_files="$(mktemp)"
+t0=$(date +%s%N)
 
-for f in "$corpus"/*.sub; do
+list_files() {
+  case "$mode" in
+    dir) find "$target" -maxdepth 1 -name "*.sub" -type f | sort ;;
+    list) grep -v '^[[:space:]]*$' "$target" ;;
+  esac
+}
+
+while IFS= read -r f; do
   [ -f "$f" ] || continue
-  src="$(cat "$f")"
-
-  line="$("$bin" --scan "$src" 2>/dev/null | head -1)"
+  out="$(timeout 20 "$bin" --scan <"$f" 2>/dev/null)" || out=""
+  line="$(printf '%s\n' "$out" | head -1)"
   ours="${line%% *}"
   ours="${ours#status=}"
-  msgs="$("$bin" --scan "$src" 2>/dev/null | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
+  if [ -z "$ours" ]; then
+    # 没有输出 = 崩了或超时。这类必须单独记账：不是「判定错了」，是工具没了
+    ours="CRASH"
+    echo "$f" >>"$crash_files"
+  fi
+  msgs="$(printf '%s\n' "$out" | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
 
   if bash -n "$f" 2>/dev/null; then bash_ok=1; else bash_ok=0; fi
 
@@ -69,7 +96,6 @@ for f in "$corpus"/*.sub; do
     if [ "$bash_ok" = "1" ]; then
       both_ok=$((both_ok + 1))
     else
-      # 危险方向：我们解析通过，bash 拒绝。
       we_permissive=$((we_permissive + 1))
       echo "$f" >>"$permissive_files"
     fi
@@ -83,38 +109,54 @@ for f in "$corpus"/*.sub; do
       printf '%s\n' "$msgs" >>"$ok_msgs"
     fi
   fi
-done
+done < <(list_files)
+t1=$(date +%s%N)
 
 total=$((both_ok + we_gap + we_permissive + corroborated))
+secs=$(( (t1 - t0) / 1000000000 ))
+crashes=$(wc -l <"$crash_files")
+
+print_capped() {
+  local file="$1"
+  if [ -s "$file" ]; then
+    head -"$max_line" "$file" | sed 's|^|  - |'
+    local n
+    n=$(wc -l <"$file")
+    [ "$n" -gt "$max_line" ] && echo "  … 另有 $((n - max_line)) 个"
+  else
+    echo "  （无）"
+  fi
+}
 
 cat <<EOF
 # preshell × bash -n 差分
 
-语料：$corpus
+语料：$target（模式 $mode）
 文件数：$total
+耗时：${secs}s
 
 - 两边都通过：$both_ok
-- 我们的缺口（我们报错，bash 通过）：$we_gap  ← P1 要啃的
+- 我们的缺口（我们报错，bash 通过）：$we_gap  ← 解析器要补的
 - 我们太宽松（我们通过，bash 拒绝）：$we_permissive  ← 危险方向，优先查
 - 两边都报错：$corroborated
+- 崩溃或超时：$crashes  ← 必须为零
 
 ## 报错原文分布
 
 只在「两边都报错」出现（可升级为 Invalid）：
 
 EOF
-
 if [ -s "$ok_msgs" ]; then
-  sort "$ok_msgs" | uniq -c | sort -rn | sed 's/^/  /'
+  sort "$ok_msgs" | grep -v '^$' | uniq -c | sort -rn | sed 's/^/  /'
 else
   echo "  （无）"
 fi
 
 echo
-echo "同时在「我们的缺口」出现（**不可**升级为 Invalid，必须先填缺口）："
+echo "同时在「我们的缺口」出现（不可升级为 Invalid，必须先填缺口）："
 echo
 if [ -s "$gap_msgs" ]; then
-  sort "$gap_msgs" | uniq -c | sort -rn | sed 's/^/  /'
+  sort "$gap_msgs" | grep -v '^$' | uniq -c | sort -rn | sed 's/^/  /'
 else
   echo "  （无）"
 fi
@@ -142,13 +184,18 @@ else
 fi
 
 echo
-echo "## 我们太宽松的文件（按危险方向优先查）"
+echo "## 崩溃 / 超时（必须为零）"
 echo
-if [ -s "$permissive_files" ]; then sed 's|^|  - |' "$permissive_files"; else echo "  （无）"; fi
+print_capped "$crash_files"
+echo
+echo "## 我们太宽松的文件"
+echo
+print_capped "$permissive_files"
 echo
 echo "## 我们缺口的文件"
 echo
-if [ -s "$gap_files" ]; then sed 's|^|  - |' "$gap_files"; else echo "  （无）"; fi
+print_capped "$gap_files"
 
-rm -f "$gap_msgs" "$ok_msgs" "$permissive_files" "$gap_files" "$table_msgs"
+rm -f "$gap_msgs" "$ok_msgs" "$permissive_files" "$gap_files" "$table_msgs" "$crash_files"
 [ "$violations" = "0" ] || exit 1
+[ "$crashes" = "0" ] || exit 1
