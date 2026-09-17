@@ -103,6 +103,19 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 （cur_start/la_start 已有）在算术命令与 `for ((...))` 头部识别。这一类占了真实语料
 缺口报错的大头（40 条 unexpected token after command、14 条 command substitution）。
 
+## 加固的三件套（每次改动都要过）
+
+1. `moon test --target native` — 库内行为：逐命令语义、畸形输入、递归边界、输入规范化
+2. `tools/corpus/run.sh` — 与 bash -n 的差分。默认语料是仓库里的
+   `tools/corpus/bash-tests`（bash 5.3 的 tests/*.sub，GPL 出处见其 README），
+   另外两种跑法：传目录指向解开的 bash 源码，或 `--list` 拿真实脚本。
+   两栏必须盯：崩溃/超时为零、我们太宽松不新增
+3. `tools/probe/malformed.sh` 与 `tools/fuzz/mutate.js` — 进程不许死。
+   fuzzer 的 `--n`、`--seed` 可复现；它还会打印解析状态分布，
+   用来确认变异体真的打到了解析器（全是进门即拒的话这个 fuzz 没有强度）
+
+三件套都在 `.github/workflows/check.yml` 里，提交即跑。CI 不依赖网络：语料随仓库分发。
+
 ## 定位失败时怎么查
 
 - issue 带行号：`preshell --scan "$(cat f.sh)"` 每条都带 `(line N)`

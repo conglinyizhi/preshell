@@ -1,0 +1,54 @@
+name: check
+
+# 三件事各自防一类退化：
+#   moon test           库内行为（含逐命令语义、畸形输入、递归边界）
+#   corpus/run.sh       与 bash -n 的差分：四象限不许移动，佐证表不许被证伪
+#   probe + fuzz        进程不许死：崩溃、挂死、输出不是合法 JSON 都算失败
+#
+# 语料随仓库分发（tools/corpus/bash-tests，GPL-3.0-or-later，出处见其 README），
+# 所以 CI 不依赖网络，跑的和本地一致。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Versions
+        run: |
+          moon version --all
+          bash --version | head -1
+
+      - name: Build
+        run: moon build --release --target native
+
+      - name: Unit tests
+        run: moon test --target native
+
+      - name: Format and check
+        run: |
+          moon fmt
+          git diff --exit-code -- '*.mbt' || {
+            echo "moon fmt 改动了文件，请本地跑 moon fmt 后提交"
+            exit 1
+          }
+          moon check --target native
+
+      - name: Differential against bash -n
+        run: bash tools/corpus/run.sh | tee /tmp/corpus.txt
+
+      - name: Malformed input probe
+        run: bash tools/probe/malformed.sh
+
+      - name: Short fuzz
+        run: node tools/fuzz/mutate.js --n 400 --seed 1

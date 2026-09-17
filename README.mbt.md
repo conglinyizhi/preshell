@@ -116,7 +116,25 @@ analysed is not byte-for-byte the one that arrived.
 - `Invalid` — there is evidence that bash would refuse this command too, so
   nothing would execute. Only claimed with evidence; see below.
 
-## Evidence rather than taste
+## Hardening
+
+Three checks, all runnable locally and in CI:
+
+```bash
+moon test --target native                     # library behaviour
+tools/corpus/run.sh                           # differential against bash -n
+tools/probe/malformed.sh                      # the process must not die
+node tools/fuzz/mutate.js --n 2000 --seed 1   # mutation fuzzing, reproducible
+```
+
+The differential corpus (bash 5.3's `tests/*.sub`) ships with the repository so
+that CI and local runs use the same input; provenance and licensing are in
+`tools/corpus/bash-tests/README.md`. `tools/corpus/find_scripts.sh` collects real
+scripts from the host for a second, noisier corpus.
+
+Two numbers to watch, because both were zero and should stay there: crashes, and
+inputs where bash rejects a command this tool accepts.
+
 
 Claiming "bash would reject this" is a statement about a program we are not
 running, and a false claim turns an unparsed command into an empty report. So

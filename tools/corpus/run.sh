@@ -13,7 +13,7 @@
 # 这条保证的强度上限就是语料本身。
 #
 # 用法：
-#   tools/corpus/run.sh                      # 默认拿 bash 源码的 tests/*.sub
+#   tools/corpus/run.sh                      # 默认拿仓库内的 tools/corpus/bash-tests
 #   tools/corpus/run.sh <目录>                # 该目录下的 *.sub
 #   tools/corpus/run.sh --list <文件列表>      # 任意脚本列表（见 find_scripts.sh）
 #
@@ -34,7 +34,9 @@ if [ "${1:-}" = "--list" ]; then
 elif [ -n "${1:-}" ]; then
   target="$1"
 else
-  for cand in "${BASH_TESTS:-}" "$HOME/Downloads"/bash-*/tests /tmp/*/bash-src/bash-*/tests; do
+  # 语料随仓库分发，默认就用它：CI 和本地跑的是同一份，结果可比。
+  # 也可以传别的目录，或用 BASH_TESTS 指向解开的 bash 源码。
+  for cand in "${BASH_TESTS:-}" "$root/tools/corpus/bash-tests" "$HOME/Downloads"/bash-*/tests; do
     [ -d "$cand" ] && target="$cand" && break
   done
 fi
