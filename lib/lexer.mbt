@@ -231,6 +231,44 @@ fn Lexer::read_operator(self : Lexer) -> String {
 }
 
 ///|
+/// Is the `((` at `start` an arithmetic command, or two nested subshells?
+///
+/// bash decides mechanically (parse.y:parse_arith_cmd): scan to the `)` that
+/// matches, and look at the character after it. Another `)` means arithmetic;
+/// anything else means the first paren was a subshell, which is why
+/// `((gzip ...) 3>&- | eval ...)` in zdiff is two subshells and not arithmetic.
+fn Lexer::is_arith_at(self : Lexer, start : Int) -> Bool {
+  let mut i = start + 2
+  let mut depth = 1
+  for ;; {
+    if i - start > 4096 {
+      return false
+    }
+    let c = match self.src.get_char(i) {
+      None => return false
+      Some(c) => c
+    }
+    match c {
+      '\'' => i = skip_quoted(self.src, i, '\'')
+      '"' => i = skip_quoted(self.src, i, '"')
+      '\\' => i += 2
+      '(' => {
+        depth += 1
+        i += 1
+      }
+      ')' => {
+        depth -= 1
+        i += 1
+        if depth == 0 {
+          return self.src.get_char(i) == Some(')')
+        }
+      }
+      _ => i += 1
+    }
+  }
+}
+
+///|
 fn Lexer::read_word(self : Lexer) -> Word {
   let line = self.line
   let start = self.pos

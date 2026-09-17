@@ -106,6 +106,30 @@ bash 语法语料 5 降到 3。教训：`((`/`))` 只在算术上下文里才有
 做这个判断。
 缺口报错的大头（40 条 unexpected token after command、14 条 command substitution）。
 
+## 方言判断的质量（已知弱点，有实测数字）
+
+`#!/bin/sh` 或 `#!/bin/dash` 的脚本，我们自己判断「用了 bash 专有语法」并给 Note。
+这个判断**质量不高**，用真正的 POSIX sh 对齐过（`tools/corpus/posix_oracle.sh`，
+oracle 是 busybox ash，1128 个声明 sh/dash 的系统脚本）：
+
+- 一致（我们报，sh 也拒绝）：3
+- 误报（我们报，sh 接受）：4
+- 漏报（我们没报，sh 拒绝）：12
+- 疑似 polyglot（正文是 Perl/Tcl/二进制，不属于 bashism 问题）：11
+- 一致放行：1098
+
+精确率 3/7，召回率 3/15。**结论：别把它当判定，当提示。** 要提升就得按这 16 个
+样本逐个补规则，并且把这个脚本接进 CI 当记分牌——现在它不在 CI 里，因为 oracle
+依赖 busybox 或 dash 是否装了。
+
+`tools/corpus/posix_oracle.sh` 自己踩过的三个坑值得记：
+
+- `(sh|dash)` 会把 `#!/usr/bin/env bash` 也配进来，因为 bash 里含 sh
+- 输出管到 `head` 会让脚本吃 SIGPIPE 提前死，摘要在末尾读不到
+- 计数器与临时文件路径混用一个变量名，bash 算术报错会直接终止整个循环
+
+三次都是「测量工具错了而不是被测对象错了」。
+
 ## 加固的三件套（每次改动都要过）
 
 1. `moon test --target native` — 库内行为：逐命令语义、畸形输入、递归边界、输入规范化

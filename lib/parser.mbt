@@ -342,7 +342,10 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
       // together; `( (` is a subshell inside a subshell. The lexer no longer
       // merges them, because merging everywhere broke nested command
       // substitutions (`arr=($(echo a))`).
-      if self.next_is_adjacent("(") {
+      // An adjacent pair is arithmetic only if the text between the parens is
+      // followed by another paren; otherwise it is a subshell inside a
+      // subshell, which is what zdiff relies on.
+      if self.next_is_adjacent("(") && self.lex.is_arith_at(self.cur_start) {
         let start = self.cur_start + 2
         self.advance()
         self.advance()
@@ -542,6 +545,11 @@ fn Parser::parse_for(self : Parser) -> Cmd {
   }
   let words : Array[Word] = []
   if self.cur is TOp("(") && self.next_is_adjacent("(") {
+    // `for ((...))` requires arithmetic: bash errors out here instead of
+    // falling back to subshells (parse.y:parse_dparen, the FOR case).
+    if !self.lex.is_arith_at(self.cur_start) {
+      self.lex.fail("expected an arithmetic expression after for ((")
+    }
     // for ((init; cond; step)) -- the condition may itself contain parens
     self.advance()
     self.advance()
