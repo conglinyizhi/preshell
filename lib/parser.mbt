@@ -269,6 +269,14 @@ fn empty_word(line : Int) -> Word {
 /// Recursion ceiling for nested constructs. Measured: 1000 levels of nested
 /// `if` parse fine and 40k crash the native stack, so this sits far from both
 /// ends. Exceeding it is reported as an issue, never as a crash.
+///|
+/// Wrap a single command as a sequence, for the `always cmd` short form.
+fn parse_seq_of_cmd(p : Parser) -> Seq {
+  let cmd = p.parse_command()
+  { items: [{ pipeline: { negated: false, cmds: [cmd], }, op: Semi, }], }
+}
+
+///|
 fn max_nesting() -> Int {
   1024
 }
@@ -418,7 +426,26 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
           if self.reserved() == Some("}") {
             self.advance()
           }
-          Cmd::Group(body)
+          // zsh's try/finally: `{ ... } always { ... }`. The second block runs
+          // whether or not the first one succeeded, so both contribute effects
+          // and the AST keeps them apart.
+          if self.reserved() == Some("always") {
+            self.advance()
+            if self.reserved() == Some("{") {
+              self.advance()
+              let fin = self.parse_seq_in({ words: ["}"], ops: [], }, "always")
+              if self.reserved() == Some("}") {
+                self.advance()
+              }
+              Cmd::Always(inner=body, always=fin)
+            } else {
+              // `{ ... } always cmd` is also legal zsh
+              let fin = parse_seq_of_cmd(self)
+              Cmd::Always(inner=body, always=fin)
+            }
+          } else {
+            Cmd::Group(body)
+          }
         }
         Some("[[") => self.parse_cond()
         _ => self.parse_simple_or_funcdef(w)

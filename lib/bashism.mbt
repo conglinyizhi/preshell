@@ -77,6 +77,10 @@ fn collect_cmd_bashisms(
     }
     Cmd::Subshell(inner) | Cmd::Group(inner) =>
       collect_bashisms(inner, rejects, differs)
+    Cmd::Always(inner~, always~) => {
+      collect_bashisms(inner, rejects, differs)
+      collect_bashisms(always, rejects, differs)
+    }
     Cmd::If(cond~, then_~, elifs~, else_~) => {
       collect_bashisms(cond, rejects, differs)
       collect_bashisms(then_, rejects, differs)

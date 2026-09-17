@@ -23,6 +23,9 @@
 
 set -uo pipefail
 
+# oracle 可换：默认 bash -n；做 zsh 方言时用 ORACLE="zsh -n"。
+ORACLE="${ORACLE:-bash -n}"
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bin="$root/_build/native/release/build/cmd/preshell/preshell.exe"
 
@@ -92,7 +95,7 @@ while IFS= read -r f; do
   fi
   msgs="$(printf '%s\n' "$out" | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
 
-  if bash -n "$f" 2>/dev/null; then bash_ok=1; else bash_ok=0; fi
+  if $ORACLE "$f" >/dev/null 2>&1; then bash_ok=1; else bash_ok=0; fi
 
   if [ "$ours" = "Complete" ]; then
     if [ "$bash_ok" = "1" ]; then
@@ -131,15 +134,16 @@ print_capped() {
 }
 
 cat <<EOF
-# preshell × bash -n 差分
+# preshell × $ORACLE 差分（默认 bash -n）
 
 语料：$target（模式 $mode）
 文件数：$total
 耗时：${secs}s
 
+oracle：$ORACLE
 - 两边都通过：$both_ok
-- 我们的缺口（我们报错，bash 通过）：$we_gap  ← 解析器要补的
-- 我们太宽松（我们通过，bash 拒绝）：$we_permissive  ← 危险方向，优先查
+- 我们的缺口（我们报错，oracle 通过）：$we_gap  ← 解析器要补的
+- 我们太宽松（我们通过，oracle 拒绝）：$we_permissive  ← 危险方向，优先查
 - 两边都报错：$corroborated
 - 崩溃或超时：$crashes  ← 必须为零
 

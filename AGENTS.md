@@ -168,6 +168,21 @@ bash 语法语料 5 降到 3。教训：`((`/`))` 只在算术上下文里才有
 `sh`/`dash`/`bash` 视为已建模集合，POSIX 脚本不产生噪音。判断依据是 shebang
 本身，不是猜的：`declared_shell` 认 `#!/usr/bin/env X` 形式，也会剥掉 `-e` 这类参数。
 
+## zsh 支持（进行中）
+
+按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单和工作量
+估计在 docs/zsh-plan.md；这里只放记分牌和口径。
+
+- 审核层与方言无关，不重复实现；差异只在词法与语法，用 Dialect 分派
+- 语料是 zsh 源码树的真实代码：1244 文件、131,822 行（Completion + Functions），
+  采集脚本 tools/corpus/zsh_corpus.sh，oracle 用 \`zsh -n\`
+- 基线：两边通过 886、我们的缺口 353、我们太宽松 2、两边都报错 3、崩溃 0。
+  已做 always 块，缺口降到 345
+- \`zsh -n\` **不是纯语法 oracle**：它仍会做部分求值（除零、fd 号都会报），
+  所以在「我们太宽松」那一栏出现条目时先怀疑 oracle
+- zsh 有一批选项会改变解析（SHGLOB/KSHGLOB/IGNOREBRACES/RC_QUOTES/ALIASES/SHORTLOOPS...），
+  按默认值假设并在报告中注明，这条和 bash 的 extglob 是同一类问题
+
 ## 定位失败时怎么查
 
 - issue 带行号：`preshell --scan "$(cat f.sh)"` 每条都带 `(line N)`

@@ -385,6 +385,11 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
       self.restore_cwd(saved)
     }
     Cmd::Group(seq) => self.walk_seq(seq)
+    Cmd::Always(inner~, always~) => {
+      // Both blocks run, so both contribute: the finally block is not optional.
+      self.walk_seq(inner)
+      self.walk_seq(always)
+    }
     Cmd::If(cond~, then_~, elifs~, else_~) => {
       self.walk_seq(cond)
       self.walk_seq(then_)

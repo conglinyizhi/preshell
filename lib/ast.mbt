@@ -86,6 +86,8 @@ pub(all) enum Cmd {
   /// `keyword` is true for the `function name` form, which is bash/ksh only;
   /// the plain `name()` form is POSIX and must not be reported as a bashism.
   FuncDef(name~ : String, body~ : Cmd, keyword~ : Bool)
+  /// zsh: `{ body } always { fin }`, the block that runs either way.
+  Always(inner~ : Seq, always~ : Seq)
   Arith(String)
   Cond(String) // [[ ... ]] kept as raw text in the spike
   /// Any compound command may carry its own redirections:
