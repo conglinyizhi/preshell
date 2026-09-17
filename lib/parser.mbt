@@ -28,7 +28,12 @@ pub fn Parser::Parser(lex : Lexer) -> Parser {
 ///|
 /// Parse a whole command line. Returns the tree plus any lexical complaints.
 pub fn parse(src : String) -> (Seq, Array[String]) {
-  let lex = Lexer::new(src)
+  parse_dialect(src, Bash)
+}
+
+///|
+pub fn parse_dialect(src : String, dialect : Dialect) -> (Seq, Array[String]) {
+  let lex = Lexer::with_dialect(src, dialect)
   let p = Parser::Parser(lex)
   let seq = p.parse_seq({ words: [], ops: [], })
   (seq, lex.errors)
@@ -38,7 +43,16 @@ pub fn parse(src : String) -> (Seq, Array[String]) {
 /// Same, plus the line each complaint came from: "which line is the problem"
 /// is the first thing a caller asks about a parse failure.
 pub fn parse_located(src : String) -> (Seq, Array[String], Array[Int]) {
-  let lex = Lexer::new(src)
+  parse_located_dialect(src, Bash)
+}
+
+///|
+/// Same, in a chosen dialect.
+pub fn parse_located_dialect(
+  src : String,
+  dialect : Dialect,
+) -> (Seq, Array[String], Array[Int]) {
+  let lex = Lexer::with_dialect(src, dialect)
   let p = Parser::Parser(lex)
   let seq = p.parse_seq({ words: [], ops: [], })
   (seq, lex.errors, lex.error_lines)
@@ -269,6 +283,7 @@ fn empty_word(line : Int) -> Word {
 /// Recursion ceiling for nested constructs. Measured: 1000 levels of nested
 /// `if` parse fine and 40k crash the native stack, so this sits far from both
 /// ends. Exceeding it is reported as an issue, never as a crash.
+
 ///|
 /// Wrap a single command as a sequence, for the `always cmd` short form.
 fn parse_seq_of_cmd(p : Parser) -> Seq {
@@ -1067,6 +1082,12 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
     }
     match self.cur {
       TWord(w) => {
+        // zsh reads `}` as a reserved word wherever it appears, not as an
+        // argument, so a group needs no separator before its closing brace:
+        // `{ echo a }` is fine there and a syntax error in bash.
+        if self.lex.dialect is Zsh && w.plain() == Some("}") {
+          break
+        }
         words.push(w)
         self.advance()
       }

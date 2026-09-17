@@ -30,6 +30,8 @@ async fn main {
   let mut scan = false
   let mut pretty = false
   let mut bench = 0
+  let mut shell : String? = None
+  let mut evidence = false
   let rest : Array[String] = []
   let mut i = 0
   for a in argv {
@@ -64,6 +66,14 @@ async fn main {
       pretty = true
       continue
     }
+    if a == "--evidence" {
+      evidence = true
+      continue
+    }
+    if a.has_prefix("--shell=") {
+      shell = Some(a.unsafe_substring(start=8, end=a.length()))
+      continue
+    }
     if a == "--bench" {
       bench = 1000
       continue
@@ -79,6 +89,13 @@ async fn main {
   }
   if bench > 0 {
     bench_corpus(bench)
+    return
+  }
+  if evidence {
+    // One message per line, for the dialect that --shell names.
+    for m in @lib.syntax_evidence(dialect_for("", shell)) {
+      println(m)
+    }
     return
   }
   let from_argv = rest.length() > 0
@@ -99,8 +116,9 @@ async fn main {
     usage()
     return
   }
+  let dialect = dialect_for(src, shell)
   if shadow {
-    let (seq, errors) = @lib.parse(src)
+    let (seq, errors) = @lib.parse_dialect(src, dialect)
     println(@json.to_json(seq).stringify(indent=2))
     for e in errors {
       println("issue: \{e}")
@@ -111,9 +129,9 @@ async fn main {
   // uses, and the only one that sees exactly what arrived (bar the null bytes
   // the shell itself would drop).
   let report = if from_argv {
-    @lib.analyze(src)
+    @lib.analyze_dialect(src, dialect)
   } else {
-    @lib.analyze_bytes(stdin_bytes.unwrap())
+    @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect)
   }
   if scan {
     // One machine-readable line for tools/corpus/run.sh, then one line per
@@ -129,6 +147,30 @@ async fn main {
   }
   let indent = if pretty { 2 } else { 0 }
   println(@json.to_json(report).stringify(indent~))
+}
+
+///|
+/// Which grammar to read when the caller does not pick one. The input's own
+/// shebang is the best evidence there is; without one, bash, because that is
+/// what a bare snippet almost always is.
+fn dialect_for(src : String, named : String?) -> @lib.Dialect {
+  match named {
+    Some(s) =>
+      match s {
+        "bash" | "sh" => @lib.Dialect::Bash
+        "zsh" => @lib.Dialect::Zsh
+        _ => @lib.Dialect::Bash
+      }
+    None =>
+      match @lib.declared_shell(src) {
+        Some(name) =>
+          match @lib.Dialect::from_shell_name(name) {
+            Some(d) => d
+            None => @lib.Dialect::Bash
+          }
+        None => @lib.Dialect::Bash
+      }
+  }
 }
 
 ///|
@@ -148,6 +190,9 @@ async fn usage() -> Unit {
     #|
     #|  --version    print tool and schema version as JSON
     #|  --help       this text
+    #|  --evidence   print the syntax errors this dialect has evidence for
+    #|  --shell=S    read the input as S: auto (default), bash or zsh.
+    #|               auto follows the shebang and falls back to bash
     #|  --pretty     indent the JSON for humans
     #|  --shadow     dump the syntax tree (developer mode)
     #|  --scan       one line of status, then any issues (developer mode)

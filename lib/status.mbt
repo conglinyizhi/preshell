@@ -73,10 +73,17 @@ pub fn report_version() -> Int {
 /// does, then report. This is what a subprocess caller should use, since it is
 /// the only path that sees the bytes as sent.
 pub fn analyze_bytes(bytes : Bytes) -> Report {
+  analyze_bytes_dialect(bytes, Bash)
+}
+
+///|
+/// Analyse with a chosen dialect. When the caller names none, the input's own
+/// declaration decides; see `dialect_for`.
+pub fn analyze_bytes_dialect(bytes : Bytes, dialect : Dialect) -> Report {
   let (text, decode_notes) = decode_command(bytes)
   // Replaced bytes are a caveat, not a parse failure: the analysis ran.
-  let r = add_notes(analyze(text), decode_notes, kind=Note)
-  add_notes(r, declared_shell_note(text), kind=Gap)
+  let r = add_notes(analyze_dialect(text, dialect), decode_notes, kind=Note)
+  add_notes(r, declared_shell_note(text, dialect), kind=Gap)
 }
 
 ///|
@@ -140,11 +147,17 @@ fn max_issues() -> Int {
 /// incomplete trace is not a smaller answer, it is a different one: a caller
 /// that ignores this will read "no writes reported" as "writes nothing".
 pub fn analyze(src : String) -> Report {
+  analyze_dialect(src, Bash)
+}
+
+///|
+/// Same, in a chosen dialect.
+pub fn analyze_dialect(src : String, dialect : Dialect) -> Report {
   // argv can carry a NUL too, so this path strips it as well. The bytes path
   // goes through decode_command first and lands here with it already gone.
   let (clean, nul_notes) = strip_nuls(src)
-  let r = add_notes(analyze_clean(clean), nul_notes, kind=Note)
-  add_notes(r, declared_shell_note(clean), kind=Gap)
+  let r = add_notes(analyze_clean(clean, dialect), nul_notes, kind=Note)
+  add_notes(r, declared_shell_note(clean, dialect), kind=Gap)
 }
 
 ///|
@@ -166,15 +179,15 @@ fn strip_nuls(src : String) -> (String, Array[String]) {
 }
 
 ///|
-fn analyze_clean(src : String) -> Report {
-  let (seq, errors, lines) = parse_located(src)
+fn analyze_clean(src : String, dialect : Dialect) -> Report {
+  let (seq, errors, lines) = parse_located_dialect(src, dialect)
   let issues : Array[Issue] = []
   let mut has_gap = false
   let mut has_syntax = false
   let mut has_note = false
   for i, e in errors {
     let line = if i < lines.length() { lines[i] } else { 0 }
-    let issue = classify_error(e, line~)
+    let issue = classify_error(e, dialect, line~)
     // The status is decided from every complaint, including those the list
     // below does not carry: a dropped `Syntax` issue must still make the whole
     // report abstain.
@@ -224,8 +237,12 @@ fn analyze_clean(src : String) -> Report {
 ///
 /// The default is `Gap`, and that is the whole design: claiming "bash would
 /// reject this" is a statement about a program we are not running.
-fn classify_error(message : String, line? : Int = 0) -> Issue {
-  let kind = if corroborated_syntax_messages().contains(message) {
+fn classify_error(
+  message : String,
+  dialect : Dialect,
+  line? : Int = 0,
+) -> Issue {
+  let kind = if corroborated_syntax_messages(dialect).contains(message) {
     Syntax
   } else {
     Gap
@@ -247,13 +264,28 @@ fn classify_error(message : String, line? : Int = 0) -> Issue {
 /// The strength of the guarantee is bounded by the corpus (bash's own
 /// `tests/*.sub`, several hundred files), which is why the list stays short
 /// and why an empty list is a perfectly good state: it means "never claim it".
-fn corroborated_syntax_messages() -> Array[String] {
-  [
-    // 证据：`${` 未闭合。语料 451 文件中只有 quote1.sub 落在「两边都报错」象限，
-    // 缺口象限 0 次；手动对照 `bash -n -c 'echo ${x'` 也是解析期报错。
-    // 强度上限就是这点证据（n=1，无反正例）。
-    "unterminated ${",
-  ]
+fn corroborated_syntax_messages(dialect : Dialect) -> Array[String] {
+  match dialect {
+    // 证据只对着 bash 取过。zsh 语料上同一条消息落进缺口象限两次
+    // （`${x//[^\\}]/}` 这类带括号表达式的展开 zsh 认、这个扫描器不认），
+    // 所以它在 zsh 下没有资格升级成 Syntax。换方言要重新取证。
+    Zsh => []
+    Bash =>
+      [
+        // 证据：`${` 未闭合。语料 451 文件中只有 quote1.sub 落在「两边都报错」象限，
+        // 缺口象限 0 次；手动对照 `bash -n -c 'echo ${x'` 也是解析期报错。
+        // 强度上限就是这点证据（n=1，无反正例）。
+        "unterminated ${",
+      ]
+  }
+}
+
+///|
+/// The messages this dialect has evidence for, one per line for the harness.
+/// The corpus harness needs the same list the classifier uses; reading it out
+/// of the source only works while the table has one branch.
+pub fn syntax_evidence(dialect : Dialect) -> Array[String] {
+  corroborated_syntax_messages(dialect)
 }
 
 ///|

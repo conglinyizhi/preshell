@@ -66,10 +66,13 @@ fn is_modelled_shell(name : String) -> Bool {
 
 ///|
 /// The note to attach when a script declares a shell this tool does not model.
-fn declared_shell_note(src : String) -> Array[String] {
+fn declared_shell_note(src : String, dialect : Dialect) -> Array[String] {
   match declared_shell(src) {
     Some(name) =>
-      if is_modelled_shell(name) {
+      // A script that declares the dialect we are already reading is not a
+      // caveat. Naming a shell we do not model at all still is.
+      if is_modelled_shell(name) ||
+        Dialect::from_shell_name(name) == Some(dialect) {
         []
       } else {
         [

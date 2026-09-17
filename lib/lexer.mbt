@@ -48,10 +48,21 @@ pub(all) struct Lexer {
   mut depth : Int
   /// Offset where the token most recently returned by `next` starts.
   mut tok_start : Int
+  /// Grammar to read. Consulted only where the two shells disagree.
+  dialect : Dialect
+  /// Whether the next token would start a command. zsh's lexer tracks this
+  /// itself (`incmdpos`) and uses it to decide whether `(` opens a subshell or
+  /// is just part of a word: `echo *(.)` is a glob, `(echo x)` is a subshell.
+  mut cmd_pos : Bool
 }
 
 ///|
 pub fn Lexer::new(src : String) -> Lexer {
+  Lexer::with_dialect(src, Bash)
+}
+
+///|
+pub fn Lexer::with_dialect(src : String, dialect : Dialect) -> Lexer {
   {
     src,
     pos: 0,
@@ -61,6 +72,8 @@ pub fn Lexer::new(src : String) -> Lexer {
     error_lines: [],
     depth: 0,
     tok_start: 0,
+    dialect,
+    cmd_pos: true,
   }
 }
 
@@ -129,6 +142,77 @@ fn Lexer::advance(self : Lexer, n : Int) -> Unit {
 
 ///|
 pub fn Lexer::next(self : Lexer) -> Tok {
+  let tok = self.next_raw()
+  self.note_position(tok)
+  tok
+}
+
+///|
+/// Track whether the following token would start a command. zsh's lexer does
+/// the same thing with `incmdpos`, and it is what tells `echo *(.)` (a word)
+/// apart from `(echo x)` (a subshell).
+fn Lexer::note_position(self : Lexer, tok : Tok) -> Unit {
+  match tok {
+    TWord(w) =>
+      match w.plain() {
+        Some(text) => self.cmd_pos = is_command_word(text)
+        None => self.cmd_pos = false
+      }
+    TNewline => self.cmd_pos = true
+    TOp(op) =>
+      // A redirection leaves us inside the same command; the word after it
+      // clears this again anyway.
+      match op {
+        ">"
+        | "<"
+        | ">>"
+        | "<<"
+        | "<<-"
+        | "<&"
+        | ">&"
+        | "<>"
+        | ">|"
+        | "&>"
+        | "&>>" => ()
+        _ => self.cmd_pos = true
+      }
+    _ => ()
+  }
+}
+
+///|
+/// Words after which a command may start. This is the reserved-word list the
+/// parser keys on, plus the two zsh-only block words.
+fn is_command_word(w : String) -> Bool {
+  match w {
+    "if"
+    | "then"
+    | "elif"
+    | "else"
+    | "fi"
+    | "while"
+    | "until"
+    | "do"
+    | "done"
+    | "for"
+    | "case"
+    | "esac"
+    | "in"
+    | "select"
+    | "function"
+    | "time"
+    | "coproc"
+    | "repeat"
+    | "foreach"
+    | "{"
+    | "}"
+    | "!" => true
+    _ => false
+  }
+}
+
+///|
+fn Lexer::next_raw(self : Lexer) -> Tok {
   for ;; {
     let c = match self.peek() {
       None => {
@@ -170,7 +254,14 @@ pub fn Lexer::next(self : Lexer) -> Tok {
     }
     self.tok_start = self.pos
     let prosub = (c == '<' || c == '>') && self.peek_at(1) == Some('(')
-    if is_meta(c) && !prosub {
+    // zsh: a `(` in word position opens a glob qualifier or pattern group and
+    // is part of the word, so it must reach the word reader. At command
+    // position it is the subshell operator in both shells.
+    let paren_in_word = c == '(' &&
+      self.dialect is Zsh &&
+      !self.cmd_pos &&
+      self.peek_at(1) != Some(')')
+    if is_meta(c) && !prosub && !paren_in_word {
       return TOp(self.read_operator())
     }
     return TWord(self.read_word())
@@ -273,6 +364,13 @@ fn Lexer::read_word(self : Lexer) -> Word {
   let line = self.line
   let start = self.pos
   let parts = self.read_parts(true)
+  // A word that consumed nothing would leave the token stream stuck, so take
+  // the character as a literal instead. Nothing should reach this, and a hang
+  // is the one failure mode worse than a wrong answer.
+  if self.pos == start {
+    self.advance(1)
+    parts.push(Lit(self.slice(start, self.pos)))
+  }
   { parts, raw: self.slice(start, self.pos), line, }
 }
 
@@ -283,17 +381,60 @@ fn Lexer::read_word(self : Lexer) -> Word {
 fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
   let parts : Array[WordPart] = []
   let lit = StringBuilder()
+  // Depth of a zsh pattern group: `*(.)`, `(a|b)`, `(#i)foo`. Inside one, the
+  // group's own parens are word characters and blanks are not word separators.
+  let mut pct = 0
   for ;; {
     let c = match self.peek() {
       None => break
       Some(c) => c
     }
+    if unquoted && self.dialect is Zsh {
+      if c == '(' {
+        // `()` is the function-definition token, not a pattern group.
+        if self.peek_at(1) == Some(')') {
+          break
+        }
+        pct += 1
+        // Mark the group as a pattern, not literal text: \`rm (a|b)\` deletes
+        // the files matching a or b, and reporting the parenthesised text as a
+        // literal path would be a wrong answer rather than a missing one.
+        flush_lit(parts, lit)
+        parts.push(Glob("("))
+        self.advance(1)
+        continue
+      } else if c == ')' {
+        // At depth zero this closes an enclosing subshell: not our word.
+        if pct == 0 {
+          break
+        }
+        pct -= 1
+        flush_lit(parts, lit)
+        parts.push(Glob(")"))
+        self.advance(1)
+        continue
+      }
+    }
     if unquoted {
-      if is_blank(c) || c == '\n' {
+      let in_group = self.dialect is Zsh && pct > 0
+      if c == '\n' {
         break
       }
-      let prosub = (c == '<' || c == '>') && self.peek_at(1) == Some('(')
-      if is_meta(c) && !prosub {
+      if is_blank(c) && !in_group {
+        break
+      }
+      // zsh keeps `|` inside a group: `(a|b)` is one pattern, not a pipeline.
+      // `;`, `&` and redirections still end the word there.
+      let ends_word = if in_group {
+        c == ';' || c == '&' || c == '<' || c == '>'
+      } else if self.dialect is Zsh && c == '(' {
+        // Mid-word zsh never treats `(` as an operator; the group was counted
+        // above and already became word content.
+        false
+      } else {
+        is_meta(c) && !((c == '<' || c == '>') && self.peek_at(1) == Some('('))
+      }
+      if ends_word {
         break
       }
     } else if c == '"' {

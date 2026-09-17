@@ -5,7 +5,7 @@
 # （ParseStatus::Invalid）。没有证据时一律算自己的缺口（Unsupported）。
 # 这个脚本就是产证据的地方，并强制：
 #
-#   凡是被 lib/status.mbt 列为「已佐证语法错」的报错原文，
+#   凡是工具（--evidence）列为「已佐证语法错」的报错原文，
 #   在「我们的缺口」象限里必须出现 0 次。
 #
 # 同一条原文可能两种情形都有（实测 known 的 unterminated here-document 就是），
@@ -59,10 +59,11 @@ fi
 
 max_line=20   # 每个象限最多打印多少条文件名
 
-# 从 lib/status.mbt 里抽出已佐证的原文清单，作为不变量的一端。
+# 已佐证的原文清单问工具本身要，不从源码 grep：那张表现在按方言分支，
+# 而 grep 出来的东西跟工具实际用的规则可能悄悄分叉。
 table_msgs="$(mktemp)"
-awk '/fn corroborated_syntax_messages/,/^}/' "$root/lib/status.mbt" |
-  sed -n 's/^ *"\(.*\)",$/\1/p' >"$table_msgs"
+# shellcheck disable=SC2086
+"$bin" ${PFLAGS:-} --evidence >"$table_msgs"
 
 both_ok=0
 we_gap=0
@@ -84,7 +85,10 @@ list_files() {
 
 while IFS= read -r f; do
   [ -f "$f" ] || continue
-  out="$(timeout 20 "$bin" --scan <"$f" 2>/dev/null)" || out=""
+  # PFLAGS lets a caller pick the dialect: zsh code in this tree carries no
+  # shebang (it is sourced), so auto-detection cannot see it.
+  # shellcheck disable=SC2086
+  out="$(timeout 20 "$bin" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
   line="$(printf '%s\n' "$out" | head -1)"
   ours="${line%% *}"
   ours="${ours#status=}"
@@ -181,7 +185,7 @@ while IFS= read -r m; do
 done <"$table_msgs"
 if [ "$violations" = "0" ]; then
   if [ -s "$table_msgs" ]; then
-    echo "  - 通过：status.mbt 里的 $(wc -l <"$table_msgs") 条已佐证原文均未出现在缺口象限"
+    echo "  - 通过：工具报的 $(wc -l <"$table_msgs") 条已佐证原文在缺口象限出现 0 次"
   else
     echo "  - 表为空：当前不允许任何报错升级为 Invalid（默认即诚实态）"
   fi

@@ -173,12 +173,22 @@ bash 语法语料 5 降到 3。教训：`((`/`))` 只在算术上下文里才有
 按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单和工作量
 估计在 docs/zsh-plan.md；这里只放记分牌和口径。
 
-- 审核层与方言无关，不重复实现；差异只在词法与语法，用 Dialect 分派
-- 语料是 zsh 源码树的真实代码：1244 文件、131,822 行（Completion + Functions），
-  采集脚本 tools/corpus/zsh_corpus.sh，oracle 用 \`zsh -n\`
-- 基线：两边通过 886、我们的缺口 353、我们太宽松 2、两边都报错 3、崩溃 0。
-  已做 always 块，缺口降到 345
-- \`zsh -n\` **不是纯语法 oracle**：它仍会做部分求值（除零、fd 号都会报），
+- CLI：`--shell=auto|bash|zsh`（auto 按 shebang，无 shebang 默认 bash）、`--evidence`
+- 审核层与方言无关，不重复实现；差异只在词法与语法，用 lib/dialect.mbt 的 Dialect 分派
+- 语料是 zsh 源码树的真实代码：1244 文件、131822 行（Completion + Functions），
+  采集脚本 tools/corpus/zsh_corpus.sh，oracle 用 `zsh -n`。注意这些文件没有 shebang，
+  量的时候要显式 `PFLAGS=--shell=zsh`
+- 基线 886/353 → 现在 **975 通过 / 264 缺口 / 2 太宽松 / 3 两边报错 / 0 崩溃**。
+  缺口的下降来自三刀：方言分派加 always 块（345）、词位置的 `(` 归入词（284）、
+  `}` 不需要前置分隔符（264）
+- 已实测的两条 zsh 与 bash 的真实差异，都别靠直觉：
+  1. `(` 在词的位置是模式分组，不是子 shell：zsh `echo (b)` 能跑（报 unknown file
+     attribute），bash 是语法错。元字符判定看 `cmd_pos`，对应 zsh 的 `incmdpos`
+  2. `}` 不需要前置分隔符：`{ echo a }` 在 zsh 里跑得动、在 bash 里是语法错，
+     因为 zsh 把 `}` 当保留字记号，词中间也停词
+- 已佐证语法错的表按方言分（syntax_evidence）：zsh 下为空，所以 zsh 解析不升级成 Invalid。
+  同一条消息在 bash 下有证据不等于在 zsh 下也有，反例已经在语料里抓到
+- `zsh -n` **不是纯语法 oracle**：它仍会做部分求值（除零、fd 号都会报），
   所以在「我们太宽松」那一栏出现条目时先怀疑 oracle
 - zsh 有一批选项会改变解析（SHGLOB/KSHGLOB/IGNOREBRACES/RC_QUOTES/ALIASES/SHORTLOOPS...），
   按默认值假设并在报告中注明，这条和 bash 的 extglob 是同一类问题
