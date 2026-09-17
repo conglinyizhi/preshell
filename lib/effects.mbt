@@ -47,6 +47,24 @@ pub(all) struct Impact {
 } derive(Debug, Eq, ToJson)
 
 ///|
+/// Drop the operand that a known flag already consumed, so a value like the
+/// `-C dir` of tar is not reported twice: once as the write target and once as
+/// a path the command reads.
+fn drop_flag_value(
+  xs : Array[(String, Bool)],
+  value : String?,
+) -> Array[(String, Bool)] {
+  match value {
+    None => xs
+    Some(v) =>
+      xs.filter(fn(it) {
+        let (t, _) = it
+        t != v
+      })
+  }
+}
+
+///|
 /// The operands that come before the first flag. For commands like `find`,
 /// whose later arguments are predicates rather than paths (`-name '*.mbt'`),
 /// only the leading ones are files.
@@ -649,16 +667,34 @@ fn Collector::classify(
         reads(rest)
       }
     }
-    "tee"
-    | "touch"
-    | "truncate"
-    | "mkdir"
-    | "chmod"
-    | "chown"
-    | "chgrp"
-    | "split"
-    | "csplit" => writes(operands)
-    "cp" | "mv" | "install" | "rsync" | "ln" => {
+    "tee" | "touch" | "truncate" | "mkdir" => writes(operands)
+    "chmod" | "chown" | "chgrp" =>
+      // The first operand is the mode, the owner or the group; the rest are
+      // files. Reporting `644` as a written path is the kind of invented fact
+      // that makes a report untrustworthy.
+      writes(if operands.length() > 1 { operands[1:].to_array() } else { [] })
+    "ln" =>
+      // `ln target link`: the last operand is what gets created.
+      if operands.length() > 0 {
+        let n_op = operands.length()
+        for i, it in operands {
+          let (t, d) = it
+          if i == n_op - 1 {
+            self.push(Write, t, d, line)
+          } else {
+            self.push(Read, t, d, line)
+          }
+        }
+      }
+    "split" | "csplit" => {
+      // The input is read; the outputs are named by the tool (xaa, xab, ...),
+      // which is not something this table can derive.
+      reads(operands)
+      if operands.length() > 0 {
+        self.push(Unknown, n + ": output file names are derived", true, line)
+      }
+    }
+    "cp" | "mv" | "install" | "rsync" => {
       let n_op = operands.length()
       for i, it in operands {
         let (t, d) = it
@@ -669,9 +705,21 @@ fn Collector::classify(
         }
       }
     }
-    "zip" | "gzip" | "bzip2" | "xz" | "zstd" =>
-      // Compressors rewrite their operand in place unless told otherwise, so
-      // the first operand is both read and written.
+    "zip" =>
+      // `zip archive.zip members...`: the archive is written, the members read.
+      match operands {
+        [(t, d), .. rest] => {
+          self.push(Write, t, d, line)
+          for it in rest {
+            let (m, md) = it
+            self.push(Read, m, md, line)
+          }
+        }
+        [] => ()
+      }
+    "gzip" | "bzip2" | "xz" | "zstd" =>
+      // These rewrite their operand in place unless told otherwise, so the
+      // first operand is both read and written.
       match operands {
         [(t, d), ..] => {
           self.push(Read, t, d, line)
@@ -700,21 +748,62 @@ fn Collector::classify(
         }
       }
     "tar" => {
-      match flag_value(items, ["-C", "--directory"]) {
-        Some(d) => self.push(Write, d, false, line)
-        None =>
-          self.push(Unknown, "tar: extraction point not given", true, line)
+      // tar does three different things depending on its mode flag, and it
+      // writes somewhere different in each: create writes the archive, extract
+      // writes into -C (or the cwd), list only reads.
+      let dest = flag_value(items, ["-C", "--directory"])
+      // The mode letter can arrive as `-czf` or as the classic no-dash form
+      // `czf`, and both spellings are common in the wild.
+      let cluster = match short_flag_cluster(operands) {
+        Some(c) => c
+        None => ""
       }
-      // `tar xzf a.tgz`: the first operand is an option cluster, not a path.
-      reads(drop_short_flag_cluster(operands))
+      let dashed = flags.fold(init="", (acc, f) => acc + f)
+      let letters = cluster + dashed
+      let archive_written = letters.contains("c") ||
+        flags.any(fn(f) { f == "--create" })
+      let listing = letters.contains("t") || flags.any(fn(f) { f == "--list" })
+      let args = drop_flag_value(drop_short_flag_cluster(operands), dest)
+      if archive_written {
+        match args {
+          [(t, d), .. members] => {
+            self.push(Write, t, d, line)
+            for it in members {
+              let (m, md) = it
+              self.push(Read, m, md, line)
+            }
+          }
+          [] => ()
+        }
+      } else {
+        match dest {
+          Some(d) => if !listing { self.push(Write, d, false, line) }
+          None =>
+            if !listing {
+              self.push(
+                Unknown,
+                "tar: extraction point is the working directory",
+                true,
+                line,
+              )
+            }
+        }
+        reads(args)
+      }
     }
     "unzip" => {
-      match flag_value(items, ["-d"]) {
+      let dest = flag_value(items, ["-d"])
+      match dest {
         Some(d) => self.push(Write, d, false, line)
         None =>
-          self.push(Unknown, "unzip: extraction point not given", true, line)
+          self.push(
+            Unknown,
+            "unzip: extraction point is the working directory",
+            true,
+            line,
+          )
       }
-      reads(operands)
+      reads(drop_flag_value(operands, dest))
     }
     "curl"
     | "wget"
@@ -738,6 +827,27 @@ fn Collector::classify(
         match flag_value(items, ["-o", "-O", "--output", "--output-document"]) {
           Some(o) => self.push(Write, o, false, line)
           None => ()
+        }
+      }
+      // A host argument is also something leaving the machine, and it does not
+      // start with http. For the file-transfer tools the host is the operand
+      // carrying a colon or an at-sign; for the rest, the first operand.
+      if n == "scp" || n == "sftp" {
+        for it in operands {
+          let (h, hd) = it
+          if h.contains(":") || h.contains("@") {
+            self.push(Net, h, hd, line)
+          }
+        }
+      } else if n == "ssh" ||
+        n == "telnet" ||
+        n == "ping" ||
+        n == "dig" ||
+        n == "nc" ||
+        n == "ncat" {
+        match operands {
+          [(t, d), ..] => self.push(Net, t, d, line)
+          [] => ()
         }
       }
     }
@@ -838,13 +948,21 @@ fn Collector::recurse_static(
 /// Without a per-command option table we cannot tell `xzf` from a filename.
 /// This is the narrow case of a general gap: an option string that does not
 /// start with `-` is indistinguishable from a path operand.
-fn drop_short_flag_cluster(xs : Array[(String, Bool)]) -> Array[(String, Bool)] {
+fn short_flag_cluster(xs : Array[(String, Bool)]) -> String? {
   if xs.length() > 0 {
     let (first, _) = xs[0]
     if first.length() > 1 &&
       first.to_string().all(fn(c) { c.is_ascii_alphabetic() }) {
-      return xs[1:].to_array()
+      return Some(first)
     }
   }
-  xs
+  None
+}
+
+///|
+fn drop_short_flag_cluster(xs : Array[(String, Bool)]) -> Array[(String, Bool)] {
+  match short_flag_cluster(xs) {
+    Some(_) => xs[1:].to_array()
+    None => xs
+  }
 }

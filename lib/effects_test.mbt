@@ -76,7 +76,8 @@ test "substitutions inside arguments are audited too" {
 test "extraction targets are read from the option table" {
   let im = impact_of("tar xzf pkg.tgz -C /tmp")
   debug_inspect(targets_of(im, Write), content="[\"/tmp\"]")
-  debug_inspect(targets_of(im, Read), content="[\"pkg.tgz\", \"/tmp\"]")
+  // 解包点由 -C 给出，不再同时被当成读取目标
+  debug_inspect(targets_of(im, Read), content="[\"pkg.tgz\"]")
 }
 
 ///|
