@@ -24,6 +24,18 @@ while IFS= read -r line; do
     printf '%-8s %q\n' "$note" "$line"
   fi
 done < "$CASES"
+# 开发模式也要能在 stdin 上工作。--shadow 曾经因为读的是空字符串而打印空树，
+# 这类故障不会崩、不会报错，只是什么都没输出。
+total=$((total + 2))
+if ! printf %s\\n "echo hi" | "$BIN" --shadow 2>/dev/null | grep -q '"parts"'; then
+  echo "  --shadow 在 stdin 上没有产出语法树"
+  bad=$((bad + 1))
+fi
+if ! printf %s\\n "echo hi" | "$BIN" --scan 2>/dev/null | grep -q '^status='; then
+  echo "  --scan 在 stdin 上没有产出状态行"
+  bad=$((bad + 1))
+fi
+
 echo "--- 共 $total 条，异常 $bad 条"
 [ "$bad" = "0" ]
 #

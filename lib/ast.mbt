@@ -51,6 +51,9 @@ pub(all) struct Redirect {
 pub(all) struct Assign {
   name : String
   append : Bool
+  /// True for the `name=(...)` form, which is bash/ksh only: a POSIX shell
+  /// rejects it, so a script declaring sh that uses one will not run there.
+  array : Bool
   /// The subscript parts of `name[...]=value`; empty for a plain assignment.
   /// `a[$i]=x` carries a hole here, and the audit has to see it.
   index : Array[WordPart]
@@ -80,7 +83,9 @@ pub(all) enum Cmd {
   Loop(until~ : Bool, cond~ : Seq, body~ : Seq)
   For(name~ : String, words~ : Array[Word], body~ : Seq)
   Case(subject~ : Word, items~ : Array[CaseItem])
-  FuncDef(name~ : String, body~ : Cmd)
+  /// `keyword` is true for the `function name` form, which is bash/ksh only;
+  /// the plain `name()` form is POSIX and must not be reported as a bashism.
+  FuncDef(name~ : String, body~ : Cmd, keyword~ : Bool)
   Arith(String)
   Cond(String) // [[ ... ]] kept as raw text in the spike
   /// Any compound command may carry its own redirections:

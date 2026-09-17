@@ -185,8 +185,11 @@ fn Lexer::read_operator(self : Lexer) -> String {
       if self.peek() == Some('|') || self.peek() == Some('&') {
         self.pos += 1
       }
-    Some('(') => if self.peek() == Some('(') { self.pos += 1 }
-    Some(')') => if self.peek() == Some(')') { self.pos += 1 }
+    // `((` and `))` are deliberately NOT merged here. They only mean
+    // arithmetic in an arithmetic context, and merging them everywhere makes a
+    // command substitution unable to find its own `)`: `arr=($(echo a))`
+    // had the two closing parens glued into one token that the substitution did
+    // not accept. The parser recognises the pair by adjacency instead.
     Some('<') =>
       if self.peek() == Some('<') {
         self.pos += 1

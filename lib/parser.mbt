@@ -334,59 +334,61 @@ fn Parser::parse_redirect_list(self : Parser) -> Array[Redirect] {
 fn Parser::parse_command_base(self : Parser) -> Cmd {
   self.skip_newlines()
   match self.cur {
-    TOp("(") => {
-      self.advance()
-      let body = self.parse_seq_in({ words: [], ops: [")"], }, "subshell")
-      if self.cur is TOp(")") {
+    TOp("(") =>
+      // `((` is an arithmetic command only when the two parens are glued
+      // together; `( (` is a subshell inside a subshell. The lexer no longer
+      // merges them, because merging everywhere broke nested command
+      // substitutions (`arr=($(echo a))`).
+      if self.next_is_adjacent("(") {
+        let start = self.cur_start + 2
         self.advance()
-      }
-      Cmd::Subshell(body)
-    }
-    TOp("((") => {
-      let start = self.cur_start + 2
-      self.advance()
-      // Balance *all* the parentheses, not just the `((`/`))` tokens: an
-      // arithmetic expression has its own, and `if (((4+4) + (4 + 7)))` closes
-      // at the last `)`, not at the first `))`.
-      let mut depth = 2
-      for ;; {
-        match self.cur {
-          TEof => break
-          TOp("((") => {
-            depth += 2
-            self.advance()
-          }
-          TOp("(") => {
-            depth += 1
-            self.advance()
-          }
-          TOp("))") => {
-            depth -= 2
-            if depth <= 0 {
-              break
+        self.advance()
+        let mut closed = false
+        // Balance every paren: the expression has its own, so `(((4+4)))`
+        // closes at the last one, not at the first `))`-looking pair.
+        let mut depth = 2
+        // End of the last token that belongs to the expression, for the raw
+        // text handed to the caller. Closers do not move it.
+        let mut raw_end = start
+        for ;; {
+          match self.cur {
+            TEof => break
+            TOp("(") => {
+              depth += 1
+              raw_end = self.lex.pos
+              self.advance()
             }
-            self.advance()
-          }
-          TOp(")") => {
-            depth -= 1
-            if depth <= 0 {
-              break
+            TOp(")") => {
+              depth -= 1
+              if depth == 0 {
+                closed = true
+                break
+              }
+              self.advance()
             }
-            self.advance()
+            _ => {
+              raw_end = self.lex.pos
+              self.advance()
+            }
           }
-          _ => self.advance()
         }
-      }
-      let raw = self.lex.slice(start, self.cur_start)
-      if self.cur is TOp(")") || self.cur is TOp("))") {
-        self.advance()
+        let raw = self.lex.slice(start, raw_end)
+        if closed {
+          self.advance()
+        } else {
+          // An unclosed `((` is a command that never finishes; accepting it
+          // silently reads as "nothing happens here".
+          self.lex.fail("unexpected end of input in arithmetic")
+        }
+        Cmd::Arith(raw)
       } else {
-        // An unclosed `((` is a command that never finishes; before this it was
-        // accepted silently, which reads as "nothing happens here".
-        self.lex.fail("unexpected end of input in arithmetic")
+        self.advance()
+        let body = self.parse_seq_in({ words: [], ops: [")"], }, "subshell")
+        if self.cur is TOp(")") {
+          self.advance()
+        }
+        Cmd::Subshell(body)
       }
-      Cmd::Arith(raw)
-    }
     TWord(w) =>
       match w.plain() {
         Some("if") => self.parse_if()
@@ -536,18 +538,19 @@ fn Parser::parse_for(self : Parser) -> Cmd {
     _ => ()
   }
   let words : Array[Word] = []
-  if self.cur is TOp("((") {
-    // for ((init; cond; step)) -- the condition may itself contain (( ))
+  if self.cur is TOp("(") && self.next_is_adjacent("(") {
+    // for ((init; cond; step)) -- the condition may itself contain parens
     self.advance()
-    let mut depth = 1
+    self.advance()
+    let mut depth = 2
     for ;; {
       match self.cur {
         TEof => break
-        TOp("((") => {
+        TOp("(") => {
           depth += 1
           self.advance()
         }
-        TOp("))") => {
+        TOp(")") => {
           depth -= 1
           if depth == 0 {
             break
@@ -557,7 +560,7 @@ fn Parser::parse_for(self : Parser) -> Cmd {
         _ => self.advance()
       }
     }
-    if self.cur is TOp("))") {
+    if self.cur is TOp(")") {
       self.advance()
     }
   } else {
@@ -689,7 +692,7 @@ fn Parser::parse_function_kw(self : Parser) -> Cmd {
     }
   }
   let body = self.parse_command()
-  Cmd::FuncDef(name~, body~)
+  Cmd::FuncDef(name~, body~, keyword=true)
 }
 
 ///|
@@ -709,12 +712,17 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
             self.advance()
             if self.cur is TOp(")") {
               self.advance()
-              return Cmd::FuncDef(name~, body=self.parse_command())
+              return Cmd::FuncDef(
+                name~,
+                body=self.parse_command(),
+                keyword=false,
+              )
             }
             self.lex.fail("expected ) in function definition")
             return Cmd::FuncDef(
               name~,
               body=Cmd::Simple({ assigns: [], words: [], redirects: [], }),
+              keyword=false,
             )
           }
           _ => ()
@@ -941,6 +949,16 @@ pub fn split_assignment(
 }
 
 ///|
+/// Is the next token this operator, glued to the current one? Used for `((`,
+/// which is arithmetic only without a space between the parens.
+fn Parser::next_is_adjacent(self : Parser, op : String) -> Bool {
+  match self.peek_tok() {
+    TOp(o) => o == op && self.la_start == self.cur_start + 1
+    _ => false
+  }
+}
+
+///|
 /// `2>&1` is a redirect on fd 2 only when the digit is glued to the operator;
 /// `echo 2 > f` is just a word and a redirect on stdout.
 fn Parser::fd_adjacent(self : Parser, w : Word) -> Bool {
@@ -973,7 +991,8 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
               self.advance()
               // `a=(1 2 3)` and `a=([k]=v)` are array assignments: the value
               // is a word list, and its holes still have to be seen.
-              if value.length() == 0 && self.cur is TOp("(") {
+              let from_array = value.length() == 0 && self.cur is TOp("(")
+              if from_array {
                 self.advance()
                 for ;; {
                   match self.cur {
@@ -992,7 +1011,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                   }
                 }
               }
-              assigns.push({ name, append, index, value, })
+              assigns.push({ name, append, array: from_array, index, value, })
               continue
             }
             None => ()

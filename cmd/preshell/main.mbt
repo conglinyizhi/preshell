@@ -82,8 +82,20 @@ async fn main {
     return
   }
   let from_argv = rest.length() > 0
-  let src = if from_argv { rest.join(" ") } else { "" }
-  if from_argv && src.trim().length() == 0 {
+  // Read stdin once, as bytes. Both the report path and the developer modes use
+  // it: reading it twice, or letting --shadow see an empty string, is how
+  // `preshell --shadow < script` silently printed an empty tree.
+  let stdin_bytes : Bytes? = if from_argv {
+    None
+  } else {
+    Some(@stdio.stdin.read_all().binary())
+  }
+  let src = if from_argv {
+    rest.join(" ")
+  } else {
+    @lib.decode_command(stdin_bytes.unwrap()).0
+  }
+  if src.trim().length() == 0 {
     usage()
     return
   }
@@ -98,7 +110,11 @@ async fn main {
   // stdin is analysed from its bytes: that is the path a subprocess caller
   // uses, and the only one that sees exactly what arrived (bar the null bytes
   // the shell itself would drop).
-  let report = if from_argv { @lib.analyze(src) } else { report_from_stdin() }
+  let report = if from_argv {
+    @lib.analyze(src)
+  } else {
+    @lib.analyze_bytes(stdin_bytes.unwrap())
+  }
   if scan {
     // One machine-readable line for tools/corpus/run.sh, then one line per
     // issue. The harness keys on the message only, so keep "issue: <message>"
@@ -121,13 +137,6 @@ fn tool_version() -> String {
 }
 
 ///|
-
-///|
-/// Read stdin and analyse it. Kept as one function so the byte-level entry
-/// point is used everywhere, including by tests.
-async fn report_from_stdin() -> @lib.Report {
-  @lib.analyze_bytes(@stdio.stdin.read_all().binary())
-}
 
 ///|
 async fn usage() -> Unit {

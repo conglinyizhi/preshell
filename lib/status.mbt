@@ -30,6 +30,11 @@ pub(all) enum IssueKind {
   /// bash would refuse the command as well. Claiming this requires evidence:
   /// a false `Syntax` would turn an unparsed command into "nothing to see".
   Syntax
+  /// Not a parse problem: the command parsed, but something about it means the
+  /// report should not be read as a clean bill. A script declaring a shell this
+  /// tool does not model is the case this exists for. A `Note` does not change
+  /// `status`, but it does force `uncertain`.
+  Note
 } derive(Debug, Eq, ToJson)
 
 ///|
@@ -69,7 +74,11 @@ pub fn report_version() -> Int {
 /// the only path that sees the bytes as sent.
 pub fn analyze_bytes(bytes : Bytes) -> Report {
   let (text, notes) = decode_command(bytes)
-  add_notes(analyze(text), notes)
+  let all = notes
+  for n in declared_shell_note(text) {
+    all.push(n)
+  }
+  add_notes(analyze_clean(strip_nuls(text).0), all)
 }
 
 ///|
@@ -121,7 +130,11 @@ pub fn analyze(src : String) -> Report {
   // argv can carry a NUL too, so this path strips it as well. The bytes path
   // goes through decode_command first and lands here with it already gone.
   let (clean, notes) = strip_nuls(src)
-  add_notes(analyze_clean(clean), notes)
+  let all = notes
+  for n in declared_shell_note(clean) {
+    all.push(n)
+  }
+  add_notes(analyze_clean(clean), all)
 }
 
 ///|
@@ -148,6 +161,7 @@ fn analyze_clean(src : String) -> Report {
   let issues : Array[Issue] = []
   let mut has_gap = false
   let mut has_syntax = false
+  let mut has_note = false
   for i, e in errors {
     let line = if i < lines.length() { lines[i] } else { 0 }
     let issue = classify_error(e, line~)
@@ -157,6 +171,8 @@ fn analyze_clean(src : String) -> Report {
     match issue.kind {
       Gap => has_gap = true
       Syntax => has_syntax = true
+      // A note is not a parse failure: the status keeps describing the parse.
+      Note => has_note = true
     }
     if i < max_issues() {
       issues.push(issue)
@@ -171,7 +187,19 @@ fn analyze_clean(src : String) -> Report {
     Complete
   }
   let base = impact(seq)
-  let impact_ = if status is Complete { base } else { base.mark_uncertain() }
+  // A POSIX script that uses bash-only syntax gets its analysis called out: the
+  // parse succeeded, so the status still says so, but the note and the
+  // uncertainty say the answer is not what that shell would do.
+  let notes = posix_mismatch_note(src, seq)
+  for n in notes {
+    issues.push({ kind: Note, message: n, line: 0, })
+    has_note = true
+  }
+  let impact_ = if status is Complete && !has_note {
+    base
+  } else {
+    base.mark_uncertain()
+  }
   {
     version: report_version(),
     status,

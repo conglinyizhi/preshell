@@ -116,6 +116,23 @@ analysed is not byte-for-byte the one that arrived.
 - `Invalid` — there is evidence that bash would refuse this command too, so
   nothing would execute. Only claimed with evidence; see below.
 
+
+## Which shell
+
+This tool parses **bash** semantics, and it says so when the input declares
+something else:
+
+- `#!/bin/sh` or `#!/bin/dash` using bash-only syntax (arrays, `[[ ]]`, `(( ))`,
+  `<<<`, `<( )`, the `function` keyword) gets a note and `uncertain: true`.
+  Such a script would not run under that shell as written. The parse itself
+  succeeded, so `status` stays `Complete`: the note is about the dialect, not
+  about this tool's coverage.
+- A shell that is not modelled at all (`zsh`, `fish`, `python`, ...) makes the
+  report `Unsupported`, because the grammar being parsed is not that one.
+
+Neither case is guessed at: the shebang is read, and `sh`/`dash`/`bash` are
+taken as the modelled set so that a POSIX script does not produce noise.
+
 ## Hardening
 
 Three checks, all runnable locally and in CI:
