@@ -28,22 +28,36 @@
 3. `tools/corpus/run.sh` 看四象限有没有移动，尤其是「我们太宽松」那一格
 4. 改完跑 `moon fmt` + `moon check --target native`
 
-## 已知缺口（P1 待啃）
+收紧语法规则时默认会让缺口变大：实测一次过度修正让缺口从 12 涨到 81。
+所以改完必须同时看两个格子的变化，并把合法写法钉进回归护栏
+（`separator_test.mbt` 的 "valid statements stay complete" 就是这种护栏）。
 
+## 已知缺口（下一个目标）
+
+已完成：命令列表缺分隔符被当成隐式 `;`、声明类内建的赋值参数
+（规则取自 parse.y:5798-5810）、命令词之前的重定向。
+
+仍然缺的，按缺口文件数排序：
+
+- **数组下标里的引号**：`myarray["a]a"]=x`、`foo=(["k"]=v)`。要按 bash 的
+  `P_ARRAYSUB` 规则扫 `[` 之后的内容（那里不是 glob）。当前缺口最多的一类
 - here-doc × 命令替换：`text=$(cat <<EOF ... EOF)` 里 here-doc 正文要在 `)` 处截断
-- `here-doc 定界符` 里带命令替换：``cat <<EO`true`F``
-- 数组下标里的引号：`foo=(["k"]=v)`、`myarray["a]a"]=x`
+- here-doc 定界符里带命令替换：``cat <<EO`true`F``
 - `${}` 内的引号规则：`${x//"'"/y}`
 - `[[ ]]` 里 `=~` 右侧的正则
 - 嵌套进程替换：`$(< <(trap ...))`
 - 模式开关：`shopt -s extglob` 会让 `+(a|b)` 从语法错变成合法。
   审核器必须显式声明假设（当前按已启用处理），并知道这是个分歧点
 
-## 已知的「我们太宽松」
+## 「我们太宽松」那一格：已清零，只剩 oracle 局限
 
-- `(` 出现在非命令位置时被当成 subshell 接受（`printf '%s\n' a=(a b)`、
-  `switch foo in foo) ...`），bash 会拒绝。这是危险方向，优先修
-- here-doc 数量超出 bash 上限（`exportfunc1.sub`）我们放行；属于 bash 实现限制，不打算追
+那格原有 14 个文件，其中真缺陷是「`(` 出现在非命令位置被当 subshell 接受」：
+`printf '%s\n' a=(a b)` 会给出假 Allow 和一份编造的影响面，而 bash 直接拒绝。
+已由分隔符规则修掉。剩下 3 个归因清楚，不要当 bug 修：
+
+- `extglob4.sub` / `extglob6.sub`：`echo @(?|.?)` 这类模式在 `shopt -s extglob`
+  下合法，而 `bash -n` 不执行 shopt，所以它拒。这是 oracle 的局限
+- `exportfunc1.sub`：超过 bash 的 here-doc 数量上限（bash 实现限制）
 
 ## MoonBit 坑
 
