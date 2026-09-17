@@ -212,12 +212,21 @@ fn Collector::scan_assign_part(
 /// here-document, and its holes always matter.
 fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
   let line = r.target.line
-  let dyn = r.target.static_text() == None
+  let dynamic_target = r.target.static_text() == None
   let t = r.target.literal_text()
   match r.op {
     ROut | RAppend | RClobber | RInOut =>
-      self.push(Write, if t == "" { "<unknown>" } else { t }, dyn, line)
-    RIn => self.push(Read, t, dyn, line)
+      self.push(
+        Write,
+        if t == "" {
+          "<unknown>"
+        } else {
+          t
+        },
+        dynamic_target,
+        line,
+      )
+    RIn => self.push(Read, t, dynamic_target, line)
     // A here-document body is data, not a path; only its holes matter.
     RHereDoc | RHereDocStrip | RHereString =>
       match r.body {

@@ -406,11 +406,8 @@ fn Lexer::sub_seq(self : Lexer, what : String) -> Seq {
     return Seq::empty()
   }
   self.depth += 1
-  let (seq, closed) = parse_sub_seq(self, ")")
+  let (seq, _closed) = parse_sub_seq(self, ")", what)
   self.depth -= 1
-  if !closed {
-    self.errors.push("unterminated " + what)
-  }
   seq
 }
 
@@ -846,12 +843,18 @@ fn Lexer::gather_heredocs(self : Lexer) -> Unit {
   let pend = self.pending
   self.pending = []
   for r in pend {
-    let (delim, _quoted) = heredoc_delimiter(r.target)
+    let (raw_delim, _quoted) = heredoc_delimiter(r.target)
     let strip = r.op is RHereDocStrip
+    // `<<-` strips leading tabs from the terminator line *and* from the
+    // delimiter itself: `cat <<-'\tEND'` is closed by a `\tEND` line.
+    // bash was checked to behave this way; without it the delimiter never
+    // matches and the rest of the input is silently swallowed as body.
+    let delim = if strip { strip_leading_tabs(raw_delim) } else { raw_delim }
     let sb = StringBuilder()
     for ;; {
       if self.pos >= self.src.length() {
-        self.errors.push("unterminated here-document")
+        // A here-document that runs into end of input matches bash: it warns
+        // when the line runs, and the remaining text is body, not code.
         break
       }
       let line_start = self.pos
@@ -870,10 +873,42 @@ fn Lexer::gather_heredocs(self : Lexer) -> Unit {
       if body_line == delim {
         break
       }
+      // Inside a command substitution the delimiter line can be closed by the
+      // `)` that ends the substitution: `x=$(cat <<EOF` / `body` / `EOF)`.
+      // That `)` belongs to the outer parser (bash spells this with
+      // PST_CMDSUBST + shell_eof_token), so leave it in the input.
+      if self.depth > 0 {
+        match comsub_close_after(body_line, delim) {
+          Some(off) => {
+            let tabbed = line.length() - body_line.length()
+            self.pos = line_start + tabbed + off
+            break
+          }
+          None => ()
+        }
+      }
       sb.write_string(body_line)
       sb.write_char('\n')
     }
     r.body = Some(sb.to_string())
+  }
+}
+
+///|
+/// Offset of the `)` that closes an enclosing command substitution, when the
+/// line begins with the here-document delimiter and only blanks sit between
+/// them. None when this line is not a delimiter line at all.
+fn comsub_close_after(line : String, delim : String) -> Int? {
+  if !line.has_prefix(delim) {
+    return None
+  }
+  let mut i = delim.length()
+  for ;; {
+    match line.get_char(i) {
+      Some(' ') | Some('\t') => i += 1
+      Some(')') => return Some(i)
+      _ => return None
+    }
   }
 }
 

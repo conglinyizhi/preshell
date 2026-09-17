@@ -141,11 +141,29 @@ test "a corroborated syntax error abstains instead of judging" {
 }
 
 ///|
-test "same message, different quadrant: here-doc at EOF stays a gap" {
-  // bash -n 对这种输入 exit 0（只在运行时警告），所以它可执行，
-  // 我们的报错绝不能升级成「bash 也会拒绝」。
+test "a here-document that runs into end of input is not our error to report" {
+  // bash -n 对这种输入 exit 0（只在运行时警告），所以它可执行。
+  // 之前我们报 unterminated here-document，那会把它错归到「我们的缺口」；
+  // 正确行为是接受它，因为 bash 本身接受。
   let r = check_of("cat <<EOF\nhi")
-  debug_inspect(r.status, content="Unsupported")
+  debug_inspect(r.status, content="Complete")
+  debug_inspect(r.issues.length(), content="0")
+}
+
+///|
+test "a here-document that runs into end of input is not our error to report" {
+  // bash -n 对这种输入 exit 0（只在运行时警告），所以它可执行。
+  // 之前我们报 unterminated here-document，那会把它错归到「我们的缺口」；
+  // 正确行为是接受它，因为 bash 本身接受。
+  let r = check_of("cat <<EOF\nhi")
+  debug_inspect(r.status, content="Complete")
+  debug_inspect(r.issues.length(), content="0")
+}
+
+///|
+test "a message in both quadrants stays a gap" {
+  // 仍在两格出现的报错不能升成 Syntax（见 status_wbtest.mbt 里的表检查）。
+  let r = check_of("echo $(date")
   debug_inspect(r.issues[0].kind, content="Gap")
-  debug_inspect(r.risk, content="Some(Ask)")
+  debug_inspect(r.status, content="Unsupported")
 }

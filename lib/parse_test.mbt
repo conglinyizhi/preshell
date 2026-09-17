@@ -148,7 +148,7 @@ test "case pattern paren does not close a command substitution" {
 test "missing close parenthesis is reported" {
   let (_, errs) = parse("echo $(date")
   inspect(errs.length(), content="1")
-  inspect(errs[0], content="unterminated command substitution")
+  inspect(errs[0], content="unexpected end of input in command substitution")
 }
 
 ///|

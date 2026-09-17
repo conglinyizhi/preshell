@@ -35,9 +35,9 @@ pub fn parse(src : String) -> (Seq, Array[String]) {
 /// The operator itself is *already consumed* from the source by the tokenizer
 /// that produced it, so the caller must not try to eat it again. The flag says
 /// whether the close was actually found before the input ran out.
-pub fn parse_sub_seq(lex : Lexer, op : String) -> (Seq, Bool) {
+pub fn parse_sub_seq(lex : Lexer, op : String, label : String) -> (Seq, Bool) {
   let p = Parser::Parser(lex)
-  let seq = p.parse_seq({ words: [], ops: [op], })
+  let seq = p.parse_seq_in({ words: [], ops: [op], }, label)
   let closed = match p.cur {
     TOp(o) => o == op
     _ => false
@@ -122,6 +122,15 @@ fn Parser::at_stop(self : Parser, stop : Stop) -> Bool {
 
 ///|
 pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
+  self.parse_seq_in(stop, "")
+}
+
+///|
+/// Same, but names the construct for the error message. A sequence that is
+/// waiting for a closer (`)`, `}`, `fi`, `done`, `esac`) and meets end of input
+/// instead is unfinished, and bash rejects it: accepting it silently is how
+/// `(echo a` used to come back as Complete.
+pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
   let items : Array[AndOr] = []
   for ;; {
     self.skip_newlines()
@@ -152,6 +161,10 @@ pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
       // No input consumed: refuse to spin on a malformed line.
       self.advance()
     }
+  }
+  if (stop.ops.length() > 0 || stop.words.length() > 0) && self.cur is TEof {
+    let what = if label == "" { "construct" } else { label }
+    self.lex.errors.push("unexpected end of input in " + what)
   }
   { items, }
 }
@@ -290,7 +303,7 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
   match self.cur {
     TOp("(") => {
       self.advance()
-      let body = self.parse_seq({ words: [], ops: [")"], })
+      let body = self.parse_seq_in({ words: [], ops: [")"], }, "subshell")
       if self.cur is TOp(")") {
         self.advance()
       }
@@ -344,7 +357,7 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
         }
         Some("{") => {
           self.advance()
-          let body = self.parse_seq({ words: ["}"], ops: [], })
+          let body = self.parse_seq_in({ words: ["}"], ops: [], }, "group")
           if self.reserved() == Some("}") {
             self.advance()
           }
@@ -405,20 +418,26 @@ fn Parser::parse_cond(self : Parser) -> Cmd {
 ///|
 fn Parser::parse_if(self : Parser) -> Cmd {
   self.advance()
-  let cond = self.parse_seq({ words: ["then"], ops: [], })
+  let cond = self.parse_seq_in({ words: ["then"], ops: [], }, "if")
   if self.reserved() == Some("then") {
     self.advance()
   }
-  let then_ = self.parse_seq({ words: ["elif", "else", "fi"], ops: [], })
+  let then_ = self.parse_seq_in(
+    { words: ["elif", "else", "fi"], ops: [], },
+    "if",
+  )
   let elifs : Array[(Seq, Seq)] = []
   for ;; {
     if self.reserved() == Some("elif") {
       self.advance()
-      let c = self.parse_seq({ words: ["then"], ops: [], })
+      let c = self.parse_seq_in({ words: ["then"], ops: [], }, "if")
       if self.reserved() == Some("then") {
         self.advance()
       }
-      let b = self.parse_seq({ words: ["elif", "else", "fi"], ops: [], })
+      let b = self.parse_seq_in(
+        { words: ["elif", "else", "fi"], ops: [], },
+        "if",
+      )
       elifs.push((c, b))
     } else {
       break
@@ -426,7 +445,7 @@ fn Parser::parse_if(self : Parser) -> Cmd {
   }
   let else_ = if self.reserved() == Some("else") {
     self.advance()
-    Some(self.parse_seq({ words: ["fi"], ops: [], }))
+    Some(self.parse_seq_in({ words: ["fi"], ops: [], }, "if"))
   } else {
     None
   }
@@ -439,11 +458,11 @@ fn Parser::parse_if(self : Parser) -> Cmd {
 ///|
 fn Parser::parse_loop(self : Parser, until : Bool) -> Cmd {
   self.advance()
-  let cond = self.parse_seq({ words: ["do"], ops: [], })
+  let cond = self.parse_seq_in({ words: ["do"], ops: [], }, "loop")
   if self.reserved() == Some("do") {
     self.advance()
   }
-  let body = self.parse_seq({ words: ["done"], ops: [], })
+  let body = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
   if self.reserved() == Some("done") {
     self.advance()
   }
@@ -510,14 +529,14 @@ fn Parser::parse_for(self : Parser) -> Cmd {
   self.skip_newlines()
   let body = if self.reserved() == Some("do") {
     self.advance()
-    let b = self.parse_seq({ words: ["done"], ops: [], })
+    let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
     if self.reserved() == Some("done") {
       self.advance()
     }
     b
   } else if self.reserved() == Some("{") {
     self.advance()
-    let b = self.parse_seq({ words: ["}"], ops: [], })
+    let b = self.parse_seq_in({ words: ["}"], ops: [], }, "loop")
     if self.reserved() == Some("}") {
       self.advance()
     }
@@ -574,7 +593,10 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     if self.cur is TOp(")") {
       self.advance()
     }
-    let body = self.parse_seq({ words: ["esac"], ops: [";;", ";&", ";;&"], })
+    let body = self.parse_seq_in(
+      { words: ["esac"], ops: [";;", ";&", ";;&"], },
+      "case",
+    )
     let mut ft = 0
     match self.cur {
       TOp(";;") => {
