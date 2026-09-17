@@ -130,8 +130,24 @@ pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
     }
     let before = self.lex.pos
     let pipeline = self.parse_pipeline()
-    let op = self.parse_separator()
-    items.push({ pipeline, op, })
+    match self.parse_separator() {
+      Some(op) => items.push({ pipeline, op, })
+      None => {
+        items.push({ pipeline, op: Semi, })
+        if self.cur is TEof {
+          break
+        }
+        if !self.stop_matches(stop) {
+          // A command list needs a separator. Treating "none" as one is how
+          // `printf x a=(a b)` used to become `printf` followed by a subshell.
+          // bash rejects the same input, but this stays a Gap until the
+          // corpus shows the two agree (see lib/status.mbt).
+          self.lex.errors.push("unexpected token after command")
+          self.advance()
+        }
+        break
+      }
+    }
     if self.lex.pos == before {
       // No input consumed: refuse to spin on a malformed line.
       self.advance()
@@ -141,29 +157,49 @@ pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
 }
 
 ///|
-fn Parser::parse_separator(self : Parser) -> BinOp {
+
+///|
+/// Consume a list separator. `None` means nothing was consumed, which is not
+/// the same as `;`.
+fn Parser::parse_separator(self : Parser) -> BinOp? {
   match self.cur {
     TOp("&&") => {
       self.advance()
-      And
+      Some(And)
     }
     TOp("||") => {
       self.advance()
-      Or
+      Some(Or)
     }
     TOp("&") => {
       self.advance()
-      Amp
+      Some(Amp)
     }
     TOp(";") => {
       self.advance()
-      Semi
+      Some(Semi)
     }
     TNewline => {
       self.advance()
-      Semi
+      Some(Semi)
     }
-    _ => Semi
+    _ => None
+  }
+}
+
+///|
+/// Does the current token end this sequence? Membership only: `at_stop` also
+/// accepts any stray closing token so that parsing cannot spin, but a closer
+/// this context never asked for is an error, not a boundary.
+fn Parser::stop_matches(self : Parser, stop : Stop) -> Bool {
+  match self.cur {
+    TOp(op) => stop.ops.contains(op)
+    TWord(w) =>
+      match w.plain() {
+        Some(s) => stop.words.contains(s)
+        None => false
+      }
+    _ => false
   }
 }
 
@@ -251,6 +287,9 @@ fn Parser::parse_command(self : Parser) -> Cmd {
         Some("[[") => self.parse_cond()
         _ => self.parse_simple_or_funcdef(w)
       }
+    TOp(op) if is_redirect_op(op) =>
+      // Redirections may precede the command word: `< /dev/null foo bar`.
+      self.parse_simple()
     _ => {
       self.advance()
       Cmd::Simple({ assigns: [], words: [], redirects: [], })
@@ -516,6 +555,43 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
 }
 
 ///|
+/// Declaration builtins take assignment statements as arguments, so `name=(...)`
+/// is valid inside their argument list and not only at the head of a command.
+///
+/// bash's rule is in parse.y:5798-5810: when the command word is a builtin
+/// flagged ASSIGNMENT_BUILTIN, or the word is `eval`/`let`, the parser sets
+/// PST_ASSIGNOK and `name=` becomes an assignment word again. The list below
+/// was checked against `bash -n`: declare/typeset/local/export/readonly/eval/
+/// let/alias accept it, while printf/echo/unset reject it (and so do
+/// `command declare ...` / `builtin declare ...`).
+fn takes_assignments(name : String) -> Bool {
+  match name {
+    "declare"
+    | "typeset"
+    | "local"
+    | "export"
+    | "readonly"
+    | "eval"
+    | "let"
+    | "alias" => true
+    _ => false
+  }
+}
+
+///|
+/// Is `name=value` still an assignment at this point in the command?
+fn assign_ok(words : Array[Word]) -> Bool {
+  match words {
+    [] => true
+    [first, ..] =>
+      match first.plain() {
+        Some(n) => takes_assignments(n)
+        None => false
+      }
+  }
+}
+
+///|
 fn all_digits(s : String) -> Bool {
   if s.length() == 0 {
     return false
@@ -684,8 +760,9 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
             _ => ()
           }
         }
-        // Assignments are only assignments at the head of the command.
-        if words.length() == 0 {
+        // Assignments at the head of a command, plus anywhere inside the
+        // argument list of a declaration builtin.
+        if assign_ok(words) {
           match split_assignment(w) {
             Some((name, append, value)) => {
               self.advance()
