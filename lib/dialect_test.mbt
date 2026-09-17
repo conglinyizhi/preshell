@@ -182,3 +182,28 @@ test "zsh's =() writes a temporary file, and its command still runs" {
   // bash has no construct here at all.
   debug_inspect(analyze("cat =(echo hi)").status, content="Unsupported")
 }
+
+///|
+test "zsh's numeric glob is a pattern, not a redirection" {
+  // Measured: `echo <1->` prints a glob error in zsh rather than redirecting,
+  // and the rule in zsh's isnumglob() is `<` digits `-` digits `>`, with both
+  // digit runs allowed to be empty. It applies anywhere in a word.
+  debug_inspect(zstatus("echo <1->"), content="Complete")
+  inspect(ztouched("echo <1->"), content="U:<1->")
+  inspect(ztouched("echo a<1->b"), content="U:a<1->b")
+  debug_inspect(zstatus("echo <->"), content="Complete")
+  // No closing `>` means it is an ordinary redirection and the target is a
+  // literal file name.
+  inspect(ztouched("cat <1-3"), content="R:1-3")
+  inspect(ztouched("cat <x-y"), content="R:x-y")
+  // In a case pattern, which is where it shows up in real scripts.
+  debug_inspect(
+    zstatus("case $x in\n  (<1->|\\*) a[1]=$1;;\nesac"),
+    content="Complete",
+  )
+  // bash reads the same text as a redirection and refuses it.
+  debug_inspect(
+    analyze("case 1 in <1-10>) echo y;; esac").status,
+    content="Unsupported",
+  )
+}

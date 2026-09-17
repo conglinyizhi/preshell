@@ -261,7 +261,8 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
       self.dialect is Zsh &&
       !self.cmd_pos &&
       self.peek_at(1) != Some(')')
-    if is_meta(c) && !prosub && !paren_in_word {
+    let numglob = c == '<' && self.dialect is Zsh && self.isnumglob_at()
+    if is_meta(c) && !prosub && !paren_in_word && !numglob {
       return TOp(self.read_operator())
     }
     return TWord(self.read_word())
@@ -372,6 +373,50 @@ fn Lexer::read_word(self : Lexer) -> Word {
     parts.push(Lit(self.slice(start, self.pos)))
   }
   { parts, raw: self.slice(start, self.pos), line, }
+}
+
+///|
+/// zsh's numeric glob: `<1-10>`, `<->`, `<-3>`. zsh recognises it wherever a
+/// `<` starts a token, so `echo <1->` is a pattern and not a redirection. The
+/// shape is the state machine in zsh's isnumglob(): digits, then `-`, then
+/// digits, then `>`. Both digit runs may be empty.
+fn Lexer::isnumglob_at(self : Lexer) -> Bool {
+  let mut i = self.pos + 1
+  for ;; {
+    match self.src.get_char(i) {
+      Some(c) => if c.is_ascii_digit() { i += 1 } else { break }
+      None => break
+    }
+  }
+  if self.src.get_char(i) != Some('-') {
+    return false
+  }
+  i += 1
+  for ;; {
+    match self.src.get_char(i) {
+      Some(c) => if c.is_ascii_digit() { i += 1 } else { break }
+      None => break
+    }
+  }
+  self.src.get_char(i) == Some('>')
+}
+
+///|
+/// Read a numeric glob, `<` already seen. Returns its text and leaves the
+/// cursor after the closing `>`.
+fn Lexer::read_numeric_glob(self : Lexer) -> String {
+  let start = self.pos
+  for ;; {
+    match self.peek() {
+      Some('>') => {
+        self.advance(1)
+        break
+      }
+      None => break
+      Some(_) => self.advance(1)
+    }
+  }
+  self.slice(start, self.pos)
 }
 
 ///|
@@ -488,6 +533,9 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         // Mid-word zsh never treats `(` as an operator; the group was counted
         // above and already became word content.
         false
+      } else if self.dialect is Zsh && c == '<' && self.isnumglob_at() {
+        // A numeric glob, not a redirection: `echo <1->`.
+        false
       } else {
         is_meta(c) && !((c == '<' || c == '>') && self.peek_at(1) == Some('('))
       }
@@ -550,6 +598,10 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         self.advance(2)
         flush_lit(parts, lit)
         parts.push(ProcSub(dir, self.sub_seq("process substitution")))
+      }
+      '<' if self.dialect is Zsh && self.isnumglob_at() => {
+        flush_lit(parts, lit)
+        parts.push(Glob(self.read_numeric_glob()))
       }
       '+' | '@' | '!' if self.peek_at(1) == Some('(') => {
         let g = self.read_extglob()
