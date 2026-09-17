@@ -1,16 +1,24 @@
 ///|
-/// shaudit — audit a bash command line without running it.
+/// shaudit — report what a shell command touches. No verdicts.
 ///
-///   shaudit 'rm -rf /'            full report (JSON)
-///   shaudit --impact 'make -j8'   only the blast radius
-///   shaudit --shadow 'cat <<EOF'  dump the syntax tree
-///   shaudit --scan "$(cat f.sh)"  one line: parse status + issue count
-///   shaudit --bench=2000          timing loop
-fn main {
+/// Input: a command line, from argv or from stdin.
+/// Output: one JSON object on stdout (see `lib/status.mbt` for the shape).
+///
+///   shaudit 'rm -rf build/'          analyse the arguments
+///   shaudit < script.sh              analyse stdin (preferred: no argv limits,
+///                                    no shell re-quoting of the command)
+///   shaudit --pretty 'make -j8'      indent the JSON for humans
+///   shaudit --shadow '<cmd>'         dump the syntax tree
+///   shaudit --scan '<cmd>'           one line: parse status and issue count
+///   shaudit --bench=2000             timing loop
+///
+/// Exit codes describe this program, never the command it was given: 0 when a
+/// report was produced, non-zero when the tool itself could not run.
+async fn main {
   let argv = @env.args()
   let mut shadow = false
   let mut scan = false
-  let mut impact_only = false
+  let mut pretty = false
   let mut bench = 0
   let rest : Array[String] = []
   let mut i = 0
@@ -28,8 +36,8 @@ fn main {
       scan = true
       continue
     }
-    if a == "--impact" {
-      impact_only = true
+    if a == "--pretty" {
+      pretty = true
       continue
     }
     if a == "--bench" {
@@ -49,13 +57,19 @@ fn main {
     bench_corpus(bench)
     return
   }
-  if rest.length() == 0 {
-    println(
-      "usage: shaudit [--shadow|--impact|--scan|--bench=N] [-c] <command>",
-    )
+  let src = if rest.length() > 0 {
+    rest.join(" ")
+  } else {
+    // stdin: the whole script, verbatim. Callers should prefer this over argv:
+    // it has no length limit and the command is not re-quoted by a shell on
+    // the way in.
+    @stdio.stdin.read_all().text()
+  }
+  if src.trim().length() == 0 {
+    println("usage: shaudit [--pretty|--shadow|--scan|--bench=N] [<command>]")
+    println("       without <command>, the command is read from stdin")
     return
   }
-  let src = rest.join(" ")
   if shadow {
     let (seq, errors) = @lib.parse(src)
     println(@json.to_json(seq).stringify(indent=2))
@@ -64,24 +78,21 @@ fn main {
     }
     return
   }
-  let report = @lib.check(src, @lib.AuditConfig::default())
-  if impact_only {
-    println(@json.to_json(report.impact).stringify(indent=2))
-    return
-  }
+  let report = @lib.analyze(src)
   if scan {
     // One machine-readable line for tools/corpus/run.sh, then one line per
     // issue. The harness keys on the message only, so keep "issue: <message>"
     // exact and put the location after it.
     println(
-      "status=\{Repr(report.status)} issues=\{report.issues.length()} findings=\{report.findings.length()}",
+      "status=\{Repr(report.status)} issues=\{report.issues.length()} effects=\{report.impact.effects.length()}",
     )
     for issue in report.issues {
       println("issue: \{issue.message} (line \{issue.line})")
     }
     return
   }
-  println(@json.to_json(report).stringify(indent=2))
+  let indent = if pretty { 2 } else { 0 }
+  println(@json.to_json(report).stringify(indent~))
 }
 
 ///|
@@ -109,16 +120,16 @@ fn bench_corpus(rounds : Int) -> Unit {
     "tar xzf pkg.tar.gz -C /tmp && ls /tmp/pkg", "case $1 in a) echo one;; b) echo two;;& *) echo other;; esac",
   ]
   let t0 = @env.now()
-  let mut findings = 0
+  let mut effects = 0
   for _ in 0..<rounds {
     for src in corpus {
-      findings += @lib.check(src, @lib.AuditConfig::default()).findings.length()
+      effects += @lib.analyze(src).impact.effects.length()
     }
   }
   let t1 = @env.now()
   let n = rounds * corpus.length()
   let ms = (t1 - t0).to_int()
   println(
-    "parsed \{n} commands in \{ms} ms  (\{ms * 1000 / n} us/cmd, \{findings} findings)",
+    "parsed \{n} commands in \{ms} ms  (\{ms * 1000 / n} us/cmd, \{effects} effects)",
   )
 }

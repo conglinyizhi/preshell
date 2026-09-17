@@ -49,12 +49,12 @@ test "unclosed constructs are not silently accepted" {
     "case x in a) echo y", "f() { echo x;", "echo $(date",
   ]
   for src in cases {
-    let r = check(src, AuditConfig::default())
+    let r = analyze(src)
     if r.status is Complete {
       fail("accepted an unclosed construct: \{src}")
     }
-    if r.findings.length() == 0 {
-      fail("no finding for an unclosed construct: \{src}")
+    if r.issues.length() == 0 {
+      fail("no issue reported for an unclosed construct: \{src}")
     }
   }
 }

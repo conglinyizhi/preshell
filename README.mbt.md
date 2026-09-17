@@ -1,90 +1,116 @@
 # shaudit
 
-静态 bash 指令审核器。**只解析，不执行。**
+A shell command *analyzer*, not an approver.
 
-给一段 bash 命令文本，它回答两件事：
+Give it a command line and it tells you **what that command touches**: which
+programs run, which paths are read, written or removed, what leaves the machine,
+and where it could not tell. That is the entire output.
 
-- 这段命令**会做什么**：启动了哪些程序、读写删除哪些路径、连了哪里
-- 这段命令**该不该放行**：按策略给出 Allow / Ask / Deny
+It does not decide whether any of that is acceptable. There is no allowlist, no
+policy, and no verdict in here, because "should this run" depends on context the
+tool does not have (which sandbox, which user, which session) and belongs to
+whoever asked. For what a caller does with the answer, see
+[`docs/example-policy.md`](docs/example-policy.md).
 
-它不运行命令，不发网络请求，不读文件内容。用完即走，单条命令微秒级。
+It is a **standalone tool, not a library**: invoke it as a subprocess and read
+JSON. Callers in any language can use it without linking anything in, and the
+GPL stays on this side of the process boundary.
 
-## 它明确不是
+## What it is not
 
-- **不是沙箱**。它不拦任何东西，只给判断。真正的护栏在执行侧。
-- **不是 linter**。它不关心代码风格，只关心影响面。
-- **不保证 100% 保真**。bash 的语义里有一部分静态不可判定（`eval $X`、
-  `$CMD`、`base64 -d | sh`）。对这部分它的回答是「不知道」，不是猜。
+- **Not a sandbox.** It blocks nothing. The real guard is wherever the command
+  actually runs.
+- **Not a policy engine.** No allow/deny, no roots to compare against.
+- **Not a linter.** It does not care about style, only about reach.
+- **Not 100% faithful.** Part of shell semantics is not statically decidable
+  (`eval $X`, `$CMD`, `base64 -d | sh`). For those the answer is "unknown",
+  never a guess.
 
-## 三种结果状态，先看状态再看判决
-
-```text
-status: Complete     解析到底，下面的 risk 有效
-status: Unsupported  这是合法 bash，但本解析器还没覆盖；审计不完整，risk 最低为 Ask
-status: Invalid      有证据说明 bash 自己也会拒绝；risk 为 null，我们弃权
-```
-
-`risk: null` 是**弃权**，不是放行。解析不了的东西没被审计过，调用方应该把 bash
-自己的报错转出去，而不是把「反正跑不起来」当成无害——正是这个推断被设计成不可用。
-
-`Unsupported` 走保守下限：一棵残缺的语法树不允许给出 Allow。
-
-## 用法
+## Usage
 
 ```bash
-shaudit 'rm -rf /'                 # 完整报告（JSON）
-shaudit --impact 'make -j8'        # 只要影响面
-shaudit --shadow 'cat <<EOF'       # 打印语法树
-shaudit --scan "$(cat script.sh)"  # 一行：解析状态 + 问题数
-shaudit --bench=2000               # 压测
+shaudit < script.sh              # preferred: no argv limits, no re-quoting
+shaudit 'rm -rf build/'          # or pass the command as arguments
+shaudit --pretty 'make -j8'      # indented JSON for humans
+shaudit --shadow 'cat <<EOF'     # dump the syntax tree
+shaudit --scan '<cmd>'           # one line: parse status, issue count, effects
+shaudit --bench=2000             # timing loop
 ```
 
-报告形状：
+Exit codes describe the tool, never the command: `0` when a report was produced.
+There is no exit code that means "dangerous".
+
+## Output
 
 ```json
 {
+  "version": 1,
   "status": "Complete",
-  "risk": "Ask",
-  "findings": [{"rule": "write-outside", "risk": "Ask", "detail": "…", "line": 1}],
-  "issues": [],
   "impact": {
-    "effects": [{"kind": "Write", "target": "/etc/motd", "dynamic": false, "line": 1}],
-    "write_roots": ["/etc"],
-    "uncertain": false
-  }
+    "effects": [
+      { "kind": "Exec", "target": "cd", "dynamic": false, "line": 1 },
+      { "kind": "Delete", "target": "/tmp/x", "dynamic": false, "line": 1 }
+    ],
+    "write_roots": ["/tmp"],
+    "uncertain": false,
+    "cwd": "/tmp"
+  },
+  "issues": []
 }
 ```
 
-`dynamic` 和 `uncertain` 不是噪音，是这套东西唯一能保证诚实的地方：`$DIR/*.log`
-这种带洞的目标，只能标成「不确定集合」，不能给一个看起来干净的假集合。
-调用方信任这个 JSON 之前，先看这两个字段。
+Two fields carry the honesty of the whole thing, and a caller that ignores them
+will misread the output:
 
-## 证据而不是品味
+- `dynamic` on an effect means the target is not a closed set (it has a hole or
+  a glob). `rm -rf $DIR/*` cannot be reported as one file.
+- `uncertain` on the impact means the same for the report as a whole, and it is
+  forced when the parse was incomplete. **An incomplete trace is not a smaller
+  answer, it is a different one**: reading "no writes reported" as "writes
+  nothing" is the mistake this field exists to prevent.
 
-`Invalid` 这个状态是有门槛的：声称「bash 也会拒绝」等于对一个我们没运行的程序下断言，
-判错就意味着放行一条真能执行的命令。所以它需要证据，证据来自差分：
+`cwd` is the directory that relative paths in the report are relative to, when
+the command line itself changed into one (`cd /tmp && rm x` reports `/tmp/x`).
+`null` means no `cd` was modelled, so relative paths are relative to wherever
+the command runs — which the caller knows and the tool does not.
+
+## Status
+
+- `Complete` — parsed end to end.
+- `Unsupported` — valid shell that the parser does not handle yet. The answer
+  above is therefore incomplete, and `uncertain` is forced to true.
+- `Invalid` — there is evidence that bash would refuse this command too, so
+  nothing would execute. Only claimed with evidence; see below.
+
+## Evidence rather than taste
+
+Claiming "bash would reject this" is a statement about a program we are not
+running, and a false claim turns an unparsed command into an empty report. So
+`Invalid` needs evidence, and the evidence comes from a differential:
 
 ```bash
-tools/corpus/run.sh [bash 源码 tests 目录]
+tools/corpus/run.sh [bash source tests dir]
 ```
 
-把本解析器与 `bash -n` 在 bash 自带语法语料上逐文件对比，产出四象限表，并强制一条不变量：
+It compares this parser with `bash -n` over bash's own syntax corpus, prints a
+four-quadrant table, and enforces one invariant:
 
-> 凡是被 `lib/status.mbt` 列为已佐证的报错原文，在「我们的缺口」象限必须出现 0 次。
+> any message listed as corroborated in `lib/status.mbt` must appear **zero**
+> times in the quadrant where bash parses the input and we do not.
 
-这条不变量已经被实测打脸过一次：`unterminated here-document` 同时出现在两个象限，
-所以它**不能**按原文升级——同一个文件里，bash 能解析而我们报错的情形是存在的。
-按语义猜哪条能升级，正是这套装置存在的意义所反对的做法。
+The corpus bounds the strength of that guarantee, which is why an empty list is
+a perfectly good state: it means "never claim it".
 
-## 构建与测试
+## Build and test
 
 ```bash
-moon test --target native          # 单元测试
+moon test --target native
 moon build --release --target native
 moon fmt && moon check --target native
 ```
 
-## 许可
+## License
 
-GPL-3.0-or-later。实现是原创重写，但设计上大量参考了 bash 源码（`parse.y` 的
-词法与文法）与 `bash -n` 的行为，见 LICENSE。
+GPL-3.0-or-later. The implementation is an original rewrite, but it was written
+with heavy reference to bash's own source (`parse.y` for the grammar and lexer)
+and to `bash -n` for behaviour. See LICENSE.

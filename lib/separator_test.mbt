@@ -8,7 +8,7 @@
 /// then over-corrected and rejected valid input (gaps went 12 -> 81), so both
 /// directions are locked down here.
 fn status_of(src : String) -> ParseStatus {
-  check(src, AuditConfig::default()).status
+  analyze(src).status
 }
 
 ///|

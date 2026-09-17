@@ -2,6 +2,8 @@ import {
   "conglinyizhi/shaudit/lib",
   "moonbitlang/core/json",
   "moonbitlang/core/env",
+  "moonbitlang/async",
+  "moonbitlang/async/stdio",
 }
 
 supported_targets = "native"

@@ -27,9 +27,14 @@ pub(all) struct Impact {
   /// Directories that would be modified, normalized. This is the blast radius
   /// a caller can actually lock.
   write_roots : Array[String]
-  /// True when any exec/write/delete/spawn target is not a closed set, i.e.
-  /// the blast radius cannot be bounded by this summary alone.
+  /// True when any exec/write/delete/spawn target is not a closed set,
+  /// i.e. the blast radius cannot be bounded by this summary alone.
   uncertain : Bool
+  /// The directory that relative paths in this report are relative to, when
+  /// the command line itself changed into one. None means "no cwd change was
+  /// modelled": relative paths are then relative to whatever directory the
+  /// command runs in, which is the caller's knowledge, not this tool's.
+  cwd : String?
 } derive(Debug, Eq, ToJson)
 
 ///|
@@ -38,16 +43,35 @@ struct Collector {
   roots : Array[String]
   mut uncertain : Bool
   mut depth : Int
+  /// Directory the command line itself moved into, or None when it has not
+  /// moved or could not be modelled. See cwd.mbt.
+  mut cwd : String?
 }
 
 ///|
 pub fn impact(seq : Seq) -> Impact {
-  let c : Collector = { items: [], roots: [], uncertain: false, depth: 0, }
+  let c : Collector = {
+    items: [],
+    roots: [],
+    uncertain: false,
+    depth: 0,
+    cwd: None,
+  }
   c.walk_seq(seq)
-  { effects: c.items, write_roots: c.roots, uncertain: c.uncertain, }
+  {
+    effects: c.items,
+    write_roots: c.roots,
+    uncertain: c.uncertain,
+    cwd: c.cwd,
+  }
 }
 
 ///|
+
+///|
+/// Resolve path-shaped targets through the directories the command line itself
+/// changed into, so that `cd /tmp && rm -rf x` reports `/tmp/x` and not a bare
+/// `x` the caller has to guess about.
 fn Collector::push(
   self : Collector,
   kind : EffectKind,
@@ -55,7 +79,11 @@ fn Collector::push(
   dynamic : Bool,
   line : Int,
 ) -> Unit {
-  self.items.push({ kind, target, dynamic, line, })
+  let resolved = match kind {
+    Read | Write | Delete => self.resolve(target)
+    _ => target
+  }
+  self.items.push({ kind, target: resolved, dynamic, line, })
   if dynamic &&
     (
       kind is Write ||
@@ -67,29 +95,9 @@ fn Collector::push(
     self.uncertain = true
   }
   if kind is Write || kind is Delete {
-    let d = parent_dir(target)
+    let d = parent_dir(resolved)
     if !self.roots.contains(d) {
       self.roots.push(d)
-    }
-  }
-}
-
-///|
-/// The directory a path lives in, normalized. `build/out.o` -> `build`,
-/// `a/b/` -> `a`, `x` -> `.`
-pub fn parent_dir(p : String) -> String {
-  let norm = normalize_path(p)
-  if p.has_suffix("/") {
-    if norm == "" {
-      "/"
-    } else {
-      norm
-    }
-  } else {
-    match norm.rev_find("/") {
-      Some(0) => "/"
-      Some(i) => norm.unsafe_substring(start=0, end=i)
-      None => "."
     }
   }
 }
@@ -103,7 +111,11 @@ fn Collector::walk_seq(self : Collector, seq : Seq) -> Unit {
 
 ///|
 fn Collector::walk_pipeline(self : Collector, p : Pipeline) -> Unit {
+  // Each element of a multi-command pipeline runs in its own subshell, so a
+  // `cd` inside one of them does not move the next one.
+  let shared = p.cmds.length() == 1
   for i, c in p.cmds {
+    let saved = self.saved_cwd()
     self.walk_cmd(c)
     match c {
       Cmd::Simple(s) =>
@@ -117,14 +129,9 @@ fn Collector::walk_pipeline(self : Collector, p : Pipeline) -> Unit {
         }
       _ => ()
     }
-  }
-}
-
-///|
-fn line_of(s : SimpleCmd) -> Int {
-  match s.words {
-    [w, ..] => w.line
-    _ => 0
+    if !shared {
+      self.restore_cwd(saved)
+    }
   }
 }
 
@@ -132,7 +139,13 @@ fn line_of(s : SimpleCmd) -> Int {
 fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
   match cmd {
     Cmd::Simple(s) => self.walk_simple(s)
-    Cmd::Subshell(seq) | Cmd::Group(seq) => self.walk_seq(seq)
+    Cmd::Subshell(seq) => {
+      // `(cd /tmp; rm x)` moves only the subshell's own directory.
+      let saved = self.saved_cwd()
+      self.walk_seq(seq)
+      self.restore_cwd(saved)
+    }
+    Cmd::Group(seq) => self.walk_seq(seq)
     Cmd::If(cond~, then_~, elifs~, else_~) => {
       self.walk_seq(cond)
       self.walk_seq(then_)
@@ -197,7 +210,13 @@ fn Collector::scan_assign_part(
   line : Int,
 ) -> Unit {
   match p {
-    CmdSub(seq) | ProcSub(_, seq) => self.walk_seq(seq)
+    CmdSub(seq) | ProcSub(_, seq) => {
+      // `x=$(cd /tmp; rm y)` moves only the substitution's directory: the
+      // command after it is still relative to where we were.
+      let saved = self.saved_cwd()
+      self.walk_seq(seq)
+      self.restore_cwd(saved)
+    }
     Param(_) | ArithSub(_) => self.push(Unknown, "${" + name + "}", true, line)
     DQuote(inner) | Subscript(inner) =>
       for q in inner {
@@ -270,8 +289,12 @@ fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
 ///|
 /// Walk a word: command substitutions inside it are real commands.
 fn Collector::walk_word(self : Collector, w : Word) -> Unit {
+  // A command substitution is its own process: a `cd` inside it is gone by the
+  // time the surrounding command line continues.
   for seq in w.subcommands() {
+    let saved = self.saved_cwd()
     self.walk_seq(seq)
+    self.restore_cwd(saved)
   }
 }
 
@@ -413,6 +436,25 @@ fn Collector::classify(
         }
       }
     }
+    "cd" => {
+      // `cd` is not an effect on a file, it is a change to how every later
+      // relative path in this command line reads. Track it, and say so when
+      // the destination cannot be worked out.
+      let dest : String? = match operands {
+        [first, ..] =>
+          match first {
+            (t, false) =>
+              if t == "-" || t == "~" || t.has_prefix("~") {
+                None
+              } else {
+                Some(t)
+              }
+            (_, true) => None
+          }
+        [] => None
+      }
+      self.change_dir(dest, line)
+    }
     "eval" => self.recurse_static(s, n, line)
     "make"
     | "cmake"
@@ -481,9 +523,12 @@ fn Collector::recurse_static(
   match eval_script(s, n) {
     Some(script) => {
       let (seq, _) = parse(script)
+      // `bash -c "cd /tmp; rm x"` runs in its own process.
+      let saved = self.saved_cwd()
       self.depth += 1
       self.walk_seq(seq)
       self.depth -= 1
+      self.restore_cwd(saved)
     }
     None => self.push(Spawn, n, true, line)
   }

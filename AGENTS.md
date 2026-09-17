@@ -1,62 +1,74 @@
 # shaudit 项目规约（给 agent）
 
-静态 bash 指令审核器：只解析、不执行。主语言 MoonBit，native target。
+shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit，native target。
+
+## 这个工具是什么
+
+输入一段 shell 命令，输出它**碰了什么**：跑了哪些程序、读/写/删了哪些路径、
+什么出去了、哪里看不出来。输出里没有「允许/拒绝」。
+
+「该不该跑」取决于调用方的上下文（哪个沙箱、哪个用户、哪个会话），不属于这里。
+判断层的示例写在 `docs/example-policy.md`，那是**调用方侧**的代码。
+
+交付形态是**独立工具**：别人起子进程读 JSON，不链接进来。GPL 因此停在进程边界上，
+这也是不做成库的原因。所以对外契约是 **CLI + JSON schema**，不是 `pub fn` 的多少。
 
 ## 目录
 
-- `lib/` — 核心库（纯解析 + 判定，无副作用）
+- `lib/` — 核心库（纯函数：不读文件系统、不起子进程、不发网络请求）
   - `ast.mbt` 语法树；`word.mbt` word 分类；`lexer.mbt` 词法；`parser.mbt` 递归下降
-  - `audit.mbt` 规则引擎；`effects.mbt` 影响面提取；`status.mbt` 解析状态与对外 Report
-- `cmd/shaudit/` — CLI，唯一会碰进程/环境的地方
+  - `subscript.mbt` 数组下标；`cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化
+  - `effects.mbt` 影响面提取（对外的核心答案）；`facts.mbt` 命令分类等事实
+  - `status.mbt` 解析状态与 Report
+- `cmd/shaudit/` — CLI：argv 或 stdin 进，JSON 出
 - `tools/corpus/` — 与 `bash -n` 的差分证据生成器
+- `docs/example-policy.md` — 调用方怎么用这份 JSON（不是本工具的一部分）
 
-## 三条不可退让的设计不变量
+## 不可退让的约束
 
-1. **`Invalid` 需要证据**。声称「bash 也会拒绝」是对一个没运行的程序下断言，判错就是放行。
-   新原文只有在 `tools/corpus/run.sh` 显示它落在「两边都报错」象限、且在「我们的缺口」
-   象限出现 0 次之后，才能加进 `corroborated_syntax_messages()`。默认一律 `Gap`。
-2. **`risk: null` 是弃权，不是放行**。调用方拿到 null 应该转发 bash 自己的报错。
-   任何把「反正跑不起来」当无害的推断都要挡掉。
-3. **带洞的必须标出来**。`Param`/`CmdSub`/`Glob`/`Tilde` 一律 `dynamic: true`；
-   `Unsupported` 状态下 `uncertain` 强制为 true。宁可让调用方多处理一个不确定，
-   也不要给一个看起来干净的假集合。
+1. **只报事实，不下判断**。不引入 allowlist、不比较「沙箱根目录」、不输出
+   allow/ask/deny。要判定就让调用方拿 JSON 自己判。
+2. **带洞的必须标出来**。`Param`/`CmdSub`/`Glob`/`Tilde` 产生的目标一律
+   `dynamic: true`；`Unsupported`/`Invalid` 状态下 `uncertain` 强制为 true。
+   宁可让调用方多处理一个不确定，也不要给一个看起来干净的假集合。
+3. **`Invalid` 需要证据**。声称「bash 也会拒绝」既是对没运行的程序下断言，
+   又会被读成「反正跑不起来」= 无害。默认一律 `Gap`，只有
+   `tools/corpus/run.sh` 证明它落在「两边都报错」象限且从未出现在「我们的缺口」
+   象限时，才能加进 `corroborated_syntax_messages()`。
+4. **相对路径要交代清楚**。命令内部改过工作目录时（`cd /tmp && rm x`），
+   影响面里必须是 `/tmp/x`，并在 `impact.cwd` 里说明基准；模型不出来就标 uncertain。
+   作用域按 shell 走：子 shell、命令替换、多命令管道的每个元素各有一份。
 
-## 改解析器时的顺序
+## 改代码时的顺序
 
-1. 先加语料或最小复现（`tools/corpus/` 或 `*_test.mbt`），再改代码
+1. 先加语料或最小复现（`tools/corpus/` 或 `*_test.mbt`），再改
 2. `moon test --target native` 全绿
-3. `tools/corpus/run.sh` 看四象限有没有移动，尤其是「我们太宽松」那一格
-4. 改完跑 `moon fmt` + `moon check --target native`
+3. `tools/corpus/run.sh` 看四象限有没有移动，**尤其是「我们太宽松」那一格**
+4. `moon fmt` + `moon check --target native`
 
 收紧语法规则时默认会让缺口变大：实测一次过度修正让缺口从 12 涨到 81。
-所以改完必须同时看两个格子的变化，并把合法写法钉进回归护栏
-（`separator_test.mbt` 的 "valid statements stay complete" 就是这种护栏）。
+所以改完必须同时看两个格子，并把合法写法钉进回归护栏。
 
 ## 已知缺口（5 个文件）
 
 已完成：分隔符规则、声明类内建赋值、命令词前重定向、数组下标（含引号）、
 复合命令重定向、空命令、嵌套算术、here-doc × 命令替换、未闭合构造、
-`<<-` 定界符去 tab。
+`<<-` 定界符去 tab、工作目录跟踪。
 
-仍然缺的（都已是边角）：`comsub-posix6`（数组赋值里嵌命令替换）、`extglob8`
-（模式开关）、`func5`（`<(:) ()` 这种 bash 自己也拒绝的函数名）、
+仍然缺的（都是边角）：`comsub-posix6`、`extglob8`（模式开关）、`func5`、
 `posix2syntax`、`vredir2`。
 
 ## 「我们太宽松」那一格：3 个，全是 oracle 局限
 
-- `extglob4.sub` / `extglob6.sub`：`echo @(?|.?)` 这类模式在 `shopt -s extglob`
-  下合法，而 `bash -n` 不执行 shopt，所以它拒。这是 oracle 的局限
+- `extglob4.sub` / `extglob6.sub`：`echo @(?.|.?)` 这类模式在 `shopt -s extglob`
+  下合法，而 `bash -n` 不执行 shopt 所以它拒。这是 oracle 的局限
 - `exportfunc1.sub`：超过 bash 的 here-doc 数量上限（bash 实现限制）
-
-本轮修掉的真缺陷是「`(` 出现在非命令位置被当 subshell 接受」和
-「未闭合构造被静默接受」——两者都会给出假 Allow 和编造的影响面。
 
 ## 定位失败时怎么查
 
-- issue 现在带行号：`shaudit --scan "$(cat f.sh)"` 每条都带 `(line N)`
+- issue 带行号：`shaudit --scan "$(cat f.sh)"` 每条都带 `(line N)`
 - 差分给四象限和报错原文分布：`tools/corpus/run.sh`
-- 按行二分对多行构造（here-doc、多行引号）会误导：用「完整构造的切片」
-  或者直接看行号，不要按行切
+- 按行二分对多行构造（here-doc、多行引号）会误导：用完整构造的切片，或直接看行号
 
 ## MoonBit 坑
 
@@ -64,7 +76,6 @@
 按码元切片 `s[a:b]` 静默改边界等）已合入 `clyzhi-moonwell-spring` skill 的
 「静默错解」一节，动手前先读那一节。
 
-## 边界
-
-核心库保持纯函数：不读文件系统、不起子进程、不发网络请求。
-`bash -n` 只在开发期由 `tools/corpus` 调用，不进 `lib/`。
+另外本项目自己的教训：**别在 JS/node 脚本里拼带反引号的 MoonBit 代码做批量替换**，
+转义会咬人；改动落成文件再拼。还有 `Array<T>` 是错的，MoonBit 是 `Array[T]`
+（我在这个项目里写错三次）。

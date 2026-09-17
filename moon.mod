@@ -13,3 +13,7 @@ description = "Static bash command auditor: parse-only, never executes. Reports 
 repository = "https://github.com/conglinyizhi/shaudit"
 
 preferred_target = "native"
+
+import {
+  "moonbitlang/async@0.21.3",
+}

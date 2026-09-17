@@ -3,7 +3,7 @@
 /// because a corpus run showed it failing on valid bash, and the shape of the
 /// parse matters as much as the accept/reject answer.
 fn status_of_construct(src : String) -> ParseStatus {
-  check(src, AuditConfig::default()).status
+  analyze(src).status
 }
 
 ///|
@@ -38,15 +38,12 @@ test "a subscript is a subscript, and a bracket without `=` stays a glob" {
 
 ///|
 test "a hole inside a subscript is not a clean result" {
-  let r = check("arr[$i]=1", AuditConfig::default())
+  let r = analyze("arr[$i]=1")
   // The hole is in the target, so the effect itself is uncertain.
   debug_inspect(r.impact.uncertain, content="true")
   debug_inspect(r.impact.effects[0].kind, content="Unknown")
   // A literal subscript stays clean.
-  debug_inspect(
-    check("arr[0]=1", AuditConfig::default()).impact.uncertain,
-    content="false",
-  )
+  debug_inspect(analyze("arr[0]=1").impact.uncertain, content="false")
 }
 
 ///|
@@ -104,7 +101,7 @@ test "an unclosed bracket stays on its own line" {
 ///|
 test "issues carry the line they happened on" {
   // 没有结尾换行：EOF 落在第 2 行，也就是命令替换开始的那一行。
-  let r = check("echo a\necho $(date", AuditConfig::default())
+  let r = analyze("echo a\necho $(date")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].line, content="2")
 }
