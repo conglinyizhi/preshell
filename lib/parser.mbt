@@ -232,7 +232,60 @@ fn empty_word(line : Int) -> Word {
 }
 
 ///|
+/// Any compound command may be followed by its own redirections; the simple
+/// command case handles its redirects inline instead.
 fn Parser::parse_command(self : Parser) -> Cmd {
+  let base = self.parse_command_base()
+  match base {
+    Cmd::Simple(_) => base
+    _ => {
+      let redirects = self.parse_redirect_list()
+      if redirects.length() == 0 {
+        base
+      } else {
+        Cmd::Redirected(inner=base, redirects~)
+      }
+    }
+  }
+}
+
+///|
+fn Parser::parse_redirect_list(self : Parser) -> Array[Redirect] {
+  let out : Array[Redirect] = []
+  for ;; {
+    match self.cur {
+      TOp(op) =>
+        if is_redirect_op(op) {
+          out.push(self.parse_redirect(None))
+          continue
+        } else {
+          break
+        }
+      TWord(w) =>
+        // `( ... ) 2>/dev/null`: the fd prefix is glued to the operator.
+        if self.peek_is_redirect() && self.fd_adjacent(w) {
+          match w.plain() {
+            Some(digits) =>
+              if all_digits(digits) {
+                self.advance()
+                out.push(self.parse_redirect(Some(parse_fd(digits))))
+                continue
+              } else {
+                break
+              }
+            None => break
+          }
+        } else {
+          break
+        }
+      _ => break
+    }
+  }
+  out
+}
+
+///|
+fn Parser::parse_command_base(self : Parser) -> Cmd {
   self.skip_newlines()
   match self.cur {
     TOp("(") => {
@@ -246,10 +299,23 @@ fn Parser::parse_command(self : Parser) -> Cmd {
     TOp("((") => {
       let start = self.cur_start + 2
       self.advance()
+      // `((a)) + ((b))`, and a nested `((` inside the condition, are all one
+      // command: count depth instead of stopping at the first `))`.
+      let mut depth = 1
       for ;; {
         match self.cur {
           TEof => break
-          TOp("))") => break
+          TOp("((") => {
+            depth += 1
+            self.advance()
+          }
+          TOp("))") => {
+            depth -= 1
+            if depth == 0 {
+              break
+            }
+            self.advance()
+          }
           _ => self.advance()
         }
       }
@@ -291,8 +357,29 @@ fn Parser::parse_command(self : Parser) -> Cmd {
       // Redirections may precede the command word: `< /dev/null foo bar`.
       self.parse_simple()
     _ => {
-      self.advance()
-      Cmd::Simple({ assigns: [], words: [], redirects: [], })
+      // A command position holding nothing: `!;`, `!& echo`. The separator
+      // belongs to the caller, so do not eat it here.
+      let empty = Cmd::Simple({ assigns: [], words: [], redirects: [], })
+      match self.cur {
+        TEof | TNewline => empty
+        TOp(op) =>
+          if is_closer(op) ||
+            op == ";" ||
+            op == "&" ||
+            op == "&&" ||
+            op == "||" ||
+            op == "|" ||
+            op == "|&" {
+            empty
+          } else {
+            self.advance()
+            empty
+          }
+        _ => {
+          self.advance()
+          empty
+        }
+      }
     }
   }
 }
@@ -380,12 +467,23 @@ fn Parser::parse_for(self : Parser) -> Cmd {
   }
   let words : Array[Word] = []
   if self.cur is TOp("((") {
-    // for ((init; cond; step))
+    // for ((init; cond; step)) -- the condition may itself contain (( ))
     self.advance()
+    let mut depth = 1
     for ;; {
       match self.cur {
         TEof => break
-        TOp("))") => break
+        TOp("((") => {
+          depth += 1
+          self.advance()
+        }
+        TOp("))") => {
+          depth -= 1
+          if depth == 0 {
+            break
+          }
+          self.advance()
+        }
         _ => self.advance()
       }
     }
@@ -705,11 +803,45 @@ fn is_valid_name(s : String) -> Bool {
 ///|
 /// `NAME=value` and `NAME+=value` are assignments only at the head of a
 /// simple command; `echo a=1` is just two words.
-pub fn split_assignment(w : Word) -> (String, Bool, Array[WordPart])? {
+
+///|
+/// `NAME=value`, `NAME+=value`, `NAME[subscript]=value`: all three are
+/// assignment words in bash, and the subscript form is where `a[$i]=x` hides a
+/// hole in the *target* rather than the value.
+pub fn split_assignment(
+  w : Word,
+) -> (String, Bool, Array[WordPart], Array[WordPart])? {
   match w.parts {
     [Lit(first), .. rest] =>
       match first.find("=") {
-        None => None
+        None =>
+          // `NAME[subscript]=value` / `NAME[subscript]+=value`
+          match w.parts {
+            [Lit(name), Subscript(index), Lit(rhs), .. tail] =>
+              if is_valid_name(name) {
+                let mut append = false
+                let mut body = rhs
+                if body.has_prefix("+=") {
+                  append = true
+                  body = body.unsafe_substring(start=2, end=body.length())
+                } else if body.has_prefix("=") {
+                  body = body.unsafe_substring(start=1, end=body.length())
+                } else {
+                  return None
+                }
+                let value : Array[WordPart] = []
+                if body.length() > 0 {
+                  value.push(Lit(body))
+                }
+                for p in tail {
+                  value.push(p)
+                }
+                Some((name, append, index, value))
+              } else {
+                None
+              }
+            _ => None
+          }
         Some(i) => {
           let mut name = first.unsafe_substring(start=0, end=i)
           let mut append = false
@@ -728,7 +860,7 @@ pub fn split_assignment(w : Word) -> (String, Bool, Array[WordPart])? {
           for p in rest {
             value.push(p)
           }
-          Some((name, append, value))
+          Some((name, append, [], value))
         }
       }
     _ => None
@@ -764,7 +896,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
         // argument list of a declaration builtin.
         if assign_ok(words) {
           match split_assignment(w) {
-            Some((name, append, value)) => {
+            Some((name, append, index, value)) => {
               self.advance()
               // `a=(1 2 3)` and `a=([k]=v)` are array assignments: the value
               // is a word list, and its holes still have to be seen.
@@ -787,7 +919,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                   }
                 }
               }
-              assigns.push({ name, append, value, })
+              assigns.push({ name, append, index, value, })
               continue
             }
             None => ()

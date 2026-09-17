@@ -20,7 +20,9 @@ fn write_static(p : WordPart, sb : StringBuilder) -> Bool {
       sb.write_string(s)
       true
     }
-    DQuote(inner) => {
+    DQuote(inner) | Subscript(inner) => {
+      // A subscript is part of the name being assigned to, so it is static
+      // exactly when its own parts are.
       for q in inner {
         if !write_static(q, sb) {
           return false
@@ -39,27 +41,35 @@ fn write_static(p : WordPart, sb : StringBuilder) -> Bool {
 pub fn Word::literal_text(self : Word) -> String {
   let sb = StringBuilder()
   for p in self.parts {
-    match p {
-      Lit(s) | SQuote(s) | Glob(s) | Tilde(s) => sb.write_string(s)
-      Param(n) => {
-        sb.write_char('$')
-        sb.write_string(n)
-      }
-      CmdSub(_) => sb.write_string("$()")
-      ArithSub(_) => sb.write_string("$(())")
-      ProcSub(_) => sb.write_string("()")
-      DQuote(inner) =>
-        for q in inner {
-          match q {
-            Lit(s) | SQuote(s) => sb.write_string(s)
-            Param(n) => {
-              sb.write_char('$')
-              sb.write_string(n)
-            }
-            _ => sb.write_string("?")
-          }
-        }
+    sb.write_string(part_text(p))
+  }
+  sb.to_string()
+}
+
+///|
+/// Render one part roughly the way it was written, for reporting.
+fn part_text(p : WordPart) -> String {
+  let sb = StringBuilder()
+  match p {
+    Lit(s) | SQuote(s) | Glob(s) | Tilde(s) => sb.write_string(s)
+    Param(n) => {
+      sb.write_char('$')
+      sb.write_string(n)
     }
+    CmdSub(_) => sb.write_string("$()")
+    ArithSub(_) => sb.write_string("$(())")
+    ProcSub(_) => sb.write_string("()")
+    Subscript(inner) => {
+      sb.write_char('[')
+      for q in inner {
+        sb.write_string(part_text(q))
+      }
+      sb.write_char(']')
+    }
+    DQuote(inner) =>
+      for q in inner {
+        sb.write_string(part_text(q))
+      }
   }
   sb.to_string()
 }
@@ -68,18 +78,7 @@ pub fn Word::literal_text(self : Word) -> String {
 /// True when the shell must fill something in before the word is a value.
 pub fn Word::has_hole(self : Word) -> Bool {
   for p in self.parts {
-    let hit = match p {
-      Param(_) | CmdSub(_) | ArithSub(_) | ProcSub(_) => true
-      DQuote(inner) =>
-        inner.any(fn(q) {
-          match q {
-            Param(_) | CmdSub(_) | ArithSub(_) | ProcSub(_) => true
-            _ => false
-          }
-        })
-      _ => false
-    }
-    if hit {
+    if part_has_hole(p) {
       return true
     }
   }
@@ -87,24 +86,33 @@ pub fn Word::has_hole(self : Word) -> Bool {
 }
 
 ///|
-/// True when the word can match more than one path.
+fn part_has_hole(p : WordPart) -> Bool {
+  match p {
+    Param(_) | CmdSub(_) | ArithSub(_) | ProcSub(_) => true
+    DQuote(inner) | Subscript(inner) => inner.any(part_has_hole)
+    _ => false
+  }
+}
+
+///|
+/// True when the word can match more than one path. A subscript is not a glob:
+/// what sits inside `name[...]` is an index expression, not a pattern.
 pub fn Word::has_glob(self : Word) -> Bool {
   for p in self.parts {
-    match p {
-      Glob(_) => return true
-      DQuote(inner) =>
-        if inner.any(fn(q) {
-            match q {
-              Glob(_) => true
-              _ => false
-            }
-          }) {
-          return true
-        }
-      _ => ()
+    if part_has_glob(p) {
+      return true
     }
   }
   false
+}
+
+///|
+fn part_has_glob(p : WordPart) -> Bool {
+  match p {
+    Glob(_) => true
+    DQuote(inner) | Subscript(inner) => inner.any(part_has_glob)
+    _ => false
+  }
 }
 
 ///|
@@ -131,7 +139,7 @@ pub fn Word::subcommands(self : Word) -> Array[Seq] {
 fn collect_subs(p : WordPart, out : Array[Seq]) -> Unit {
   match p {
     CmdSub(seq) | ProcSub(_, seq) => out.push(seq)
-    DQuote(inner) =>
+    DQuote(inner) | Subscript(inner) =>
       for q in inner {
         collect_subs(q, out)
       }

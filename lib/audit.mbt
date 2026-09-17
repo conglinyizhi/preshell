@@ -172,6 +172,12 @@ fn Auditor::walk_cmd(self : Auditor, cmd : Cmd) -> Unit {
       })
     }
     Cmd::Arith(_) => ()
+    Cmd::Redirected(inner~, redirects~) => {
+      self.walk_cmd(inner)
+      for r in redirects {
+        self.scan_redirect(r)
+      }
+    }
     Cmd::Cond(raw) =>
       if raw.contains("$(") || raw.contains("`") {
         self.add(
@@ -320,6 +326,11 @@ fn command_name(s : SimpleCmd) -> String? {
 fn Auditor::walk_simple(self : Auditor, s : SimpleCmd) -> Unit {
   let name = command_name(s)
   for a in s.assigns {
+    // The subscript is part of the target: `a[$i]=x` carries the hole in the
+    // index, not in the value, and missing it would report a clean result.
+    for p in a.index {
+      self.scan_part(p)
+    }
     for p in a.value {
       self.scan_part(p)
     }

@@ -11,6 +11,7 @@ pub(all) enum WordPart {
   ArithSub(String) // $((...))  -- run-time value
   ProcSub(Char, Seq) // <(...) or >(...)
   Glob(String) // unquoted * ? [...] -- matches many paths
+  Subscript(Array[WordPart]) // name[...] -- array subscript, quotes and all
   Tilde(String) // ~ or ~user
 } derive(Debug, Eq, ToJson)
 
@@ -50,6 +51,9 @@ pub(all) struct Redirect {
 pub(all) struct Assign {
   name : String
   append : Bool
+  /// The subscript parts of `name[...]=value`; empty for a plain assignment.
+  /// `a[$i]=x` carries a hole here, and the audit has to see it.
+  index : Array[WordPart]
   value : Array[WordPart]
 } derive(Debug, Eq, ToJson)
 
@@ -79,6 +83,10 @@ pub(all) enum Cmd {
   FuncDef(name~ : String, body~ : Cmd)
   Arith(String)
   Cond(String) // [[ ... ]] kept as raw text in the spike
+  /// Any compound command may carry its own redirections:
+  /// `( ls ) 2>/dev/null`, `{ echo x; } >&2`, `while ...; done < file`.
+  /// bash spells this as `shell_command redirection_list`.
+  Redirected(inner~ : Cmd, redirects~ : Array[Redirect])
 } derive(Debug, Eq, ToJson)
 
 ///|

@@ -272,6 +272,10 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
           }
         }
       }
+      '[' if self.looks_like_subscript() => {
+        flush_lit(parts, lit)
+        parts.push(Subscript(self.read_subscript()))
+      }
       '*' | '?' | '[' => {
         let g = self.read_glob()
         match g {

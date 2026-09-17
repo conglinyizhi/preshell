@@ -170,6 +170,12 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
         items: [{ pipeline: { negated: false, cmds: [body], }, op: Semi, }],
       })
     Cmd::Arith(_) | Cmd::Cond(_) => ()
+    Cmd::Redirected(inner~, redirects~) => {
+      self.walk_cmd(inner)
+      for r in redirects {
+        self.redirect_effects(r)
+      }
+    }
   }
 }
 
@@ -182,36 +188,63 @@ fn Collector::note_holes(self : Collector, w : Word) -> Unit {
 }
 
 ///|
+/// One part of an assignment: nested commands are real commands, and a hole
+/// anywhere in the assignment (index or value) makes its target uncertain.
+fn Collector::scan_assign_part(
+  self : Collector,
+  name : String,
+  p : WordPart,
+  line : Int,
+) -> Unit {
+  match p {
+    CmdSub(seq) | ProcSub(_, seq) => self.walk_seq(seq)
+    Param(_) | ArithSub(_) => self.push(Unknown, "${" + name + "}", true, line)
+    DQuote(inner) | Subscript(inner) =>
+      for q in inner {
+        self.scan_assign_part(name, q, line)
+      }
+    _ => ()
+  }
+}
+
+///|
+/// One redirection: the target is a path for `>` and `<`, plain data for a
+/// here-document, and its holes always matter.
+fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
+  let line = r.target.line
+  let dyn = r.target.static_text() == None
+  let t = r.target.literal_text()
+  match r.op {
+    ROut | RAppend | RClobber | RInOut =>
+      self.push(Write, if t == "" { "<unknown>" } else { t }, dyn, line)
+    RIn => self.push(Read, t, dyn, line)
+    // A here-document body is data, not a path; only its holes matter.
+    RHereDoc | RHereDocStrip | RHereString =>
+      match r.body {
+        Some(b) =>
+          if b.contains("$(") || b.contains("`") {
+            self.push(Unknown, "here-document body", true, line)
+          }
+        None => ()
+      }
+    _ => ()
+  }
+  self.walk_word(r.target)
+}
+
+///|
 fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
   let line = line_of(s)
   for a in s.assigns {
+    for p in a.index {
+      self.scan_assign_part(a.name, p, line)
+    }
     for p in a.value {
-      match p {
-        CmdSub(seq) | ProcSub(_, seq) => self.walk_seq(seq)
-        Param(_) => self.push(Unknown, "${" + a.name + "}", true, line)
-        _ => ()
-      }
+      self.scan_assign_part(a.name, p, line)
     }
   }
   for r in s.redirects {
-    let dyn = r.target.static_text() == None
-    let t = r.target.literal_text()
-    match r.op {
-      ROut | RAppend | RClobber | RInOut =>
-        self.push(Write, if t == "" { "<unknown>" } else { t }, dyn, line)
-      RIn => self.push(Read, t, dyn, line)
-      // A here-document body is data, not a path; only its holes matter.
-      RHereDoc | RHereDocStrip | RHereString =>
-        match r.body {
-          Some(b) =>
-            if b.contains("$(") || b.contains("`") {
-              self.push(Unknown, "here-document body", true, line)
-            }
-          None => ()
-        }
-      _ => ()
-    }
-    self.walk_word(r.target)
+    self.redirect_effects(r)
   }
   for w in s.words {
     self.walk_word(w)
