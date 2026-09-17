@@ -93,6 +93,21 @@ dangerous". A read-only `git status` is unmodelled and will set the flag. When a
 deployment needs more, the honest next step is a caller-supplied table of program
 semantics rather than a bigger built-in list.
 
+### Input normalisation
+
+Two input-level facts belong in the contract, because both were once ways for
+the answer to be quietly wrong:
+
+- **A NUL byte is dropped and the two sides joined**, which is what bash does:
+  `true\0; rm -rf /` runs the `rm`. Truncating at the NUL printed "Complete,
+  nothing touched" for a command that deletes everything.
+- **Invalid UTF-8 is decoded lossily** rather than rejected, and the replacement
+  is reported as an issue. A command line with one stray byte is still worth
+  analysing; failing the whole run is not.
+
+Either case makes `status` `Unsupported` and `uncertain` true: the command
+analysed is not byte-for-byte the one that arrived.
+
 ## Status
 
 - `Complete` — parsed end to end.

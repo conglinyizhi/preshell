@@ -36,6 +36,9 @@ pub(all) struct Impact {
   /// True when any exec/write/delete/spawn target is not a closed set,
   /// i.e. the blast radius cannot be bounded by this summary alone.
   uncertain : Bool
+  /// How many effects were found but not listed (see max_effects). Any drop
+  /// forces `uncertain`.
+  effects_dropped : Int
   /// The directory that relative paths in this report are relative to, when
   /// the command line itself changed into one. None means "no cwd change was
   /// modelled": relative paths are then relative to whatever directory the
@@ -228,9 +231,21 @@ fn is_network_modeled(n : String) -> Bool {
 }
 
 ///|
+/// How many effects a report carries. Effects are the answer, not diagnostics,
+/// so the cap is generous — but it exists: a 360KB input of nested `if` used to
+/// produce 39k effects and a 2.8MB answer, which is not something to hand a
+/// caller that is going to paste it somewhere. `effects_dropped` says how many
+/// were left out, and dropping any forces `uncertain`, because a partial effect
+/// list is not a smaller answer.
+fn max_effects() -> Int {
+  4096
+}
+
+///|
 struct Collector {
   items : Array[Effect]
   roots : Array[String]
+  mut dropped : Int
   mut uncertain : Bool
   mut depth : Int
   /// Directory the command line itself moved into, or None when it has not
@@ -243,6 +258,7 @@ pub fn impact(seq : Seq) -> Impact {
   let c : Collector = {
     items: [],
     roots: [],
+    dropped: 0,
     uncertain: false,
     depth: 0,
     cwd: None,
@@ -253,6 +269,7 @@ pub fn impact(seq : Seq) -> Impact {
     write_roots: c.roots,
     uncertain: c.uncertain,
     cwd: c.cwd,
+    effects_dropped: c.dropped,
   }
 }
 
@@ -274,7 +291,14 @@ fn Collector::push(
     Read | Write | Delete => self.resolve(target)
     _ => target
   }
-  self.items.push({ kind, target: resolved, dynamic, modeled, line, })
+  if self.items.length() >= max_effects() {
+    self.dropped = self.dropped + 1
+    self.uncertain = true
+    // Roots still accumulate: they are cheap, deduplicated, and they are the
+    // part a caller most often acts on.
+  } else {
+    self.items.push({ kind, target: resolved, dynamic, modeled, line, })
+  }
   if dynamic &&
     (
       kind is Write ||

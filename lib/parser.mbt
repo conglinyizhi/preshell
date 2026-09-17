@@ -13,12 +13,16 @@ pub(all) struct Parser {
   mut cur_start : Int
   mut la : Tok?
   mut la_start : Int
+  /// How deep the nested-construct recursion currently is. Bounded, because an
+  /// unbounded one is a crash: 40k nested `if` used to overflow the stack and
+  /// take the process down with SIGSEGV. Real scripts nest a few dozen deep.
+  mut depth : Int
 }
 
 ///|
 pub fn Parser::Parser(lex : Lexer) -> Parser {
   let cur = lex.next()
-  { lex, cur, cur_start: lex.tok_start, la: None, la_start: 0, }
+  { lex, cur, cur_start: lex.tok_start, la: None, la_start: 0, depth: 0, }
 }
 
 ///|
@@ -257,9 +261,26 @@ fn empty_word(line : Int) -> Word {
 ///|
 /// Any compound command may be followed by its own redirections; the simple
 /// command case handles its redirects inline instead.
+
+///|
+/// Recursion ceiling for nested constructs. Measured: 1000 levels of nested
+/// `if` parse fine and 40k crash the native stack, so this sits far from both
+/// ends. Exceeding it is reported as an issue, never as a crash.
+fn max_nesting() -> Int {
+  1024
+}
+
+///|
+/// Any compound command may be followed by its own redirections; the simple
+/// command case handles its redirects inline instead.
 fn Parser::parse_command(self : Parser) -> Cmd {
+  if self.depth >= max_nesting() {
+    self.lex.fail("input nested too deeply")
+    return Cmd::Simple({ assigns: [], words: [], redirects: [], })
+  }
+  self.depth += 1
   let base = self.parse_command_base()
-  match base {
+  let result = match base {
     Cmd::Simple(_) => base
     _ => {
       let redirects = self.parse_redirect_list()
@@ -270,6 +291,8 @@ fn Parser::parse_command(self : Parser) -> Cmd {
       }
     }
   }
+  self.depth -= 1
+  result
 }
 
 ///|
@@ -322,19 +345,31 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
     TOp("((") => {
       let start = self.cur_start + 2
       self.advance()
-      // `((a)) + ((b))`, and a nested `((` inside the condition, are all one
-      // command: count depth instead of stopping at the first `))`.
-      let mut depth = 1
+      // Balance *all* the parentheses, not just the `((`/`))` tokens: an
+      // arithmetic expression has its own, and `if (((4+4) + (4 + 7)))` closes
+      // at the last `)`, not at the first `))`.
+      let mut depth = 2
       for ;; {
         match self.cur {
           TEof => break
           TOp("((") => {
+            depth += 2
+            self.advance()
+          }
+          TOp("(") => {
             depth += 1
             self.advance()
           }
           TOp("))") => {
+            depth -= 2
+            if depth <= 0 {
+              break
+            }
+            self.advance()
+          }
+          TOp(")") => {
             depth -= 1
-            if depth == 0 {
+            if depth <= 0 {
               break
             }
             self.advance()
@@ -343,8 +378,12 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
         }
       }
       let raw = self.lex.slice(start, self.cur_start)
-      if self.cur is TOp("))") {
+      if self.cur is TOp(")") || self.cur is TOp("))") {
         self.advance()
+      } else {
+        // An unclosed `((` is a command that never finishes; before this it was
+        // accepted silently, which reads as "nothing happens here".
+        self.lex.fail("unexpected end of input in arithmetic")
       }
       Cmd::Arith(raw)
     }
@@ -421,6 +460,8 @@ fn Parser::parse_cond(self : Parser) -> Cmd {
   let raw = self.lex.slice(start, self.cur_start)
   if self.reserved() == Some("]]") {
     self.advance()
+  } else {
+    self.lex.fail("unexpected end of input in [[ ]]")
   }
   Cmd::Cond(raw)
 }

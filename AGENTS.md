@@ -46,6 +46,16 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
    影响面里必须是 `/tmp/x`，并在 `impact.cwd` 里说明基准；模型不出来就标 uncertain。
    作用域按 shell 走：子 shell、命令替换、多命令管道的每个元素各有一份。
 
+5. **输入规范化必须和 shell 一致**。NUL 字节要丢弃并连接（bash 就是这么做的：
+   `true\0; rm -rf /` 会真的执行 rm），绝不能截断——截断会给出「Complete、无副作用」
+   的假报告。非法 UTF-8 有损解码并报 issue，不要让整次运行失败。
+6. **递归要有上限，切片要夹紧**。实测：4 万层嵌套 `if` 会把 native 栈打爆（SIGSEGV）、
+   输入 `((` 会因为倒置的切片区间 abort（SIGABRT）。现在有 `max_nesting`（1024）、
+   `max_issues`（64）、`max_effects`（4096），截断必须用 `*_dropped` 明说并强制
+   `uncertain`。同理：任何从 token 记账推出的区间都可能是倒置的，`Lexer::slice` 夹住它。
+7. **误报比漏报更伤信任**。`grep PATTERN`、`find -name PATTERN`、`(( (a) + (b) ))`
+   这类「首个操作数不是路径」「括号要整体配平」的规则，写错了就会凭空造出事实。
+
 ## 改代码时的顺序
 
 1. 先加语料或最小复现（`tools/corpus/` 或 `*_test.mbt`），再改

@@ -85,8 +85,15 @@ fn Lexer::fail(self : Lexer, message : String) -> Unit {
 }
 
 ///|
+
+///|
+/// Slice by code-unit offsets. Clamped so an inverted range yields an empty
+/// string instead of aborting the process: this is called with positions
+/// derived from token bookkeeping, and a two-character input once took the
+/// whole tool down through `unsafe_substring(start=2, end=0)`.
 fn Lexer::slice(self : Lexer, a : Int, b : Int) -> String {
-  self.src.unsafe_substring(start=a, end=b)
+  let hi = if b > a { b } else { a }
+  self.src.unsafe_substring(start=a, end=hi)
 }
 
 ///|
@@ -108,6 +115,9 @@ pub fn Lexer::next(self : Lexer) -> Tok {
         if self.pending.length() > 0 {
           self.gather_heredocs()
         }
+        // Record where this token starts even at end of input: callers use it
+        // to slice the text between two tokens.
+        self.tok_start = self.pos
         return TEof
       }
       Some(c) => c

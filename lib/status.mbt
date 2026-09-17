@@ -49,13 +49,66 @@ pub(all) struct Report {
   version : Int
   status : ParseStatus
   impact : Impact
-  /// Empty when the command parsed end to end.
+  /// The first issues found, capped at `max_issues()`. Empty when the command
+  /// parsed end to end.
   issues : Array[Issue]
+  /// How many issues were found but not listed. Diagnostics scale with the
+  /// input (a 5000-level nesting produced 5001 of them), and a caller needs to
+  /// know the list it got is partial.
+  issues_dropped : Int
 } derive(Debug, Eq, ToJson)
 
 ///|
 pub fn report_version() -> Int {
   1
+}
+
+///|
+/// Analyse a command given as raw bytes: normalise the input the way the shell
+/// does, then report. This is what a subprocess caller should use, since it is
+/// the only path that sees the bytes as sent.
+pub fn analyze_bytes(bytes : Bytes) -> Report {
+  let (text, notes) = decode_command(bytes)
+  add_notes(analyze(text), notes)
+}
+
+///|
+/// Fold input-normalisation notes into a report. Any note means the command we
+/// analysed is not byte-for-byte what arrived, so nothing here may come back
+/// looking clean.
+fn add_notes(r : Report, notes : Array[String]) -> Report {
+  if notes.length() == 0 {
+    return r
+  }
+  let issues : Array[Issue] = []
+  for n in notes {
+    issues.push({ kind: Gap, message: n, line: 0, })
+  }
+  for i in r.issues {
+    issues.push(i)
+  }
+  let total = issues.length() + r.issues_dropped
+  let kept = if issues.length() > max_issues() {
+    issues[:max_issues()].to_array()
+  } else {
+    issues
+  }
+  {
+    version: r.version,
+    status: Unsupported,
+    impact: r.impact.mark_uncertain(),
+    issues: kept,
+    issues_dropped: total - kept.length(),
+  }
+}
+
+///|
+/// How many issues a report carries. Diagnostics scale with the input: a
+/// 5000-level nesting produced 5001 issues and a 280KB answer for a 15KB
+/// question. The count of what was left out is reported instead, so a caller
+/// can tell something is wrong without paying for the whole list.
+fn max_issues() -> Int {
+  64
 }
 
 ///|
@@ -65,20 +118,51 @@ pub fn report_version() -> Int {
 /// incomplete trace is not a smaller answer, it is a different one: a caller
 /// that ignores this will read "no writes reported" as "writes nothing".
 pub fn analyze(src : String) -> Report {
+  // argv can carry a NUL too, so this path strips it as well. The bytes path
+  // goes through decode_command first and lands here with it already gone.
+  let (clean, notes) = strip_nuls(src)
+  add_notes(analyze_clean(clean), notes)
+}
+
+///|
+/// Drop NUL bytes, joining what surrounds them, which is what bash does.
+fn strip_nuls(src : String) -> (String, Array[String]) {
+  if !src.contains_char('\u{0}') {
+    return (src, [])
+  }
+  let sb = StringBuilder::new()
+  for c in src {
+    if c != '\u{0}' {
+      sb.write_char(c)
+    }
+  }
+  (
+    sb.to_string(),
+    ["null byte in input: ignored and joined, the way the shell does it"],
+  )
+}
+
+///|
+fn analyze_clean(src : String) -> Report {
   let (seq, errors, lines) = parse_located(src)
   let issues : Array[Issue] = []
-  for i, e in errors {
-    let line = if i < lines.length() { lines[i] } else { 0 }
-    issues.push(classify_error(e, line~))
-  }
   let mut has_gap = false
   let mut has_syntax = false
-  for i in issues {
-    match i.kind {
+  for i, e in errors {
+    let line = if i < lines.length() { lines[i] } else { 0 }
+    let issue = classify_error(e, line~)
+    // The status is decided from every complaint, including those the list
+    // below does not carry: a dropped `Syntax` issue must still make the whole
+    // report abstain.
+    match issue.kind {
       Gap => has_gap = true
       Syntax => has_syntax = true
     }
+    if i < max_issues() {
+      issues.push(issue)
+    }
   }
+  let dropped = errors.length() - issues.length()
   let status = if has_syntax {
     Invalid
   } else if has_gap {
@@ -88,7 +172,13 @@ pub fn analyze(src : String) -> Report {
   }
   let base = impact(seq)
   let impact_ = if status is Complete { base } else { base.mark_uncertain() }
-  { version: report_version(), status, impact: impact_, issues, }
+  {
+    version: report_version(),
+    status,
+    impact: impact_,
+    issues,
+    issues_dropped: dropped,
+  }
 }
 
 ///|
@@ -136,5 +226,6 @@ pub fn Impact::mark_uncertain(self : Impact) -> Impact {
     write_roots: self.write_roots,
     uncertain: true,
     cwd: self.cwd,
+    effects_dropped: self.effects_dropped,
   }
 }

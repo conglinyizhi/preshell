@@ -81,12 +81,9 @@ async fn main {
     bench_corpus(bench)
     return
   }
-  let src = if rest.length() > 0 {
-    rest.join(" ")
-  } else {
-    read_stdin_text()
-  }
-  if src.trim().length() == 0 {
+  let from_argv = rest.length() > 0
+  let src = if from_argv { rest.join(" ") } else { "" }
+  if from_argv && src.trim().length() == 0 {
     usage()
     return
   }
@@ -98,7 +95,10 @@ async fn main {
     }
     return
   }
-  let report = @lib.analyze(src)
+  // stdin is analysed from its bytes: that is the path a subprocess caller
+  // uses, and the only one that sees exactly what arrived (bar the null bytes
+  // the shell itself would drop).
+  let report = if from_argv { @lib.analyze(src) } else { report_from_stdin() }
   if scan {
     // One machine-readable line for tools/corpus/run.sh, then one line per
     // issue. The harness keys on the message only, so keep "issue: <message>"
@@ -121,8 +121,12 @@ fn tool_version() -> String {
 }
 
 ///|
-async fn read_stdin_text() -> String {
-  @stdio.stdin.read_all().text()
+
+///|
+/// Read stdin and analyse it. Kept as one function so the byte-level entry
+/// point is used everywhere, including by tests.
+async fn report_from_stdin() -> @lib.Report {
+  @lib.analyze_bytes(@stdio.stdin.read_all().binary())
 }
 
 ///|
@@ -164,16 +168,10 @@ fn digits_of(s : String) -> Int {
 /// Check a fixed corpus in a tight loop, for timing.
 fn bench_corpus(rounds : Int) -> Unit {
   let corpus = [
-    "git status && git diff --stat",
-    "echo hello > /tmp/out && cat /tmp/out",
-    "curl -s https://example.com | head -20",
-    "find . -name '*.mbt' -exec grep -l foo {} \\;",
-    "for f in src/*.mbt; do wc -l $f; done",
-    "if [ -d build ]; then rm -rf build; fi",
-    "cat <<EOF\n$(date)\nEOF",
-    "x=$(echo a; echo b); echo \"$x\" | wc -l",
-    "tar xzf pkg.tar.gz -C /tmp && ls /tmp/pkg",
-    "case $1 in a) echo one;; b) echo two;;& *) echo other;; esac",
+    "git status && git diff --stat", "echo hello > /tmp/out && cat /tmp/out", "curl -s https://example.com | head -20",
+    "find . -name '*.mbt' -exec grep -l foo {} \\;", "for f in src/*.mbt; do wc -l $f; done",
+    "if [ -d build ]; then rm -rf build; fi", "cat <<EOF\n$(date)\nEOF", "x=$(echo a; echo b); echo \"$x\" | wc -l",
+    "tar xzf pkg.tar.gz -C /tmp && ls /tmp/pkg", "case $1 in a) echo one;; b) echo two;;& *) echo other;; esac",
   ]
   let t0 = @env.now()
   let mut effects = 0
