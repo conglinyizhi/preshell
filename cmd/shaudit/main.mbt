@@ -70,12 +70,14 @@ fn main {
     return
   }
   if scan {
-    // One machine-readable line for tools/corpus/run.sh.
+    // One machine-readable line for tools/corpus/run.sh, then one line per
+    // issue. The harness keys on the message only, so keep "issue: <message>"
+    // exact and put the location after it.
     println(
       "status=\{Repr(report.status)} issues=\{report.issues.length()} findings=\{report.findings.length()}",
     )
     for issue in report.issues {
-      println("issue: \{issue.message}")
+      println("issue: \{issue.message} (line \{issue.line})")
     }
     return
   }

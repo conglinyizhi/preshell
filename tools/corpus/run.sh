@@ -61,7 +61,7 @@ for f in "$corpus"/*.sub; do
   line="$("$bin" --scan "$src" 2>/dev/null | head -1)"
   ours="${line%% *}"
   ours="${ours#status=}"
-  msgs="$("$bin" --scan "$src" 2>/dev/null | tail -n +2 | sed 's/^issue: //')"
+  msgs="$("$bin" --scan "$src" 2>/dev/null | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
 
   if bash -n "$f" 2>/dev/null; then bash_ok=1; else bash_ok=0; fi
 

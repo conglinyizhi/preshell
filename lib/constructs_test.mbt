@@ -86,3 +86,31 @@ test "nested arithmetic heads count depth" {
     content="Complete",
   )
 }
+
+///|
+test "an unclosed bracket stays on its own line" {
+  // `echo [[:alpha:]` has no closing bracket; bash treats it as literal text.
+  // Scanning past the newline for a match turned lines 37-44 of a corpus file
+  // into a single word, which silently swallowed the rest of the input.
+  let src = "echo [[:alpha:]\necho done\n"
+  debug_inspect(status_of_construct(src), content="Complete")
+  inspect(seq_of(src).items.length(), content="2")
+  match first_cmd(src) {
+    Cmd::Simple(s) => inspect(s.words[1].has_glob(), content="true")
+    _ => fail("expected a simple command")
+  }
+}
+
+///|
+test "issues carry the line they happened on" {
+  // 没有结尾换行：EOF 落在第 2 行，也就是命令替换开始的那一行。
+  let r = check("echo a\necho $(date", AuditConfig::default())
+  inspect(r.issues.length(), content="1")
+  debug_inspect(r.issues[0].line, content="2")
+}
+
+///|
+test "quoted brackets are not subscripts" {
+  // `touch '[a' '[x'`: the bracket is inside quotes, so nothing to scan.
+  debug_inspect(status_of_construct("touch '[a' '[x'"), content="Complete")
+}

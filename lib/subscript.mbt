@@ -11,12 +11,19 @@
 fn Lexer::looks_like_subscript(self : Lexer) -> Bool {
   match self.subscript_end() {
     None => false
-    Some(end) =>
+    Some(end) => {
+      // Quotes inside the brackets mean this is a subscript even without an
+      // assignment following: `unset A[']']`, `echo A["]"]`.
+      let inner = self.slice(self.pos + 1, end - 1)
+      if inner.contains_char('"') || inner.contains_char('\'') {
+        return true
+      }
       match self.src.get_char(end) {
         Some('=') => true
         Some('+') => self.src.get_char(end + 1) == Some('=')
         _ => false
       }
+    }
   }
 }
 
@@ -28,11 +35,18 @@ fn Lexer::subscript_end(self : Lexer) -> Int? {
   let mut i = self.pos + 1
   let mut depth = 1
   for ;; {
+    // An unclosed bracket stays a literal glob character in bash, so the scan
+    // must not run past the end of the line looking for a match: doing that
+    // swallowed `echo [[:alpha:]` and every following line with it.
+    if i - self.pos > 4096 {
+      return None
+    }
     let c = match self.src.get_char(i) {
       None => return None
       Some(c) => c
     }
     match c {
+      '\n' => return None
       '[' => {
         depth += 1
         i += 1
@@ -60,6 +74,9 @@ fn skip_quoted(s : String, i : Int, q : Char) -> Int {
   for ;; {
     match s.get_char(j) {
       None => return j
+      // A quote that does not close on this line cannot be part of a
+      // subscript; hand the newline back so the caller gives up.
+      Some('\n') => return j
       Some(c) =>
         if c == q {
           return j + 1
@@ -77,7 +94,7 @@ fn Lexer::read_subscript(self : Lexer) -> Array[WordPart] {
   let start = self.pos + 1
   match self.subscript_end() {
     None => {
-      self.errors.push("unterminated array subscript")
+      self.fail("unterminated array subscript")
       self.advance(1)
       []
     }
@@ -91,7 +108,7 @@ fn Lexer::read_subscript(self : Lexer) -> Array[WordPart] {
       let sub = Lexer::new(inner)
       let parts = sub.read_parts(true)
       for e in sub.errors {
-        self.errors.push(e)
+        self.fail(e)
       }
       parts
     }

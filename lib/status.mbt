@@ -57,10 +57,11 @@ pub(all) struct Report {
 ///|
 /// Parse, audit and summarise one command line.
 pub fn check(src : String, cfg : AuditConfig) -> Report {
-  let (seq, errors) = parse(src)
+  let (seq, errors, lines) = parse_located(src)
   let issues : Array[Issue] = []
-  for e in errors {
-    issues.push(classify_error(e))
+  for i, e in errors {
+    let line = if i < lines.length() { lines[i] } else { 0 }
+    issues.push(classify_error(e, line~))
   }
   let mut has_gap = false
   let mut has_syntax = false
@@ -109,13 +110,13 @@ pub fn check(src : String, cfg : AuditConfig) -> Report {
 /// The default is `Gap`, and that is the whole design: claiming "bash would
 /// reject this" is a statement about a program we are not running, and getting
 /// it wrong means waving through a command that executes.
-fn classify_error(message : String) -> Issue {
+fn classify_error(message : String, line? : Int = 0) -> Issue {
   let kind = if corroborated_syntax_messages().contains(message) {
     Syntax
   } else {
     Gap
   }
-  { kind, message, line: 0, }
+  { kind, message, line, }
 }
 
 ///|

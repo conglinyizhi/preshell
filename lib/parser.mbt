@@ -31,6 +31,16 @@ pub fn parse(src : String) -> (Seq, Array[String]) {
 }
 
 ///|
+/// Same, plus the line each complaint came from: "which line is the problem"
+/// is the first thing a caller asks about a parse failure.
+pub fn parse_located(src : String) -> (Seq, Array[String], Array[Int]) {
+  let lex = Lexer::new(src)
+  let p = Parser::Parser(lex)
+  let seq = p.parse_seq({ words: [], ops: [], })
+  (seq, lex.errors, lex.error_lines)
+}
+
+///|
 /// Parse inside `$( )`, `<()`, `>()`: everything up to the closing operator.
 /// The operator itself is *already consumed* from the source by the tokenizer
 /// that produced it, so the caller must not try to eat it again. The flag says
@@ -151,7 +161,7 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
           // `printf x a=(a b)` used to become `printf` followed by a subshell.
           // bash rejects the same input, but this stays a Gap until the
           // corpus shows the two agree (see lib/status.mbt).
-          self.lex.errors.push("unexpected token after command")
+          self.lex.fail("unexpected token after command")
           self.advance()
         }
         break
@@ -164,7 +174,7 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
   }
   if (stop.ops.length() > 0 || stop.words.length() > 0) && self.cur is TEof {
     let what = if label == "" { "construct" } else { label }
-    self.lex.errors.push("unexpected end of input in " + what)
+    self.lex.fail("unexpected end of input in " + what)
   }
   { items, }
 }
@@ -660,7 +670,7 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
               self.advance()
               return Cmd::FuncDef(name~, body=self.parse_command())
             }
-            self.lex.errors.push("expected ) in function definition")
+            self.lex.fail("expected ) in function definition")
             return Cmd::FuncDef(
               name~,
               body=Cmd::Simple({ assigns: [], words: [], redirects: [], }),

@@ -43,6 +43,8 @@ pub(all) struct Lexer {
   /// The body can only be read after the newline that ends the current line.
   mut pending : Array[Redirect]
   mut errors : Array[String]
+  /// Line of each entry in `errors`, index for index.
+  mut error_lines : Array[Int]
   mut depth : Int
   /// Offset where the token most recently returned by `next` starts.
   mut tok_start : Int
@@ -50,7 +52,16 @@ pub(all) struct Lexer {
 
 ///|
 pub fn Lexer::new(src : String) -> Lexer {
-  { src, pos: 0, line: 1, pending: [], errors: [], depth: 0, tok_start: 0, }
+  {
+    src,
+    pos: 0,
+    line: 1,
+    pending: [],
+    errors: [],
+    error_lines: [],
+    depth: 0,
+    tok_start: 0,
+  }
 }
 
 ///|
@@ -61,6 +72,16 @@ fn Lexer::peek(self : Lexer) -> Char? {
 ///|
 fn Lexer::peek_at(self : Lexer, n : Int) -> Char? {
   self.src.get_char(self.pos + n)
+}
+
+///|
+///
+/// Record a complaint together with the line it happened on. The line matters:
+/// "which line is the problem" is the first thing a caller asks, and without it
+/// tracking a parse failure down means bisecting the input by hand.
+fn Lexer::fail(self : Lexer, message : String) -> Unit {
+  self.errors.push(message)
+  self.error_lines.push(self.line)
 }
 
 ///|
@@ -230,7 +251,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         if self.peek() == Some('\'') {
           self.advance(1)
         } else {
-          self.errors.push("unterminated single quote")
+          self.fail("unterminated single quote")
         }
         flush_lit(parts, lit)
         parts.push(SQuote(s))
@@ -241,7 +262,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         if self.peek() == Some('"') {
           self.advance(1)
         } else {
-          self.errors.push("unterminated double quote")
+          self.fail("unterminated double quote")
         }
         flush_lit(parts, lit)
         parts.push(DQuote(inner))
@@ -337,7 +358,7 @@ fn Lexer::read_ansi_body(self : Lexer) -> String {
   for ;; {
     match self.peek() {
       None => {
-        self.errors.push("unterminated $'")
+        self.fail("unterminated $'")
         break
       }
       Some('\'') => {
@@ -368,7 +389,7 @@ fn Lexer::read_backtick(self : Lexer) -> String {
   for ;; {
     match self.peek() {
       None => {
-        self.errors.push("unterminated backquote")
+        self.fail("unterminated backquote")
         break
       }
       Some('`') => {
@@ -402,7 +423,7 @@ fn Lexer::read_backtick(self : Lexer) -> String {
 /// inside a command substitution and its `)` does not close it.
 fn Lexer::sub_seq(self : Lexer, what : String) -> Seq {
   if self.depth >= 24 {
-    self.errors.push("nesting too deep")
+    self.fail("nesting too deep")
     return Seq::empty()
   }
   self.depth += 1
@@ -418,7 +439,7 @@ fn Lexer::backquote_seq(self : Lexer, text : String) -> Seq {
   let sub = Lexer::new(text)
   let seq = parse_sub_seq_eof(sub)
   for e in sub.errors {
-    self.errors.push(e)
+    self.fail(e)
   }
   seq
 }
@@ -609,7 +630,7 @@ fn Lexer::read_braced(self : Lexer) -> String {
   for ;; {
     match self.peek() {
       None => {
-        self.errors.push("unterminated ${")
+        self.fail("unterminated ${")
         break
       }
       Some('{') => {
@@ -693,7 +714,7 @@ fn Lexer::read_arith(self : Lexer) -> String {
   if self.peek() == Some(')') && self.peek_at(1) == Some(')') {
     self.advance(2)
   } else {
-    self.errors.push("unterminated arithmetic expansion")
+    self.fail("unterminated arithmetic expansion")
   }
   body
 }
