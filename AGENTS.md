@@ -35,7 +35,14 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
    又会被读成「反正跑不起来」= 无害。默认一律 `Gap`，只有
    `tools/corpus/run.sh` 证明它落在「两边都报错」象限且从未出现在「我们的缺口」
    象限时，才能加进 `corroborated_syntax_messages()`。
-4. **相对路径要交代清楚**。命令内部改过工作目录时（`cd /tmp && rm x`），
+4. **不建模的程序要显式标出来**。每个 `Exec` 带 `modeled` 标志；未建模
+   （git/node/make/python/docker…）一律驱动 `uncertain`。理由：枚举世界上所有程序的
+   文件行为是无界工作，但「我们不建模它」是有界且必须可见的——沉默会被读成
+   「什么都不做」。往 `is_path_modeled` / `is_pure` / `is_network_modeled`
+   里加名字是在对那个程序的行为下断言，**拿不准就别加**（不加会落到未建模，是安全方向）。
+   另外误报比漏报更伤信任：`grep PATTERN file`、`find . -name PATTERN` 的首个参数
+   不是路径，这类要单独处理。
+5. **相对路径要交代清楚**。
    影响面里必须是 `/tmp/x`，并在 `impact.cwd` 里说明基准；模型不出来就标 uncertain。
    作用域按 shell 走：子 shell、命令替换、多命令管道的每个元素各有一份。
 

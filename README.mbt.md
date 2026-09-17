@@ -59,8 +59,16 @@ There is no exit code that means "dangerous".
 }
 ```
 
-Two fields carry the honesty of the whole thing, and a caller that ignores them
-will misread the output:
+Three things carry the honesty of the whole thing, and a caller that ignores
+them will misread the output:
+
+- `modeled: false` on an `Exec` means the program ran, and **what it touches is
+  decided inside it**. `git pull` writing `.git/` is not missing from the report
+  by oversight: enumerating what `git`, `node`, `python` or `docker` do means
+  reading the scripts and images they are handed, which is not a bounded
+  project. So the tool models the programs whose arguments *are* the files they
+  touch (the coreutils-shaped set) and marks everything else. Every unmodelled
+  program also forces `uncertain`.
 
 - `dynamic` on an effect means the target is not a closed set (it has a hole or
   a glob). `rm -rf $DIR/*` cannot be reported as one file.
@@ -71,8 +79,19 @@ will misread the output:
 
 `cwd` is the directory that relative paths in the report are relative to, when
 the command line itself changed into one (`cd /tmp && rm x` reports `/tmp/x`).
-`null` means no `cd` was modelled, so relative paths are relative to wherever
-the command runs — which the caller knows and the tool does not.
+The field is absent when no `cd` was modelled, so relative paths are relative to
+wherever the command runs — which the caller knows and the tool does not.
+
+### What "unmodelled" costs, and what it does not
+
+The set of fully modelled programs stays small on purpose. Adding a name to it is
+a claim about that program's file behaviour, and **when in doubt, leave it out**:
+an omitted program is reported as unmodelled, which is the safe direction.
+
+`uncertain` therefore tracks "we do not model something here", not "this looks
+dangerous". A read-only `git status` is unmodelled and will set the flag. When a
+deployment needs more, the honest next step is a caller-supplied table of program
+semantics rather than a bigger built-in list.
 
 ## Status
 

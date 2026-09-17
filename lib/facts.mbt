@@ -34,6 +34,21 @@ fn line_of(s : SimpleCmd) -> Int {
 }
 
 ///|
+
+///|
+/// Shells. `-c "..."` on one of these is a command line this tool can parse,
+/// which is the only reason recursion is safe at all.
+fn is_shell(n : String) -> Bool {
+  match n {
+    "bash" | "sh" | "zsh" | "dash" | "ksh" => true
+    _ => false
+  }
+}
+
+///|
+/// Programs that run other programs or scripts. Their behaviour is decided by
+/// what they are handed, not by their arguments, so they are reported as
+/// unmodelled rather than guessed at.
 fn is_interpreter(n : String) -> Bool {
   match n {
     "bash"

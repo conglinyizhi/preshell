@@ -18,6 +18,12 @@ pub(all) struct Effect {
   target : String
   /// True when the target is not a closed set: it has a hole or a glob.
   dynamic : Bool
+  /// Only meaningful for `Exec`. False means: this program ran, and what it
+  /// touches is decided inside it, so everything else in this report is a
+  /// *lower bound*. `git pull` writing `.git/` is not missing from the answer
+  /// by oversight; it is outside what this tool models, and saying so is the
+  /// point.
+  modeled : Bool
   line : Int
 } derive(Debug, Eq, ToJson)
 
@@ -36,6 +42,190 @@ pub(all) struct Impact {
   /// command runs in, which is the caller's knowledge, not this tool's.
   cwd : String?
 } derive(Debug, Eq, ToJson)
+
+///|
+/// The operands that come before the first flag. For commands like `find`,
+/// whose later arguments are predicates rather than paths (`-name '*.mbt'`),
+/// only the leading ones are files.
+fn leading_operands(items : Array[(String, Bool)]) -> Array[(String, Bool)] {
+  let out : Array[(String, Bool)] = []
+  for it in items {
+    let (t, _) = it
+    if t.has_prefix("-") {
+      break
+    }
+    if t != "" {
+      out.push(it)
+    }
+  }
+  out
+}
+
+///|
+/// Programs with no file behaviour of their own: they are pure text or shell
+/// state, and any file they touch is touched through a redirection, which the
+/// report captures separately.
+///
+/// This is a claim about the program, so the rule for adding a name is the same
+/// as everywhere else here: **when unsure, leave it out**. An omitted program
+/// becomes unmodelled, which is the safe direction; a wrongly included one
+/// silently under-reports.
+fn is_pure(n : String) -> Bool {
+  match n {
+    // text producers and tests
+    "echo"
+    | "printf"
+    | "true"
+    | "false"
+    | ":"
+    | "test"
+    | "["
+    | "[["
+    | "seq"
+    | "expr"
+    | "basename"
+    | "tr"
+    | "dirname"
+    | "tty"
+    | "sleep" => true
+    // system questions, no file arguments
+    "pwd"
+    | "date"
+    | "id"
+    | "whoami"
+    | "uname"
+    | "hostname"
+    | "printenv"
+    | "umask" => true
+    // shell state
+    "export"
+    | "unset"
+    | "set"
+    | "shift"
+    | "exit"
+    | "return"
+    | "break"
+    | "continue"
+    | "trap"
+    | "wait"
+    | "local"
+    | "declare"
+    | "typeset"
+    | "readonly"
+    | "let"
+    | "read"
+    | "alias"
+    | "unalias"
+    | "hash"
+    | "jobs"
+    | "fg"
+    | "bg"
+    | "kill" => true
+    _ => false
+  }
+}
+
+///|
+
+///|
+/// Programs whose *arguments are the files they touch*. This list is closed on
+/// purpose, and it stays short for a reason: it is only the set of programs
+/// whose whole job is file manipulation, so modelling them needs no knowledge
+/// of any application.
+///
+/// Everything else — interpreters, build tools, package managers, anything
+/// written by someone else — is reported as unmodelled. Enumerating what
+/// `node`, `python` or `docker` touch means reading the scripts and images they
+/// are given, which is not a bounded project; marking them is.
+fn is_path_modeled(n : String) -> Bool {
+  match n {
+    "cat"
+    | "head"
+    | "tail"
+    | "less"
+    | "more"
+    | "grep"
+    | "rg"
+    | "awk"
+    | "sort"
+    | "wc"
+    | "diff"
+    | "readlink"
+    | "stat"
+    | "file"
+    | "md5sum"
+    | "sha256sum"
+    | "base64"
+    | "strings"
+    | "xxd"
+    | "cut"
+    | "uniq"
+    | "comm"
+    | "join"
+    | "paste"
+    | "expand"
+    | "fold"
+    | "nl"
+    | "od"
+    | "tee"
+    | "touch"
+    | "truncate"
+    | "mkdir"
+    | "rmdir"
+    | "ln"
+    | "install"
+    | "split"
+    | "csplit"
+    | "chmod"
+    | "chown"
+    | "chgrp"
+    | "rm"
+    | "unlink"
+    | "shred"
+    | "cp"
+    | "mv"
+    | "rsync"
+    | "sed"
+    | "dd"
+    | "tar"
+    | "unzip"
+    | "zip"
+    | "gzip"
+    | "gunzip"
+    | "bzip2"
+    | "xz"
+    | "zstd"
+    | "source"
+    | "."
+    | "ls"
+    | "du"
+    | "df"
+    | "tree"
+    | "realpath"
+    | "find" => true
+    _ => false
+  }
+}
+
+///|
+/// Programs that talk to the network. Kept apart from the path-modelled set:
+/// `git status` is neither a network call nor a file operation this tool can
+/// follow, and lumping it in here would mislabel both.
+fn is_network_modeled(n : String) -> Bool {
+  match n {
+    "curl"
+    | "wget"
+    | "nc"
+    | "ncat"
+    | "ssh"
+    | "scp"
+    | "sftp"
+    | "telnet"
+    | "ping"
+    | "dig" => true
+    _ => false
+  }
+}
 
 ///|
 struct Collector {
@@ -78,12 +268,13 @@ fn Collector::push(
   target : String,
   dynamic : Bool,
   line : Int,
+  modeled? : Bool = true,
 ) -> Unit {
   let resolved = match kind {
     Read | Write | Delete => self.resolve(target)
     _ => target
   }
-  self.items.push({ kind, target: resolved, dynamic, line, })
+  self.items.push({ kind, target: resolved, dynamic, modeled, line, })
   if dynamic &&
     (
       kind is Write ||
@@ -92,6 +283,12 @@ fn Collector::push(
       kind is Spawn ||
       kind is Unknown
     ) {
+    self.uncertain = true
+  }
+  // A program whose behaviour we do not model puts everything below it out of
+  // reach: the report is a lower bound, and the caller has to be able to see
+  // that without reading the effect list closely.
+  if !modeled {
     self.uncertain = true
   }
   if kind is Write || kind is Delete {
@@ -320,7 +517,6 @@ fn Collector::classify(
   s : SimpleCmd,
   line : Int,
 ) -> Unit {
-  self.push(Exec, n, false, line)
   let items = arg_items(s)
   let flags : Array[String] = []
   let operands : Array[(String, Bool)] = []
@@ -331,6 +527,35 @@ fn Collector::classify(
     } else if t != "" {
       operands.push(it)
     }
+  }
+  // `find -exec` runs another program, so the whole command goes opaque:
+  // reporting the directory it walks would miss the command it runs.
+  let runs_another = flags.any(fn(f) {
+    f == "-exec" ||
+    f == "-execdir" ||
+    f == "-ok" ||
+    f == "-okdir" ||
+    f == "-delete"
+  })
+  // `-c` recursion only makes sense for shells: a Python `-c` string is
+  // Python, and parsing it as shell would invent commands that never run.
+  let recurses = (is_shell(n) && has_flag_text(flags, "-c")) || n == "eval"
+  // Which programs this tool claims to understand. Anything else runs, and
+  // what it touches is decided inside it: that is reported as unmodelled, and
+  // it is what keeps this from being an unbounded enumeration problem.
+  let modeled = !runs_another &&
+    (
+      is_pure(n) ||
+      is_path_modeled(n) ||
+      is_network_modeled(n) ||
+      recurses ||
+      n == "cd"
+    )
+  self.push(Exec, n, false, line, modeled~)
+  if !modeled {
+    // Nothing else can be said about it, and saying nothing would read as
+    // "touches nothing".
+    return
   }
   let writes = fn(xs : Array[(String, Bool)]) {
     for it in xs {
@@ -355,24 +580,61 @@ fn Collector::classify(
     | "tail"
     | "less"
     | "more"
-    | "grep"
-    | "rg"
-    | "awk"
     | "sort"
     | "wc"
     | "diff"
     | "source"
-    | "." => reads(operands)
-    "sed" =>
-      // The first operand is the script; the rest are files.
-      if flags.any(fn(f) { f.has_prefix("-i") }) && operands.length() > 1 {
-        writes(operands[1:].to_array())
-      } else if operands.length() > 1 {
-        reads(operands[1:].to_array())
+    | "."
+    | "stat"
+    | "file"
+    | "readlink"
+    | "md5sum"
+    | "sha256sum"
+    | "base64"
+    | "strings"
+    | "xxd"
+    | "cut"
+    | "uniq"
+    | "comm"
+    | "join"
+    | "paste"
+    | "expand"
+    | "fold"
+    | "nl"
+    | "od"
+    | "ls"
+    | "du"
+    | "df"
+    | "tree"
+    | "realpath" => reads(operands)
+    "find" =>
+      // Predicates are not paths: only the starting points are.
+      reads(leading_operands(items))
+    "grep" | "rg" | "awk" | "sed" => {
+      // The first operand is the pattern or the script, and the rest are
+      // files. Reporting the pattern as a path the command reads is the kind
+      // of false positive that makes a caller stop trusting the report.
+      let rest = if operands.length() > 1 {
+        operands[1:].to_array()
+      } else {
+        []
       }
-    "tee" | "touch" | "truncate" | "mkdir" | "chmod" | "chown" =>
-      writes(operands)
-    "cp" | "mv" | "install" | "rsync" => {
+      if n == "sed" && flags.any(fn(f) { f.has_prefix("-i") }) {
+        writes(rest)
+      } else {
+        reads(rest)
+      }
+    }
+    "tee"
+    | "touch"
+    | "truncate"
+    | "mkdir"
+    | "chmod"
+    | "chown"
+    | "chgrp"
+    | "split"
+    | "csplit" => writes(operands)
+    "cp" | "mv" | "install" | "rsync" | "ln" => {
       let n_op = operands.length()
       for i, it in operands {
         let (t, d) = it
@@ -383,6 +645,16 @@ fn Collector::classify(
         }
       }
     }
+    "zip" | "gzip" | "bzip2" | "xz" | "zstd" =>
+      // Compressors rewrite their operand in place unless told otherwise, so
+      // the first operand is both read and written.
+      match operands {
+        [(t, d), ..] => {
+          self.push(Read, t, d, line)
+          self.push(Write, t, d, line)
+        }
+        [] => ()
+      }
     "dd" =>
       for it in items {
         let (t, _) = it
@@ -420,7 +692,16 @@ fn Collector::classify(
       }
       reads(operands)
     }
-    "curl" | "wget" | "nc" | "ssh" | "scp" | "git" | "pip" | "npm" => {
+    "curl"
+    | "wget"
+    | "nc"
+    | "ncat"
+    | "ssh"
+    | "scp"
+    | "sftp"
+    | "telnet"
+    | "ping"
+    | "dig" => {
       for it in items {
         let (t, _) = it
         if t.has_prefix("http://") ||
@@ -455,26 +736,21 @@ fn Collector::classify(
       }
       self.change_dir(dest, line)
     }
-    "eval" => self.recurse_static(s, n, line)
-    "make"
-    | "cmake"
-    | "ninja"
-    | "cargo"
-    | "go"
-    | "npm"
-    | "pnpm"
-    | "yarn"
-    | "mvn"
-    | "gradle" =>
-      // Builders decide their own writes at run time; say so instead of
-      // pretending the blast radius is known.
-      self.push(Unknown, n + ": build tool", true, line)
-    _ =>
-      if is_interpreter(n) && has_flag_text(flags, "-c") {
-        self.recurse_static(s, n, line)
-      }
+    _ => if recurses { self.recurse_static(s, n, line) }
   }
-  for it in operands {
+  // Only the operands this command treats as paths get the hole check;
+  // otherwise a pattern like `-name "*.mbt"` is reported as an unknown path.
+  let checked = match n {
+    "grep" | "rg" | "awk" | "sed" =>
+      if operands.length() > 1 {
+        operands[1:].to_array()
+      } else {
+        []
+      }
+    "find" => leading_operands(items)
+    _ => operands
+  }
+  for it in checked {
     let (t, d) = it
     if d && !t.has_prefix("-") {
       self.push(Unknown, t, true, line)

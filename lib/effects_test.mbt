@@ -73,13 +73,6 @@ test "substitutions inside arguments are audited too" {
 }
 
 ///|
-test "builders declare themselves unknown rather than innocuous" {
-  let im = impact_of("make -j8")
-  debug_inspect(im.uncertain, content="true")
-  debug_inspect(targets_of(im, Unknown), content="[\"make: build tool\"]")
-}
-
-///|
 test "extraction targets are read from the option table" {
   let im = impact_of("tar xzf pkg.tgz -C /tmp")
   debug_inspect(targets_of(im, Write), content="[\"/tmp\"]")
@@ -93,4 +86,37 @@ test "parent_dir normalizes" {
   inspect(parent_dir("x"), content=".")
   inspect(parent_dir("/etc/passwd"), content="/etc")
   inspect(parent_dir("./a/../b/c"), content="b")
+}
+
+///|
+test "a program we do not model is reported instead of ignored" {
+  // `make`'s writes are decided at run time. The answer is not "no writes":
+  // it is "this ran, and everything below is a lower bound".
+  let im = impact_of("make -j8")
+  debug_inspect(im.uncertain, content="true")
+  debug_inspect(targets_of(im, Exec), content="[\"make\"]")
+  debug_inspect(im.effects[0].modeled, content="false")
+}
+
+///|
+test "opaque programs drive uncertainty, and modelled ones do not" {
+  // The point of the modelled flag: an unmodelled program must not be able to
+  // produce a clean, closed answer.
+  debug_inspect(impact_of("git pull origin main").uncertain, content="true")
+  debug_inspect(impact_of("node build.js").uncertain, content="true")
+  debug_inspect(impact_of("rm -rf build/").uncertain, content="false")
+  debug_inspect(impact_of("cat a.txt | wc -l").uncertain, content="false")
+}
+
+///|
+test "only shells get their -c string parsed as a command line" {
+  // `python3 -c "import os"` is Python, not shell: parsing it as shell would
+  // invent an `import` command that never runs.
+  let im = impact_of("python3 -c \"import os\"")
+  debug_inspect(targets_of(im, Exec), content="[\"python3\"]")
+  debug_inspect(im.uncertain, content="true")
+  // A shell, on the other hand, is a command line we can follow.
+  let sh = impact_of("bash -c \"rm -rf /tmp/x\"")
+  debug_inspect(targets_of(sh, Delete), content="[\"/tmp/x\"]")
+  debug_inspect(sh.uncertain, content="false")
 }
