@@ -1,4 +1,4 @@
-# shaudit
+# preshell
 
 A shell command *analyzer*, not an approver.
 
@@ -29,12 +29,12 @@ GPL stays on this side of the process boundary.
 ## Usage
 
 ```bash
-shaudit < script.sh              # preferred: no argv limits, no re-quoting
-shaudit 'rm -rf build/'          # or pass the command as arguments
-shaudit --pretty 'make -j8'      # indented JSON for humans
-shaudit --shadow 'cat <<EOF'     # dump the syntax tree
-shaudit --scan '<cmd>'           # one line: parse status, issue count, effects
-shaudit --bench=2000             # timing loop
+preshell < script.sh              # preferred: no argv limits, no re-quoting
+preshell 'rm -rf build/'          # or pass the command as arguments
+preshell --pretty 'make -j8'      # indented JSON for humans
+preshell --shadow 'cat <<EOF'     # dump the syntax tree
+preshell --scan '<cmd>'           # one line: parse status, issue count, effects
+preshell --bench=2000             # timing loop
 ```
 
 Exit codes describe the tool, never the command: `0` when a report was produced.

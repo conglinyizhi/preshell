@@ -1,6 +1,6 @@
 # 拿这份 JSON 去做什么（调用方的事）
 
-shaudit 只回答**事实**：这条命令碰了什么。它不判断该不该跑，所以「放行/拒绝」这一层
+preshell 只回答**事实**：这条命令碰了什么。它不判断该不该跑，所以「放行/拒绝」这一层
 必须由调用方按自己的上下文写（哪个沙箱、哪个用户、哪个会话）。
 
 这里给几个例子，都是**调用方侧**的代码，不属于这个工具。
@@ -8,7 +8,7 @@ shaudit 只回答**事实**：这条命令碰了什么。它不判断该不该�
 ## 1. 只要影响面
 
 ```bash
-shaudit < cmd.sh | jq '{status, uncertain: .impact.uncertain, roots: .impact.write_roots}'
+preshell < cmd.sh | jq '{status, uncertain: .impact.uncertain, roots: .impact.write_roots}'
 ```
 
 ```
@@ -22,7 +22,7 @@ shaudit < cmd.sh | jq '{status, uncertain: .impact.uncertain, roots: .impact.wri
 
 ```bash
 allowed='^(/tmp|/home/me/project)/'
-shaudit < cmd.sh |
+preshell < cmd.sh |
   jq -r '
     if .impact.uncertain then "ask"                       # 影响面不封闭，交给人
     elif (.impact.effects | map(select(.kind=="Write" or .kind=="Delete"))
@@ -34,13 +34,13 @@ shaudit < cmd.sh |
     end'
 ```
 
-注意这段代码里的 `"ask"` / `"allow"` 是**调用方**的词汇，不是 shaudit 的输出。
+注意这段代码里的 `"ask"` / `"allow"` 是**调用方**的词汇，不是 preshell 的输出。
 工具里没有这两个词。
 
 ## 3. 给人看的审查清单
 
 ```bash
-shaudit --pretty < cmd.sh | jq -r '
+preshell --pretty < cmd.sh | jq -r '
   "命令数: \(.impact.effects | map(select(.kind=="Exec")) | length)",
   "会改:   \(.impact.effects | map(select(.kind=="Write" or .kind=="Delete") | .target) | join(", "))",
   "会读:   \(.impact.effects | map(select(.kind=="Read") | .target) | join(", "))",

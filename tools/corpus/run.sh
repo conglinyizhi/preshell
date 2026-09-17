@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 对比 shaudit 与 `bash -n` 在 bash 自带语法语料上的表现，产出四象限表。
+# 对比 preshell 与 `bash -n` 在 bash 自带语法语料上的表现，产出四象限表。
 #
-# 为什么需要它：shaudit 只有在**有证据**时才允许把一条报错标成 "bash 也会拒绝"
+# 为什么需要它：preshell 只有在**有证据**时才允许把一条报错标成 "bash 也会拒绝"
 # （ParseStatus::Invalid）。没有证据时一律算自己的缺口（Unsupported）。
 # 这个脚本就是产证据的地方，并强制一条不变量：
 #
@@ -23,7 +23,7 @@
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-bin="$root/_build/native/release/build/cmd/mbby/mbby.exe"
+bin="$root/_build/native/release/build/cmd/preshell/preshell.exe"
 
 corpus="${1:-${BASH_TESTS:-}}"
 if [ -z "$corpus" ]; then
@@ -88,7 +88,7 @@ done
 total=$((both_ok + we_gap + we_permissive + corroborated))
 
 cat <<EOF
-# shaudit × bash -n 差分
+# preshell × bash -n 差分
 
 语料：$corpus
 文件数：$total

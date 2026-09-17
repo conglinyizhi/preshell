@@ -1,6 +1,6 @@
 # 调用方式
 
-mbby 是**独立工具**，调用它的唯一方式是起子进程。这样调用方用任何语言都行，
+preshell 是**独立工具**，调用它的唯一方式是起子进程。这样调用方用任何语言都行，
 GPL 也停在进程边界上——不链接、不 import、不静态打包。
 
 ## 契约
@@ -16,12 +16,12 @@ stderr     帮助、用法、诊断——绝不混进 stdout
 `--version` 给出版本与 schema 号，调用方据此锁定自己解析的形状：
 
 ```json
-{"tool":"mbby","version":"0.1.0","schema":1}
+{"tool":"preshell","version":"0.1.0","schema":1}
 ```
 
 ## 为什么用 stdin 而不是参数
 
-`mbby --json '<一堆指令>'` 能用，但把命令当参数传有三个问题：
+`preshell --json '<一堆指令>'` 能用，但把命令当参数传有三个问题：
 
 - 命令里本来就有引号、换行、`$`，调用方得先转义一遍；转错了自己看不出来
 - 单个参数有长度上限（Linux 常见 128KB）
@@ -33,8 +33,8 @@ stdin 没有这些问题：命令原样进去，原样分析。
 
 ```bash
 moon build --release --target native
-install -Dm755 _build/native/release/build/cmd/mbby/mbby.exe ~/.local/bin/mbby
-mbby --version
+install -Dm755 _build/native/release/build/cmd/preshell/preshell.exe ~/.local/bin/preshell
+preshell --version
 ```
 
 （`moon install` 也能装，但要等发布到 Mooncakes。）
@@ -47,8 +47,8 @@ mbby --version
 import { spawnSync } from "node:child_process";
 
 export function analyze(command) {
-  const r = spawnSync("mbby", [], { input: command, encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`mbby failed: ${r.stderr}`);
+  const r = spawnSync("preshell", [], { input: command, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`preshell failed: ${r.stderr}`);
   return JSON.parse(r.stdout);
 }
 ```
@@ -62,9 +62,9 @@ export function analyze(command) {
 import json, subprocess
 
 def analyze(command: str) -> dict:
-    r = subprocess.run(["mbby"], input=command, capture_output=True, text=True)
+    r = subprocess.run(["preshell"], input=command, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"mbby failed: {r.stderr}")
+        raise RuntimeError(f"preshell failed: {r.stderr}")
     return json.loads(r.stdout)
 ```
 
@@ -75,20 +75,20 @@ use std::process::{Command, Stdio};
 use std::io::Write;
 
 pub fn analyze(command: &str) -> serde_json::Value {
-    let mut child = Command::new("mbby")
+    let mut child = Command::new("preshell")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().expect("spawn mbby");
+        .spawn().expect("spawn preshell");
     child.stdin.take().unwrap().write_all(command.as_bytes()).unwrap();
-    let out = child.wait_with_output().expect("wait mbby");
-    assert!(out.status.success(), "mbby failed: {}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).expect("mbby produced invalid JSON")
+    let out = child.wait_with_output().expect("wait preshell");
+    assert!(out.status.success(), "preshell failed: {}", String::from_utf8_lossy(&out.stderr));
+    serde_json::from_slice(&out.stdout).expect("preshell produced invalid JSON")
 }
 ```
 
 ### Shell
 
 ```bash
-mbby < script.sh | jq .
+preshell < script.sh | jq .
 ```
 
 ## 读什么、别读什么

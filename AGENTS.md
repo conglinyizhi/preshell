@@ -1,4 +1,4 @@
-# shaudit 项目规约（给 agent）
+# preshell 项目规约（给 agent）
 
 shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit，native target。
 
@@ -20,7 +20,7 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   - `subscript.mbt` 数组下标；`cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化
   - `effects.mbt` 影响面提取（对外的核心答案）；`facts.mbt` 命令分类等事实
   - `status.mbt` 解析状态与 Report
-- `cmd/shaudit/` — CLI：argv 或 stdin 进，JSON 出
+- `cmd/preshell/` — CLI：argv 或 stdin 进，JSON 出
 - `tools/corpus/` — 与 `bash -n` 的差分证据生成器
 - `docs/example-policy.md` — 调用方怎么用这份 JSON（不是本工具的一部分）
 
@@ -73,7 +73,7 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 
 ## 定位失败时怎么查
 
-- issue 带行号：`shaudit --scan "$(cat f.sh)"` 每条都带 `(line N)`
+- issue 带行号：`preshell --scan "$(cat f.sh)"` 每条都带 `(line N)`
 - 差分给四象限和报错原文分布：`tools/corpus/run.sh`
 - 按行二分对多行构造（here-doc、多行引号）会误导：用完整构造的切片，或直接看行号
 

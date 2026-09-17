@@ -1,5 +1,5 @@
 ///|
-/// mbby — report what a shell command touches. No verdicts.
+/// preshell — report what a shell command touches. No verdicts.
 ///
 /// The contract callers rely on is deliberately small:
 ///
@@ -13,10 +13,10 @@
 ///
 /// argv is accepted as a convenience for interactive use:
 ///
-///   mbby 'rm -rf build/'          analyse the arguments
-///   mbby < script.sh              analyse stdin (what callers should do)
-///   mbby --version                tool and schema version, as JSON
-///   mbby --help                   this text, on stderr
+///   preshell 'rm -rf build/'          analyse the arguments
+///   preshell < script.sh              analyse stdin (what callers should do)
+///   preshell --version                tool and schema version, as JSON
+///   preshell --help                   this text, on stderr
 ///
 /// Developer modes, not part of the caller contract:
 ///
@@ -45,7 +45,7 @@ async fn main {
     if a == "--version" {
       println(
         Json::object({
-          "tool": Json::string("mbby"),
+          "tool": Json::string("preshell"),
           "version": Json::string(tool_version()),
           "schema": Json::number(@lib.report_version().to_double()),
         }).stringify(),
@@ -128,10 +128,10 @@ async fn read_stdin_text() -> String {
 ///|
 async fn usage() -> Unit {
   let text =
-    #|mbby — report what a shell command touches (no verdicts)
+    #|preshell — report what a shell command touches (no verdicts)
     #|
-    #|usage: mbby [options] [<command>]
-    #|       mbby < script.sh          # preferred: the command comes from stdin
+    #|usage: preshell [options] [<command>]
+    #|       preshell < script.sh          # preferred: the command comes from stdin
     #|
     #|  --version    print tool and schema version as JSON
     #|  --help       this text

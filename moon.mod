@@ -1,4 +1,4 @@
-name = "conglinyizhi/shaudit"
+name = "conglinyizhi/preshell"
 
 version = "0.1.0"
 
@@ -10,7 +10,7 @@ keywords = [ "bash", "shell", "parser", "audit", "sandbox" ]
 
 description = "Static bash command auditor: parse-only, never executes. Reports what a command would touch."
 
-repository = "https://github.com/conglinyizhi/shaudit"
+repository = "https://github.com/conglinyizhi/preshell"
 
 preferred_target = "native"
 

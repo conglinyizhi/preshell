@@ -1,5 +1,5 @@
 import {
-  "conglinyizhi/shaudit/lib",
+  "conglinyizhi/preshell/lib",
   "moonbitlang/core/json",
   "moonbitlang/core/env",
   "moonbitlang/async",
