@@ -168,6 +168,20 @@ bash 语法语料 5 降到 3。教训：`((`/`))` 只在算术上下文里才有
 `sh`/`dash`/`bash` 视为已建模集合，POSIX 脚本不产生噪音。判断依据是 shebang
 本身，不是猜的：`declared_shell` 认 `#!/usr/bin/env X` 形式，也会剥掉 `-e` 这类参数。
 
+## bash 侧记分牌（451 个 .sub）
+
+**433 通过 / 1 缺口 / 3 太宽松 / 3 两边报错 / 0 崩溃**（会话开始时是 431/3/3/3/0）。
+
+那 3 个「太宽松」全是 oracle 的问题，不是漏判，两个成因都要记住：
+
+- `extglob4.sub`、`extglob6.sub` 需要 `shopt -s extglob`。它们本来就来自 bash 自己的
+  测试套件，`bash -n` 不带该选项会拒，`bash -O extglob -n` 就通过。
+- `exportfunc1.sub` 第 14 行有十个立即文档，撞上 bash 的立即文档数量上限
+  （`超出最大立即文档计数`）。这是资源上限，不是语法规则。
+
+剩下那 1 个缺口是 `func5.sub` 的 `<(:) ()`，文件自己注明「these are still errors」，
+而且是 POSIX 模式下的错误；非 POSIX 模式 bash 接受，我们报 Unsupported（保守方向）。
+
 ## zsh 支持（进行中）
 
 按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单和工作量
