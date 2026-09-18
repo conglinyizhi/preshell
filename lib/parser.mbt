@@ -368,7 +368,40 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
       // An adjacent pair is arithmetic only if the text between the parens is
       // followed by another paren; otherwise it is a subshell inside a
       // subshell, which is what zdiff relies on.
-      if self.next_is_adjacent("(") && self.lex.is_arith_at(self.cur_start) {
+      if self.lex.dialect is Zsh && self.next_is_adjacent(")") {
+        // zsh's anonymous function: `()` glued together, then a command, then
+        // the arguments it is called with. `( )` with a space inside is an
+        // empty subshell instead, and the word after it is a syntax error,
+        // so the adjacency is what tells the two apart.
+        self.advance()
+        self.advance()
+        let body = self.parse_command()
+        let args : Array[Word] = []
+        let redirects : Array[Redirect] = []
+        for ;; {
+          match self.cur {
+            TWord(w) => {
+              args.push(w)
+              self.advance()
+            }
+            TOp(op) =>
+              if is_redirect_op(op) {
+                redirects.push(self.parse_redirect(None))
+              } else {
+                break
+              }
+            _ => break
+          }
+        }
+        if is_empty_command(body) &&
+          args.length() == 0 &&
+          redirects.length() == 0 {
+          // `()` with nothing after it: zsh refuses this too.
+          self.lex.fail("expected a command after the anonymous function")
+        }
+        Cmd::AnonFunc(body~, args~, redirects~)
+      } else if self.next_is_adjacent("(") &&
+        self.lex.is_arith_at(self.cur_start) {
         let start = self.cur_start + 2
         self.advance()
         self.advance()
@@ -934,6 +967,18 @@ fn parse_fd(s : String) -> Int {
     v = v * 10 + (c.to_int() - '0'.to_int())
   }
   v
+}
+
+///|
+/// Whether a command carries nothing at all: `()`, or an empty `;`.
+fn is_empty_command(c : Cmd) -> Bool {
+  match c {
+    Simple(s) =>
+      s.assigns.length() == 0 &&
+      s.words.length() == 0 &&
+      s.redirects.length() == 0
+    _ => false
+  }
 }
 
 ///|

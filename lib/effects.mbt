@@ -385,6 +385,18 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
       self.restore_cwd(saved)
     }
     Cmd::Group(seq) => self.walk_seq(seq)
+    Cmd::AnonFunc(body~, args~, redirects~) => {
+      // The body runs now, with those words as its arguments, so neither part
+      // is optional: a command substitution inside an argument is a real
+      // command, and the redirects apply to the call.
+      self.walk_cmd(body)
+      for w in args {
+        self.walk_word(w)
+      }
+      for r in redirects {
+        self.redirect_effects(r)
+      }
+    }
     Cmd::Always(inner~, always~) => {
       // Both blocks run, so both contribute: the finally block is not optional.
       self.walk_seq(inner)

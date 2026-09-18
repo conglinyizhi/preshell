@@ -77,6 +77,15 @@ fn collect_cmd_bashisms(
     }
     Cmd::Subshell(inner) | Cmd::Group(inner) =>
       collect_bashisms(inner, rejects, differs)
+    Cmd::AnonFunc(body~, args~, redirects~) => {
+      collect_cmd_bashisms(body, rejects, differs)
+      for w in args {
+        collect_word_bashisms(w, rejects, differs)
+      }
+      for r in redirects {
+        collect_word_bashisms(r.target, rejects, differs)
+      }
+    }
     Cmd::Always(inner~, always~) => {
       collect_bashisms(inner, rejects, differs)
       collect_bashisms(always, rejects, differs)

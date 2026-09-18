@@ -88,6 +88,11 @@ pub(all) enum Cmd {
   FuncDef(name~ : String, body~ : Cmd, keyword~ : Bool)
   /// zsh: `{ body } always { fin }`, the block that runs either way.
   Always(inner~ : Seq, always~ : Seq)
+  /// zsh: `() { body } arg...` -- an anonymous function. It runs right there,
+  /// with the words after the body as its arguments, so both the body and
+  /// anything inside those words are commands that really run. bash refuses the
+  /// whole form.
+  AnonFunc(body~ : Cmd, args~ : Array[Word], redirects~ : Array[Redirect])
   Arith(String)
   Cond(String) // [[ ... ]] kept as raw text in the spike
   /// Any compound command may carry its own redirections:

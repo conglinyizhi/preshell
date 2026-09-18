@@ -365,3 +365,28 @@ test "zsh spells the clobber redirect with a bang, bash does not" {
   inspect(ztouched("echo a > out"), content="W:out")
   inspect(touched("echo a > out"), content="W:out")
 }
+
+///|
+test "zsh's anonymous function runs its body with its arguments" {
+  // Measured: `() { echo $# } one two three` prints 3 in zsh, and bash refuses
+  // every one of these forms. The body is audited because it runs right there.
+  debug_inspect(zstatus("() { echo hi }"), content="Complete")
+  debug_inspect(zstatus("(){ echo hi }"), content="Complete")
+  debug_inspect(zstatus("() { echo $1 $2 } a b"), content="Complete")
+  debug_inspect(zstatus("() if true; then echo yes; fi"), content="Complete")
+  debug_inspect(zstatus("() (echo sub)"), content="Complete")
+  inspect(ztouched("() { rm -rf /tmp/anonx } one two"), content="D:/tmp/anonx")
+  // A command substitution in the arguments is a command that runs.
+  inspect(ztouched("() { echo $1 } $(rm -rf /tmp/y)"), content="U:$1 D:/tmp/y")
+  inspect(ztouched("() { cat a } > /tmp/o"), content="R:a W:/tmp/o")
+  // `( )` with a space is an empty subshell, and zsh refuses the word after it.
+  debug_inspect(zstatus("( ) { echo hi }"), content="Unsupported")
+  // No body at all is refused by zsh as well.
+  debug_inspect(zstatus("()"), content="Unsupported")
+  // bash has no anonymous function: every form above is a syntax error there.
+  for c in ["() { echo hi }", "(){ echo hi }", "() (echo sub)"] {
+    debug_inspect(analyze(c).status, content="Unsupported")
+  }
+  // An empty subshell with a body word is still fine where the shells agree.
+  debug_inspect(zstatus("( : )"), content="Complete")
+}
