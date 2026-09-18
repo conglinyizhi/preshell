@@ -390,3 +390,27 @@ test "zsh's anonymous function runs its body with its arguments" {
   // An empty subshell with a body word is still fine where the shells agree.
   debug_inspect(zstatus("( : )"), content="Complete")
 }
+
+///|
+test "the conditional keyword is a word, not a bracket expression" {
+  // `[[` at command position was read as a glob bracket, so the whole
+  // condition became a single command word and `if [[ ... ]] then` fell apart.
+  // Measured: bash and zsh agree on all of these.
+  debug_inspect(zstatus("if [[ \"$x\" == a ]] then :; fi"), content="Complete")
+  debug_inspect(
+    analyze("if [[ \"$x\" == a ]] then :; fi").status,
+    content="Complete",
+  )
+  debug_inspect(zstatus("if [[ -f x ]] then :; fi"), content="Complete")
+  debug_inspect(zstatus("if [[ $x == a ]] then :; fi"), content="Complete")
+  debug_inspect(zstatus("[[ \"$x\" == a ]] && echo y"), content="Complete")
+  // A bracket expression in an argument is still a pattern, so the fix must not
+  // reach outside command position.
+  inspect(ztouched("rm [[:alpha:]]"), content="D:[[:alpha:]] U:[[:alpha:]]")
+  debug_inspect(
+    zstatus("case x in [[:alpha:]]) echo;; esac"),
+    content="Complete",
+  )
+  // A simple command still needs its separator before `then`.
+  debug_inspect(zstatus("if true then :; fi"), content="Unsupported")
+}

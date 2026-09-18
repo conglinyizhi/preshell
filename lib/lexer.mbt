@@ -750,6 +750,15 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         flush_lit(parts, lit)
         parts.push(ProcSub('=', self.sub_seq("=( ) process substitution")))
       }
+      '[' if self.cmd_pos && !self.in_casepat && self.peek_at(1) == Some('[') => {
+        // `[[` in command position is the conditional keyword, not a bracket
+        // expression. Reading it as a glob swallowed the whole condition into
+        // one word: `[[ "$x" == a ]]` became a single command word.
+        flush_lit(parts, lit)
+        self.advance(2)
+        parts.push(Lit("[["))
+        break
+      }
       '[' if self.looks_like_subscript() => {
         flush_lit(parts, lit)
         parts.push(Subscript(self.read_subscript()))
