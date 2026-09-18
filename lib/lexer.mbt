@@ -721,7 +721,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         parts.push(CmdSub(self.backquote_seq(body)))
       }
       '$' => self.read_dollar(parts, lit, !unquoted)
-      '<' | '>' if self.peek_at(1) == Some('(') => {
+      '<' | '>' if unquoted && self.peek_at(1) == Some('(') => {
         let dir = c
         self.advance(2)
         flush_lit(parts, lit)
@@ -731,7 +731,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         flush_lit(parts, lit)
         parts.push(Glob(self.read_numeric_glob()))
       }
-      '+' | '@' | '!' if self.peek_at(1) == Some('(') => {
+      '+' | '@' | '!' if unquoted && self.peek_at(1) == Some('(') => {
         let g = self.read_extglob()
         match g {
           Some(text) => {
@@ -767,11 +767,11 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         parts.push(Lit("[["))
         break
       }
-      '[' if self.looks_like_subscript() => {
+      '[' if unquoted && self.looks_like_subscript() => {
         flush_lit(parts, lit)
         parts.push(Subscript(self.read_subscript()))
       }
-      '*' | '?' | '[' => {
+      '*' | '?' | '[' if unquoted => {
         let g = self.read_glob()
         match g {
           Some(text) => {

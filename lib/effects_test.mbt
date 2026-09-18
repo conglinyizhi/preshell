@@ -178,3 +178,20 @@ test "a command substitution inside [[ ]] still runs" {
   inspect(touched("[[ -f x ]]"), content="")
   debug_inspect(analyze("[[ -f x ]]").status, content="Complete")
 }
+
+///|
+test "quotes make process substitution and globs literal" {
+  // Measured: inside double quotes a `<( )` and a `*`/`[` are ordinary text.
+  // We used to see a process substitution and a glob there, which invented a
+  // command (`echo "<(a)"` reported Exec a) and turned `rm "*"` into a pattern.
+  inspect(touched("echo \"<(a)\""), content="")
+  inspect(touched("rm \"*\""), content="D:*")
+  debug_inspect(
+    analyze_dialect("local a=\"<({[\" b=\">)}]\"", Zsh).status,
+    content="Complete",
+  )
+  // Unquoted, both are what they look like.
+  inspect(touched("rm *"), content="D:* U:*")
+  inspect(touched("cat <(echo hi)"), content="R:<() U:<()")
+  inspect(touched("echo \"$(cat x)\""), content="R:x U:$()")
+}
