@@ -640,15 +640,25 @@ fn Collector::classify(
   line : Int,
 ) -> Unit {
   let items = arg_items(s)
-  let flags : Array[String] = []
-  let operands : Array[(String, Bool)] = []
-  for it in items {
-    let (t, _) = it
-    if t.has_prefix("-") {
-      flags.push(t)
-    } else if t != "" {
-      operands.push(it)
-    }
+  // Option values are the table's business (lib/opts.mbt): an option that
+  // consumes a value must not leave it on the operand side. Programs without
+  // a table keep the old "starts with a dash" split exactly.
+  let po = opts_of(n)
+  let scan = if has_table(po) {
+    scan_args(po, items)
+  } else {
+    scan_legacy(items)
+  }
+  let flags = scan.flags
+  let operands = scan.operands
+  // The first operand of grep/awk/sed is a pattern or a script, unless the
+  // pattern came from -f/-e; then every operand is a file.
+  let script_operands = if scan.from_option {
+    operands
+  } else if operands.length() > 1 {
+    operands[1:].to_array()
+  } else {
+    []
   }
   // `find -exec` runs another program, so the whole command goes opaque:
   // reporting the directory it walks would miss the command it runs.
@@ -678,6 +688,15 @@ fn Collector::classify(
     // Nothing else can be said about it, and saying nothing would read as
     // "touches nothing".
     return
+  }
+  // A value the table says is a path counts in the direction it was given:
+  // sort -o writes its value, grep -f reads it, cp -t only names a directory.
+  for v in scan.values {
+    match v.val {
+      ReadPath | TargetDir => self.push(Read, v.text, v.dynamic, line)
+      WritePath => self.push(Write, v.text, v.dynamic, line)
+      _ => ()
+    }
   }
   let writes = fn(xs : Array[(String, Bool)]) {
     for it in xs {
@@ -733,38 +752,62 @@ fn Collector::classify(
       // Predicates are not paths: only the starting points are.
       reads(leading_operands(items))
     "grep" | "rg" | "awk" | "sed" => {
-      // The first operand is the pattern or the script, and the rest are
-      // files. Reporting the pattern as a path the command reads is the kind
-      // of false positive that makes a caller stop trusting the report.
-      let rest = if operands.length() > 1 {
+      let in_place = n == "sed" &&
+        (scan.opts.contains("-i") || scan.opts.contains("--in-place"))
+      if in_place {
+        writes(script_operands)
+        // `sed -i.bak 's/a/b/' data.txt` also writes data.txt.bak. The suffix
+        // has to be attached; a bare -i makes no backup.
+        match value_of(scan, ["-i", "--in-place"]) {
+          Some(suffix) =>
+            for it in script_operands {
+              let (t, d) = it
+              self.push(Write, t + suffix, d, line)
+            }
+          None => ()
+        }
+      } else {
+        reads(script_operands)
+      }
+    }
+    "tee" | "touch" | "truncate" | "mkdir" => writes(operands)
+    "chmod" | "chown" | "chgrp" => {
+      // The first operand is the mode, the owner or the group; the rest are
+      // files. With --reference the mode/owner comes from an option, so every
+      // operand is a file. Reporting `644` as a written path is the kind of
+      // invented fact that makes a report untrustworthy.
+      let files = if scan.opts.contains("--reference") {
+        operands
+      } else if operands.length() > 1 {
         operands[1:].to_array()
       } else {
         []
       }
-      if n == "sed" && flags.any(fn(f) { f.has_prefix("-i") }) {
-        writes(rest)
-      } else {
-        reads(rest)
-      }
+      writes(files)
     }
-    "tee" | "touch" | "truncate" | "mkdir" => writes(operands)
-    "chmod" | "chown" | "chgrp" =>
-      // The first operand is the mode, the owner or the group; the rest are
-      // files. Reporting `644` as a written path is the kind of invented fact
-      // that makes a report untrustworthy.
-      writes(if operands.length() > 1 { operands[1:].to_array() } else { [] })
     "ln" =>
-      // `ln target link`: the last operand is what gets created.
-      if operands.length() > 0 {
-        let n_op = operands.length()
-        for i, it in operands {
-          let (t, d) = it
-          if i == n_op - 1 {
-            self.push(Write, t, d, line)
-          } else {
+      match scan.target_dir {
+        // `ln -t dir a`: the link is created inside dir, under the basename.
+        // The directory's own hole (or its glob) makes the link dynamic.
+        Some((dir, dir_d)) =>
+          for it in operands {
+            let (t, d) = it
             self.push(Read, t, d, line)
+            self.push(Write, join_dir(dir, t), dir_d || d, line)
           }
-        }
+        // `ln target link`: the last operand is what gets created.
+        None =>
+          if operands.length() > 0 {
+            let n_op = operands.length()
+            for i, it in operands {
+              let (t, d) = it
+              if i == n_op - 1 {
+                self.push(Write, t, d, line)
+              } else {
+                self.push(Read, t, d, line)
+              }
+            }
+          }
       }
     "split" | "csplit" => {
       // The input is read; the outputs are named by the tool (xaa, xab, ...),
@@ -774,17 +817,33 @@ fn Collector::classify(
         self.push(Unknown, n + ": output file names are derived", true, line)
       }
     }
-    "cp" | "mv" | "install" | "rsync" => {
-      let n_op = operands.length()
-      for i, it in operands {
-        let (t, d) = it
-        if i == n_op - 1 {
-          self.push(Write, t, d, line)
-        } else {
-          self.push(Read, t, d, line)
+    "cp" | "mv" | "install" | "rsync" =>
+      match scan.target_dir {
+        // `cp -t dir a b` writes dir/a and dir/b. mv removes the sources
+        // instead of reading them (measured: D:a.txt W:destdir/a.txt).
+        // The directory's own hole (or its glob) makes the write dynamic.
+        Some((dir, dir_d)) =>
+          for it in operands {
+            let (t, d) = it
+            if n == "mv" {
+              self.push(Delete, t, d, line)
+            } else {
+              self.push(Read, t, d, line)
+            }
+            self.push(Write, join_dir(dir, t), dir_d || d, line)
+          }
+        None => {
+          let n_op = operands.length()
+          for i, it in operands {
+            let (t, d) = it
+            if i == n_op - 1 {
+              self.push(Write, t, d, line)
+            } else {
+              self.push(Read, t, d, line)
+            }
+          }
         }
       }
-    }
     "zip" =>
       // `zip archive.zip members...`: the archive is written, the members read.
       match operands {
@@ -798,12 +857,14 @@ fn Collector::classify(
         [] => ()
       }
     "gzip" | "bzip2" | "xz" | "zstd" =>
-      // These rewrite their operand in place unless told otherwise, so the
-      // first operand is both read and written.
+      // These rewrite their operand in place unless told otherwise; with
+      // -c/--stdout the result goes to stdout and the operand is only read.
       match operands {
         [(t, d), ..] => {
           self.push(Read, t, d, line)
-          self.push(Write, t, d, line)
+          if !scan.to_stdout {
+            self.push(Write, t, d, line)
+          }
         }
         [] => ()
       }
@@ -955,12 +1016,7 @@ fn Collector::classify(
   // Only the operands this command treats as paths get the hole check;
   // otherwise a pattern like `-name "*.mbt"` is reported as an unknown path.
   let checked = match n {
-    "grep" | "rg" | "awk" | "sed" =>
-      if operands.length() > 1 {
-        operands[1:].to_array()
-      } else {
-        []
-      }
+    "grep" | "rg" | "awk" | "sed" => script_operands
     "find" => leading_operands(items)
     _ => operands
   }

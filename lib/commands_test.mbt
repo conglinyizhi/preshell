@@ -236,3 +236,156 @@ test "a named descriptor prefix before a redirect" {
   // A brace word that is not a valid name stays an ordinary word.
   debug_inspect(analyze("echo {not a fd}").status, content="Complete")
 }
+
+///|
+/// Option values: the value of an option is not an operand, and a path-shaped
+/// value counts in the direction the option gives it.
+///
+/// Every case here was measured before it was written into the table. The
+/// method: an `LD_PRELOAD` shim over the libc file entry points (open/openat/
+/// fopen/freopen/stat/fstatat/statx/unlink/rename/link/symlink/chmod/mkdir/
+/// truncate) logged the flag each call used while the real command ran in a
+/// scratch directory; the expected string below is what that log says, mapped
+/// to R/W/D/S. For the compressors `-c` a filesystem snapshot was used
+/// instead, because those binaries do not all go through libc.
+test "an option value is never an operand" {
+  let cases : Array[(String, String)] = [
+    // sort -o writes; all three spellings measured (separate value, attached,
+    // and --output=).
+    ("sort -o out.txt in.txt", "W:out.txt R:in.txt"),
+    ("sort --output=out.txt in.txt", "W:out.txt R:in.txt"),
+    ("sort -oout.txt in.txt", "W:out.txt R:in.txt"),
+    // cp/install/ln -t: the operands land inside the directory. cp/install/ln
+    // read the source, mv removes it (measured: rename).
+    (
+      "cp -t destdir a.txt b.txt", "R:destdir R:a.txt W:destdir/a.txt R:b.txt W:destdir/b.txt",
+    ),
+    ("cp --target-directory=d a.txt", "R:d R:a.txt W:d/a.txt"),
+    ("mv -t destdir a.txt", "R:destdir D:a.txt W:destdir/a.txt"),
+    ("install -t d a.txt", "R:d R:a.txt W:d/a.txt"),
+    ("ln -t d a.txt", "R:d R:a.txt W:d/a.txt"),
+    // -f carries the pattern/script from a file, so every operand is a file.
+    ("sed -f script.sed data.txt", "R:script.sed R:data.txt"),
+    ("awk -f prog.awk in.txt", "R:prog.awk R:in.txt"),
+    ("grep -f pats.txt data.txt", "R:pats.txt R:data.txt"),
+    ("grep --file=pats.txt data.txt", "R:pats.txt R:data.txt"),
+    // sed -i.bak writes the file and its backup.
+    ("sed -i.bak s/a/b/ data.txt", "W:data.txt W:data.txt.bak"),
+  ]
+  for c in cases {
+    let (src, want) = c
+    let got = touched(src)
+    if got != want {
+      fail("\{src}: want \{want}, got \{got}")
+    }
+    if analyze(src).impact.uncertain {
+      fail("\{src}: a static option value must not make the report uncertain")
+    }
+  }
+}
+
+///|
+/// The other direction: values that are not paths must not be reported at all.
+/// Reporting `R:2` for `head -n 2` is an invented fact, and an invented fact
+/// costs more trust than a missing one.
+test "an option value that is not a path is not reported" {
+  let cases : Array[(String, String)] = [
+    ("sort -k 2 data.txt", "R:data.txt"),
+    ("head -n 5 data.txt", "R:data.txt"),
+    ("tail -n 5 data.txt", "R:data.txt"),
+    ("diff -U 3 a.txt b.txt", "R:a.txt R:b.txt"),
+    ("cut -d ' ' -f 2 data.txt", "R:data.txt"),
+    ("uniq -f 1 data.txt", "R:data.txt"),
+    ("join -1 1 -2 1 a.txt b.txt", "R:a.txt R:b.txt"),
+    // --reference is stat'd, not opened; the file it names is read, and every
+    // operand becomes a file because the mode comes from the option.
+    ("chmod --reference=ref.txt d.txt", "R:ref.txt W:d.txt"),
+    // -r on touch/truncate is a reference file (stat), not a write target.
+    ("touch -r ref.txt data.txt", "R:ref.txt W:data.txt"),
+    ("truncate -r ref.txt data.txt", "R:ref.txt W:data.txt"),
+    // -c sends the compressed stream to stdout: nothing is rewritten.
+    ("gzip -c f.txt", "R:f.txt"),
+  ]
+  for c in cases {
+    let (src, want) = c
+    let got = touched(src)
+    if got != want {
+      fail("\{src}: want \{want}, got \{got}")
+    }
+  }
+}
+
+///|
+/// The rest of the measured rows: long options, clustered short options and
+/// attached values all reach the same place. These exist so a table row cannot
+/// silently stop working.
+test "long and attached option spellings" {
+  let cases : Array[(String, String)] = [
+    ("sort -t: -k1,1 data.txt", "R:data.txt"),
+    ("sort --key=2 --output=out.txt data.txt", "W:out.txt R:data.txt"),
+    ("head -c 3 data.txt", "R:data.txt"),
+    ("head --lines=5 data.txt", "R:data.txt"),
+    ("tail -c 3 data.txt", "R:data.txt"),
+    ("tail --bytes=3 --sleep-interval=1 data.txt", "R:data.txt"),
+    ("diff -C 2 a.txt b.txt", "R:a.txt R:b.txt"),
+    ("diff --unified=3 --context=2 a.txt b.txt", "R:a.txt R:b.txt"),
+    ("cut -c 1-2 data.txt", "R:data.txt"),
+    ("cut --characters=1-2 data.txt", "R:data.txt"),
+    ("cut --fields=2 --delimiter=: --bytes=1 data.txt", "R:data.txt"),
+    (
+      "uniq --skip-fields=1 --skip-chars=1 --check-chars=1 data.txt", "R:data.txt",
+    ),
+    ("join -j 1 a.txt b.txt", "R:a.txt R:b.txt"),
+    ("join -t: -o 1.1 a.txt b.txt", "R:a.txt R:b.txt"),
+    // -e also supplies the pattern, so data.txt is not dropped as "the
+    // pattern".
+    ("grep -e foo data.txt", "R:data.txt"),
+    ("grep --regexp=foo data.txt", "R:data.txt"),
+    ("grep -m 1 -A 2 -B 2 -C 2 foo data.txt", "R:data.txt"),
+    (
+      "grep --max-count=1 --after-context=2 --before-context=2 --context=2 foo data.txt",
+      "R:data.txt",
+    ),
+    ("rg -f pats.txt data.txt", "R:pats.txt R:data.txt"),
+    ("rg --file=pats.txt data.txt", "R:pats.txt R:data.txt"),
+    ("rg -A 2 foo data.txt", "R:data.txt"),
+    ("rg -e foo -m 1 -t txt -g *.txt data.txt", "R:data.txt"),
+    ("awk -v x=1 {print} data.txt", "R:data.txt"),
+    ("awk -F: {print} data.txt", "R:data.txt"),
+    ("awk --assign x=1 --field-separator=: {print} data.txt", "R:data.txt"),
+    ("sed -e s/a/b/ data.txt", "R:data.txt"),
+    ("sed --expression=s/a/b/ data.txt", "R:data.txt"),
+    ("sed --in-place=.bak -e s/a/b/ data.txt", "W:data.txt W:data.txt.bak"),
+    ("cp --suffix=.bak a.txt b.txt", "R:a.txt W:b.txt"),
+    ("cp --backup=numbered a.txt b.txt", "R:a.txt W:b.txt"),
+    ("cp --target-directory destdir a.txt", "R:destdir R:a.txt W:destdir/a.txt"),
+    ("mv --suffix=.bak a.txt b.txt", "R:a.txt W:b.txt"),
+    ("mv --backup=numbered a.txt b.txt", "R:a.txt W:b.txt"),
+    ("install --mode=644 a.txt b.txt", "R:a.txt W:b.txt"),
+    ("install --owner=root --group=root a.txt b.txt", "R:a.txt W:b.txt"),
+    ("install --suffix=.bak --backup=numbered a.txt b.txt", "R:a.txt W:b.txt"),
+    ("ln --suffix=.bak --backup=numbered a.txt b.txt", "R:a.txt W:b.txt"),
+    ("chown --reference=ref.txt data.txt", "R:ref.txt W:data.txt"),
+    ("chgrp --reference=ref.txt data.txt", "R:ref.txt W:data.txt"),
+    ("touch --date=2020-01-01 data.txt", "W:data.txt"),
+    ("touch -t 202001010000 data.txt", "W:data.txt"),
+    ("touch --reference=ref.txt data.txt", "R:ref.txt W:data.txt"),
+    ("truncate --size=0 data.txt", "W:data.txt"),
+    ("truncate --reference=ref.txt data.txt", "R:ref.txt W:data.txt"),
+    ("gzip --stdout data.txt", "R:data.txt"),
+    ("gzip -9c data.txt", "R:data.txt"),
+    ("gzip -S .zz data.txt", "R:data.txt W:data.txt"),
+    ("bzip2 -c data.txt", "R:data.txt"),
+    ("bzip2 --stdout data.txt", "R:data.txt"),
+    ("xz -c data.txt", "R:data.txt"),
+    ("xz -S .zz data.txt", "R:data.txt W:data.txt"),
+    ("zstd --stdout data.txt", "R:data.txt"),
+  ]
+  for c in cases {
+    let (src, want) = c
+    let got = touched(src)
+    if got != want {
+      fail("\{src}: want \{want}, got \{got}")
+    }
+  }
+}
