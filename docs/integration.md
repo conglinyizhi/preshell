@@ -102,6 +102,32 @@ preshell < script.sh | jq .
 别把 `uncertain: false` 读成「安全」，也别把 `effects` 里没有 `Write` 读成「不写」——
 先看有没有 `modeled: false` 的 `Exec`：那是「有程序跑了，它碰什么我们不建模」。
 
+## 方言与 probe 模式
+
+命令可能来自 bash 工具，也可能是 zsh 脚本。`--shell=S` 决定用哪套文法读输入：
+
+- `auto`（默认）：按 shebang 选，没有 shebang 按 bash
+- `bash` / `zsh`：钉死一套文法
+- `probe`：先按输入自己声明的方言读，声明不了或读不通时再试 bash、zsh，
+  取第一个 `status` 为 `Complete` 的结果
+
+probe 的语义边界，调用方必须知道：
+
+- **probe 成功不等于方言确定。** 同一段文本可能两套文法都能解析，但碰的东西不同：
+  实测 `echo hi >! /tmp/out`，bash 写的是名为 `!` 的文件，zsh 写的是 `/tmp/out`。
+  probe 只保证「找到一套读得通的文法」，不保证「这就是它的方言」
+- 最后用了哪套文法写在 issue 里（`kind: "Note"`）。有两种情况会出现：
+  一是回退到非声明的文法（或没有声明、bash 读不通而改用 zsh）；
+  二是没有声明、bash 能读但 zsh 读出来的 effects 不一样。
+  有这条 Note 时 `impact.uncertain` 为 true
+- 输入自己声明了方言、又按那套方言读通时不加 Note：声明已经回答了问题
+- 所有文法都不通过时，返回第一条（bash）的结果，`status` 保持 `Unsupported`，
+  失败不会被包装成成功
+- 目前只有 bash 和 zsh 两级，没有独立的 POSIX sh 文法：`sh`/`dash` 归到 bash，
+  POSIX 差异由已有的 bashism Note 承担
+
+报告的形状（`version` / `status` / `impact` / `issues`）没有变化，方言信息走 `issues`。
+
 ## 性能与状态
 
 - 单次调用约 1ms（进程启动为主，解析 3µs）。一次审查一条命令，不需要常驻

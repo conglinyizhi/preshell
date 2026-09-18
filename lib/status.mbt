@@ -161,6 +161,190 @@ pub fn analyze_dialect(src : String, dialect : Dialect) -> Report {
 }
 
 ///|
+/// The dialect probe reads first: the input's own declaration when it names a
+/// grammar this tool models, otherwise bash. That is the same answer `auto`
+/// gives, and it is what probe compares the successful dialect against when
+/// deciding whether that dialect is an assumption.
+fn probe_primary(src : String) -> Dialect {
+  match declared_shell(src) {
+    Some(name) =>
+      match Dialect::from_shell_name(name) {
+        Some(d) => d
+        None => Bash
+      }
+    None => Bash
+  }
+}
+
+///|
+/// The order probe tries grammars in.
+///
+/// The declaration comes first. A script that says `#!/bin/zsh` has already
+/// answered the question, and trying bash before zsh would read a construct the
+/// two shells spell the same way with the wrong grammar while still reporting
+/// `Complete` — with no note at all, because that would look like the default.
+///
+/// After that, bash, then zsh. There is no third, POSIX level: `Dialect` has
+/// two values and `sh`/`dash` map to bash, so a two-level chain is all this can
+/// offer. POSIX-only differences are covered by the bashism note instead, which
+/// fires when a `#!/bin/sh` script uses syntax dash reads differently.
+fn probe_chain(primary : Dialect) -> Array[Dialect] {
+  let chain : Array[Dialect] = [primary]
+  for d in [Bash, Zsh] {
+    if !chain.contains(d) {
+      chain.push(d)
+    }
+  }
+  chain
+}
+
+///|
+/// The grammar probe would read `src` with: the first one in the chain whose
+/// analysis comes back `Complete`, or the primary when none does.
+///
+/// One consequence of the existing rules is worth naming here. A `#!/bin/zsh`
+/// script read as bash is already reported as a gap by `declared_shell_note`,
+/// so a zsh declaration never falls through to the bash element. The chain is
+/// still uniform; that element just cannot win.
+pub fn probe_dialect(src : String) -> Dialect {
+  let primary = probe_primary(src)
+  for d in probe_chain(primary) {
+    if analyze_dialect(src, d).status is Complete {
+      return d
+    }
+  }
+  primary
+}
+
+///|
+/// Read `src` by probe: try the declared grammar first, then bash, then zsh,
+/// and keep the first analysis that comes back `Complete`.
+///
+/// The report has to say which grammar answered, because "probe succeeded" is
+/// not evidence that the input's dialect is settled: the same text can parse
+/// under both grammars and mean different things (`>!` writes a file in zsh and
+/// a file named `!` in bash). That is a `Note`, not a new field, so the JSON
+/// shape is untouched; the note forces `uncertain` like every other caveat.
+/// Two cases get one, both checked in `probe_caveat`: a fallback the input does
+/// not declare, and a reading the other grammar disagrees with. A declared
+/// grammar that parsed the input, or a bare command both grammars read the same
+/// way, stays quiet.
+///
+/// When no grammar parses the input, the first result — the primary's — comes
+/// back unchanged, `Unsupported` included. A probe that found nothing is still
+/// a failure.
+pub fn analyze_probe(src : String) -> Report {
+  let primary = probe_primary(src)
+  let used = probe_dialect(src)
+  probe_caveat(analyze_dialect(src, used), src, primary, used)
+}
+
+///|
+/// Same as `analyze_probe`, from raw bytes. This is the path a subprocess
+/// caller uses. The dialect is resolved on the decoded text, but the analysis
+/// still runs over the bytes, so the decode caveats survive into the report.
+pub fn analyze_bytes_probe(bytes : Bytes) -> Report {
+  let (text, _) = decode_command(bytes)
+  let primary = probe_primary(text)
+  let used = probe_dialect(text)
+  probe_caveat(analyze_bytes_dialect(bytes, used), text, primary, used)
+}
+
+///|
+/// What a grammar is called in a report. The names match the `--shell=` values.
+fn dialect_label(d : Dialect) -> String {
+  match d {
+    Bash => "bash"
+    Zsh => "zsh"
+  }
+}
+
+///|
+/// Say which grammar was used when that is not self-evident from the input.
+///
+/// `Note` is deliberate: the parse succeeded, so the status keeps describing it.
+/// What changes is which grammar the answer describes, and that is the kind of
+/// caveat `Note` exists for. Two situations earn one:
+///
+/// - a fallback: the grammar that answered is not the one the input declares
+///   (or, with no declaration, not the default bash). The input does not
+///   confirm the dialect, so the caller must not read the answer as settled.
+/// - a disagreement: no declaration, the first grammar (bash) parsed the input,
+///   but zsh parses it too and reports different effects. `>!` is the measured
+///   case: bash writes a file named `!`, zsh writes the file that follows. Both
+///   readings are `Complete`, so the answer depends on which shell runs the
+///   text, and the report has to name the one it used.
+///
+/// A declared grammar that parsed the input, or a bare command the two grammars
+/// read the same way, gets neither: there is nothing to warn about.
+fn probe_caveat(
+  r : Report,
+  src : String,
+  primary : Dialect,
+  used : Dialect,
+) -> Report {
+  if used != primary {
+    let why = match declared_shell(src) {
+      Some(name) =>
+        "The input declares " +
+        name +
+        ", so this is not the grammar it asks for"
+      None => "The input declares no shell, so the dialect is an assumption"
+    }
+    let note = "probe: read as " +
+      dialect_label(used) +
+      ", because " +
+      dialect_label(primary) +
+      " did not parse this input. " +
+      why
+    return add_notes(r, [note], kind=Note)
+  }
+  match declared_shell(src) {
+    // The declaration settles the grammar; only a fallback would be worth
+    // reporting, and that case returned above.
+    Some(_) => r
+    None =>
+      match probe_disagreement(src, used, r.impact) {
+        Some(other) =>
+          add_notes(
+            r,
+            [
+              "probe: read as " +
+              dialect_label(used) +
+              ", but " +
+              dialect_label(other) +
+              " also parses this input and reports different effects. No shebang settles which grammar applies, so this is one reading of two",
+            ],
+            kind=Note,
+          )
+        None => r
+      }
+  }
+}
+
+///|
+/// The first other grammar in the chain that also parses `src` but reports
+/// different effects than `used`: the case where the dialect probe picked
+/// actually changes the answer. A grammar that does not parse the input cannot
+/// disagree about it, and one that parses it the same way is not worth a note.
+fn probe_disagreement(
+  src : String,
+  used : Dialect,
+  impact : Impact,
+) -> Dialect? {
+  for d in probe_chain(used) {
+    if d == used {
+      continue
+    }
+    let r = analyze_dialect(src, d)
+    if r.status is Complete && r.impact.effects != impact.effects {
+      return Some(d)
+    }
+  }
+  None
+}
+
+///|
 /// Drop NUL bytes, joining what surrounds them, which is what bash does.
 fn strip_nuls(src : String) -> (String, Array[String]) {
   if !src.contains_char('\u{0}') {

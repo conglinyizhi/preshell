@@ -15,6 +15,7 @@
 ///
 ///   preshell 'rm -rf build/'          analyse the arguments
 ///   preshell < script.sh              analyse stdin (what callers should do)
+///   preshell --shell=probe < cmd      try each grammar, keep the first hit
 ///   preshell --version                tool and schema version, as JSON
 ///   preshell --help                   this text, on stderr
 ///
@@ -92,11 +93,16 @@ async fn main {
     return
   }
   if evidence {
-    // One message per line, for the dialect that --shell names.
+    // One message per line, for the dialect that --shell names. `probe` is not
+    // a dialect, so this falls back to bash, the chain's first element.
     for m in @lib.syntax_evidence(dialect_for("", shell)) {
       println(m)
     }
     return
+  }
+  let probe = match shell {
+    Some("probe") => true
+    _ => false
   }
   let from_argv = rest.length() > 0
   // Read stdin once, as bytes. Both the report path and the developer modes use
@@ -116,8 +122,17 @@ async fn main {
     usage()
     return
   }
-  let dialect = dialect_for(src, shell)
+  // stdin is analysed from its bytes: that is the path a subprocess caller
+  // uses, and the only one that sees exactly what arrived (bar the null bytes
+  // the shell itself would drop).
   if shadow {
+    // There is no single tree to dump under probe, so dump the grammar probe
+    // would have settled on; the report modes carry the caveat instead.
+    let dialect = if probe {
+      @lib.probe_dialect(src)
+    } else {
+      dialect_for(src, shell)
+    }
     let (seq, errors) = @lib.parse_dialect(src, dialect)
     println(@json.to_json(seq).stringify(indent=2))
     for e in errors {
@@ -125,13 +140,19 @@ async fn main {
     }
     return
   }
-  // stdin is analysed from its bytes: that is the path a subprocess caller
-  // uses, and the only one that sees exactly what arrived (bar the null bytes
-  // the shell itself would drop).
-  let report = if from_argv {
-    @lib.analyze_dialect(src, dialect)
+  let report = if probe {
+    if from_argv {
+      @lib.analyze_probe(src)
+    } else {
+      @lib.analyze_bytes_probe(stdin_bytes.unwrap())
+    }
   } else {
-    @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect)
+    let dialect = dialect_for(src, shell)
+    if from_argv {
+      @lib.analyze_dialect(src, dialect)
+    } else {
+      @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect)
+    }
   }
   if scan {
     // One machine-readable line for tools/corpus/run.sh, then one line per
@@ -191,8 +212,14 @@ async fn usage() -> Unit {
     #|  --version    print tool and schema version as JSON
     #|  --help       this text
     #|  --evidence   print the syntax errors this dialect has evidence for
-    #|  --shell=S    read the input as S: auto (default), bash or zsh.
-    #|               auto follows the shebang and falls back to bash
+    #|  --shell=S    read the input as S: auto (default), bash, zsh or probe.
+    #|               auto follows the shebang and falls back to bash.
+    #|               probe tries the declared dialect, then bash, then zsh,
+    #|               and keeps the first grammar that parses the input. Only
+    #|               bash and zsh exist here, so the chain is two levels deep.
+    #|               A fallback the input does not declare is reported as a
+    #|               Note and makes the impact uncertain; the report names the
+    #|               dialect used. probe success is not proof of the dialect
     #|  --pretty     indent the JSON for humans
     #|  --shadow     dump the syntax tree (developer mode)
     #|  --scan       one line of status, then any issues (developer mode)

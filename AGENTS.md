@@ -187,7 +187,8 @@ bash 语法语料 5 降到 3。教训：`((`/`))` 只在算术上下文里才有
 按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单和工作量
 估计在 docs/zsh-plan.md；这里只放记分牌和口径。
 
-- CLI：`--shell=auto|bash|zsh`（auto 按 shebang，无 shebang 默认 bash）、`--evidence`
+- CLI：`--shell=auto|bash|zsh|probe`（auto 按 shebang，无 shebang 默认 bash；
+  probe 按「声明的方言 → bash → zsh」回退，最后用的方言用 Note 写进报告）、`--evidence`
 - 审核层与方言无关，不重复实现；差异只在词法与语法，用 lib/dialect.mbt 的 Dialect 分派
 - 语料是 zsh 源码树的真实代码：1244 文件、131822 行（Completion + Functions），
   采集脚本 tools/corpus/zsh_corpus.sh，oracle 用 `zsh -n`。注意这些文件没有 shebang，
