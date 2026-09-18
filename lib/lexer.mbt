@@ -69,6 +69,10 @@ pub(all) struct Lexer {
   /// csh form `for x ( a b )`. There the `(` is the word list's own paren, not
   /// a glob group.
   mut in_for_words : Bool
+  /// Set while the parser is inside an arithmetic command `(( ... ))`. There a
+  /// `#` is an operand (zsh's character-code operator), not a comment: measured,
+  /// both bash and zsh parse `(( 1 + 2 # c ))` and `(( #x == 97 ))`.
+  mut in_arith : Bool
 }
 
 ///|
@@ -93,6 +97,7 @@ pub fn Lexer::with_dialect(src : String, dialect : Dialect) -> Lexer {
     array_elems: false,
     in_casepat: false,
     in_for_words: false,
+    in_arith: false,
   }
 }
 
@@ -285,7 +290,7 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
       self.line += 1
       continue
     }
-    if c == '#' {
+    if c == '#' && !self.in_arith {
       for ;; {
         match self.peek() {
           None | Some('\n') => break

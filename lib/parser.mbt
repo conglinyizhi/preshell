@@ -403,6 +403,10 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
       } else if self.next_is_adjacent("(") &&
         self.lex.is_arith_at(self.cur_start) {
         let start = self.cur_start + 2
+        // Inside the arithmetic a `#` is an operand (zsh reads `#x` as a
+        // character code), not the start of a comment: measured, both shells
+        // accept `(( 1 + 2 # c ))`.
+        self.lex.in_arith = true
         self.advance()
         self.advance()
         let mut closed = false
@@ -435,6 +439,7 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
           }
         }
         let raw = self.lex.slice(start, raw_end)
+        self.lex.in_arith = false
         if closed {
           self.advance()
         } else {

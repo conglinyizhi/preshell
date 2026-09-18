@@ -133,3 +133,18 @@ test "a dup target that is not a descriptor writes a file" {
   inspect(touched("echo a >&-"), content="")
   inspect(touched("echo a 2>&1 > out"), content="W:out")
 }
+
+///|
+test "a hash inside arithmetic is an operand, not a comment" {
+  // Measured: both bash and zsh parse `(( 1 + 2 # c ))` and `(( #x == 97 ))`
+  // (zsh reads `#x` as the character code of the first character). Reading the
+  // `#` as a comment left the arithmetic open, so both dialects reported a gap.
+  debug_inspect(analyze("(( 1 + 2 # c ))").status, content="Complete")
+  inspect(ztouched("x=abc; (( #x == 97 ))"), content="")
+  debug_inspect(analyze("(( ##$chr ))").status, content="Complete")
+  // Outside arithmetic the comment still hides what follows, which is what
+  // keeps the flag from leaking past the closing parens.
+  inspect(touched("echo a # > /tmp/x"), content="")
+  inspect(touched("(( i++ )) ; echo a # > /tmp/x"), content="")
+  inspect(touched("echo a > /tmp/x # so what"), content="W:/tmp/x")
+}
