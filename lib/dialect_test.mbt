@@ -523,3 +523,34 @@ test "repeat takes a separator before its body" {
     content="Unsupported",
   )
 }
+
+///|
+test "a backquote is read by the shell that opened it" {
+  // The backquoted text was re-lexed with a fresh lexer fixed to bash, so an
+  // outer zsh was read with bash words inside. Measured: zsh's `>!` clobbers
+  // `f`, while bash's `>!` writes a file literally named `!`. Both parse, so a
+  // wrong inner grammar is a wrong effect table under a Complete status.
+  inspect(ztouched("x=`echo >! f`"), content="W:f")
+  inspect(touched("x=`echo >! f`"), content="W:!")
+  // A zsh-only loop is legal inside a backquote, and only for zsh.
+  debug_inspect(zstatus("x=`for i j in a b; do :; done`"), content="Complete")
+  debug_inspect(
+    analyze("x=`for i j in a b; do :; done`").status,
+    content="Unsupported",
+  )
+  // Word-position `(` is zsh's glob qualifier and a bash syntax error.
+  debug_inspect(zstatus("x=`echo *(.)`"), content="Complete")
+  debug_inspect(analyze("x=`echo *(.)`").status, content="Unsupported")
+  // The dialect has to travel through nesting as well.
+  inspect(ztouched("x=`cat \\`echo >! g\\``"), content="W:g R:$() U:$()")
+}
+
+///|
+test "the sibling command substitution already carries the dialect" {
+  // `$( )` and `<()` share the open lexer instead of starting a new one, so
+  // they were right before this fix. Pin them so the backquote path cannot
+  // regress them, and so the two spellings are known to agree.
+  inspect(ztouched("x=$(echo >! f)"), content="W:f")
+  inspect(touched("x=$(echo >! f)"), content="W:!")
+  inspect(ztouched("cat <(echo >! f)"), content="W:f R:<() U:<()")
+}

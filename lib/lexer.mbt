@@ -909,8 +909,12 @@ fn Lexer::sub_seq(self : Lexer, what : String) -> Seq {
 ///|
 /// A backquoted command gets its own little input: it ends at the end of that
 /// text, not at a `)`.
+///
+/// It is still the *same* shell reading it, so the dialect travels with the
+/// text: reading a zsh backquote with bash rules turned `echo *(.)` into a
+/// syntax error and `>!` into a write of a file named `!`.
 fn Lexer::backquote_seq(self : Lexer, text : String) -> Seq {
-  let sub = Lexer::new(text)
+  let sub = Lexer::with_dialect(text, self.dialect)
   let seq = parse_sub_seq_eof(sub)
   for e in sub.errors {
     self.fail(e)
