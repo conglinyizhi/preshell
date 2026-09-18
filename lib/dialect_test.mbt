@@ -348,3 +348,20 @@ test "zsh's csh forms for and repeat run their body for real" {
     content="Complete",
   )
 }
+
+///|
+test "zsh spells the clobber redirect with a bang, bash does not" {
+  // Measured: every one of these writes the file `out` in zsh and a file called
+  // `!` in bash. Reporting zsh's `>!` as a write to a file named `!` is a wrong
+  // answer in the Complete quadrant, which the corpus cannot see at all.
+  for
+    c in ["echo a >! out", "echo a >>! out", "echo a >&! out", "echo a &>! out"] {
+    inspect(ztouched(c), content="W:out")
+    inspect(touched(c), content="W:!")
+  }
+  // The suffix sits after the fd prefix as well.
+  inspect(ztouched("echo a 2>! out"), content="W:out")
+  // Plain redirects are unaffected in both dialects.
+  inspect(ztouched("echo a > out"), content="W:out")
+  inspect(touched("echo a > out"), content="W:out")
+}

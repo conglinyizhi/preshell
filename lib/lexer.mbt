@@ -317,6 +317,21 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
 }
 
 ///|
+/// Consume the clobber-override suffix of a redirect operator, if present.
+///
+/// zsh spells `>|` as `>!` as well, and takes the same suffix after every form
+/// that accepts one: in its lexer `d == '!' || d == '|'` appears together at
+/// each of those points (Src/lex.c). bash has no `!` spelling, so there the
+/// `!` stays a file name -- measured: `bash -c 'echo hi >! out'` writes a file
+/// called `!`, `zsh -c 'echo hi >! out'` writes `out`.
+fn Lexer::take_clobber_variant(self : Lexer) -> Unit {
+  if self.peek() == Some('|') ||
+    (self.dialect is Zsh && self.peek() == Some('!')) {
+    self.pos += 1
+  }
+}
+
+///|
 fn Lexer::read_operator(self : Lexer) -> String {
   let start = self.pos
   let c = self.peek()
@@ -343,6 +358,7 @@ fn Lexer::read_operator(self : Lexer) -> String {
         if self.peek() == Some('>') {
           self.pos += 1
         }
+        self.take_clobber_variant()
       }
     Some('|') =>
       if self.peek() == Some('|') || self.peek() == Some('&') {
@@ -363,10 +379,20 @@ fn Lexer::read_operator(self : Lexer) -> String {
         self.pos += 1
       }
     Some('>') =>
-      if self.peek() == Some('>') ||
-        self.peek() == Some('&') ||
-        self.peek() == Some('|') {
+      if self.peek() == Some('>') {
         self.pos += 1
+        if self.peek() == Some('&') {
+          self.pos += 1
+          self.take_clobber_variant()
+        } else {
+          // `>>|` / `>>!`: the append form takes the suffix as well.
+          self.take_clobber_variant()
+        }
+      } else if self.peek() == Some('&') {
+        self.pos += 1
+        self.take_clobber_variant()
+      } else {
+        self.take_clobber_variant()
       }
     _ => ()
   }

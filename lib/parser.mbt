@@ -948,9 +948,23 @@ fn is_redirect_op(op : String) -> Bool {
     | "<<"
     | "<<-"
     | "<<<"
-    | ">|"
     | "&>"
-    | "&>>" => true
+    | "&>>"
+    | ">>&"
+    // The clobber spellings zsh accepts: `>|` and `>!`, and the same suffix on
+    // the other redirect forms.
+    | ">|"
+    | ">!"
+    | ">>|"
+    | ">>!"
+    | ">&|"
+    | ">&!"
+    | ">>&|"
+    | ">>&!"
+    | "&>|"
+    | "&>!"
+    | "&>>|"
+    | "&>>!" => true
     _ => false
   }
 }
@@ -967,8 +981,22 @@ fn redir_op_of(op : String) -> RedirOp {
     "<<" => RHereDoc
     "<<-" => RHereDocStrip
     "<<<" => RHereString
-    ">|" => RClobber
-    "&>" | "&>>" => ROut
+    // Every clobber spelling zsh accepts, plus the `!` variants of the other
+    // redirect forms, which all clobber the target the same way.
+    ">|"
+    | ">!"
+    | ">>|"
+    | ">>!"
+    | ">&|"
+    | ">&!"
+    | ">>&|"
+    | ">>&!"
+    | "&>|"
+    | "&>!"
+    | "&>>|"
+    | "&>>!" => RClobber
+    ">>" | "&>>" | ">>&" => RAppend
+    "&>" => ROut
     _ => ROut
   }
 }

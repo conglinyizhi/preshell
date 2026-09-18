@@ -474,6 +474,22 @@ fn Collector::scan_assign_part(
 ///|
 /// One redirection: the target is a path for `>` and `<`, plain data for a
 /// here-document, and its holes always matter.
+
+///|
+/// Whether a dup target names a descriptor rather than a file: `2`, `1-`, `-`.
+fn is_fd_word(t : String) -> Bool {
+  if t == "-" {
+    return true
+  }
+  let trimmed = if t.ends_with("-") {
+    t.unsafe_substring(start=0, end=t.length() - 1)
+  } else {
+    t
+  }
+  trimmed.length() > 0 && all_digits(trimmed)
+}
+
+///|
 fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
   let line = r.target.line
   let dynamic_target = r.target.static_text() == None
@@ -491,6 +507,25 @@ fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
         line,
       )
     RIn => self.push(Read, t, dynamic_target, line)
+    // `>&word` duplicates a descriptor when word is one, and writes the file
+    // otherwise. Measured: `bash -c 'echo hi >& out'` and the same in zsh both
+    // write a file called out, and we used to report nothing at all.
+    RDupOut =>
+      if !is_fd_word(t) {
+        self.push(
+          Write,
+          if t == "" {
+            "<unknown>"
+          } else {
+            t
+          },
+          dynamic_target,
+          line,
+        )
+      }
+    // `<&word` with a word that is not a descriptor is an error at run time in
+    // bash, so there is no path to report.
+    RDupIn => ()
     // A here-document body is data, not a path; only its holes matter.
     RHereDoc | RHereDocStrip | RHereString =>
       match r.body {

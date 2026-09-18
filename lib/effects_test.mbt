@@ -121,3 +121,15 @@ test "only shells get their -c string parsed as a command line" {
   debug_inspect(targets_of(sh, Delete), content="[\"/tmp/x\"]")
   debug_inspect(sh.uncertain, content="false")
 }
+
+///|
+test "a dup target that is not a descriptor writes a file" {
+  // Measured: `bash -c 'echo hi >& out'` and the same in zsh both write a file
+  // called out. We used to report nothing, so a real write went unseen.
+  inspect(touched("echo a >& out"), content="W:out")
+  inspect(ztouched("echo a >& out"), content="W:out")
+  // Descriptors and their close/move forms stay silent: there is no path.
+  inspect(touched("echo a >&2"), content="")
+  inspect(touched("echo a >&-"), content="")
+  inspect(touched("echo a 2>&1 > out"), content="W:out")
+}
