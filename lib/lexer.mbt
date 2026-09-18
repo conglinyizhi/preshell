@@ -205,8 +205,11 @@ fn Lexer::note_position(self : Lexer, tok : Tok) -> Unit {
           self.array_open = false
           self.cmd_pos = true
         }
-        // A redirection leaves us inside the same command; the word after it
-        // clears this again anyway.
+        // A redirection leaves us inside the same command, but the word that
+        // follows it is the redirect's target, not a command word. zsh reads
+        // that target with `incmdpos` clear, which is why `<{a,b}` is a
+        // redirect from the brace expansion and not a redirect from the group
+        // brace `{`. Leaving the flag set made the target `{` a group brace.
         ">"
         | "<"
         | ">>"
@@ -217,7 +220,7 @@ fn Lexer::note_position(self : Lexer, tok : Tok) -> Unit {
         | "<>"
         | ">|"
         | "&>"
-        | "&>>" => ()
+        | "&>>" => self.cmd_pos = false
         _ => {
           self.cmd_pos = true
           self.array_open = false
@@ -610,13 +613,35 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
   // Depth of a zsh pattern group: `*(.)`, `(a|b)`, `(#i)foo`. Inside one, the
   // group's own parens are word characters and blanks are not word separators.
   let mut pct = 0
+  // zsh counts plain braces inside a word (`bct` in Src/lex.c gettokstr). A
+  // `}` that closes a `{` read here is word content; one that does not is the
+  // literal right brace the lexer pushes back at the end of the word.
+  let mut bct = 0
+  // zsh's `in_brace_param`: the level of a `{` that directly follows an
+  // unescaped `$` (Src/lex.c, the String case). Only `$`-braces set it, and
+  // while it is set blanks, newlines, `;`, `&`, `|`, `(` and `<`/`>` stay
+  // inside the word.
+  let mut brace_param = 0
+  // Line where that region opened, for the "closing brace expected" complaint.
+  let mut brace_param_line = self.line
+  // Offset just past the most recent literal right brace. It equals `self.pos`
+  // only while nothing has been read after that brace, which is exactly when
+  // zsh's pushback fires.
+  let mut rbrace_end = -1
+  // True when the word stopped at a newline while a pattern group was still
+  // open. zsh keeps reading the group across the newline (`inbl && !pct` gates
+  // the break), so the `}` before it is not the last character of the word
+  // there and gettokstr does not push it back. This lexer ends the word at the
+  // newline instead, so the pushback has to be suppressed to stay with zsh.
+  let mut newline_in_group = false
   for ;; {
     let c = match self.peek() {
       None => break
       Some(c) => c
     }
     if unquoted && self.dialect is Zsh {
-      if c == '(' {
+      let in_dbrace = brace_param > 0
+      if c == '(' && !in_dbrace {
         // `name=(a b)` and `name+=(a b)`: this `(` opens an array, so the word
         // ends here and the parser sees the operator. Without this the `(`
         // became word content and the elements were read as commands.
@@ -636,7 +661,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         parts.push(Glob("("))
         self.advance(1)
         continue
-      } else if c == ')' {
+      } else if c == ')' && !in_dbrace {
         // At depth zero this closes an enclosing subshell: not our word.
         if pct == 0 {
           break
@@ -650,10 +675,14 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
     }
     if unquoted {
       let in_group = self.dialect is Zsh && pct > 0
-      if c == '\n' {
+      let in_dbrace = self.dialect is Zsh && brace_param > 0
+      if c == '\n' && !in_dbrace {
+        if in_group {
+          newline_in_group = true
+        }
         break
       }
-      if is_blank(c) && !in_group {
+      if is_blank(c) && !in_group && !in_dbrace {
         break
       }
       // zsh keeps `|` inside a group: `(a|b)` is one pattern, not a pipeline.
@@ -661,7 +690,12 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
       // Inside a group only `;`, `&` and redirections end the word. A numeric
       // glob is a pattern even there: `case x in a:(s.<1-2>))` runs in zsh.
       let numglob_here = self.dialect is Zsh && c == '<' && self.isnumglob_at()
-      let ends_word = if in_group {
+      let ends_word = if in_dbrace {
+        // Src/lex.c: while `in_brace_param` is set, `;`, `&`, `|`, `<` and
+        // `>` are word content. Measured: `$${x;y}` and `$${x|y}` run in zsh
+        // and the whole brace group is one word.
+        false
+      } else if in_group {
         (c == ';' || c == '&' || c == '<' || c == '>') && !numglob_here
       } else if self.dialect is Zsh && c == '(' {
         // Mid-word zsh never treats `(` as an operator; the group was counted
@@ -790,6 +824,35 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         parts.push(Lit("{"))
         break
       }
+      '{' if unquoted && self.dialect is Zsh => {
+        // A plain `{` inside a word is word content, but it still pairs: the
+        // `}` that closes it must not be pushed back out of the word. A `{`
+        // directly after an unescaped `$` opens zsh's `in_brace_param` region.
+        bct += 1
+        if brace_param == 0 && self.dollar_brace_before(start) {
+          brace_param = bct
+          brace_param_line = self.line
+        }
+        rbrace_end = -1
+        lit.write_char('{')
+        self.advance(1)
+      }
+      '}' if unquoted && self.dialect is Zsh => {
+        if bct > 0 {
+          bct -= 1
+          if bct < brace_param {
+            brace_param = 0
+          }
+          rbrace_end = -1
+        } else {
+          // zsh's pushback candidate (Src/lex.c, the `lexbuf.ptr[-1] == '}'`
+          // hack): the `}` did not close a brace read in this word, so if it
+          // turns out to be the last character the word ends before it.
+          rbrace_end = self.pos + 1
+        }
+        lit.write_char('}')
+        self.advance(1)
+      }
       '[' if unquoted && self.looks_like_subscript() => {
         flush_lit(parts, lit)
         parts.push(Subscript(self.read_subscript()))
@@ -823,8 +886,57 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
       }
     }
   }
+  if unquoted && self.dialect is Zsh && brace_param > 0 {
+    // zsh's gettokstr ends with this when it reaches the end of the word with
+    // in_brace_param still set, and the word cannot end before then: neither
+    // blanks nor separators close it. Measured `echo $${x<y` (unclosed) is
+    // `zsh: closing brace expected`, while `echo $${x<y}` runs.
+    self.fail_at("closing brace expected", brace_param_line)
+  }
+  // The pushback: at the end of a word zsh cuts off a literal `}` that did not
+  // close a brace inside the word, ungets it, and re-lexes it as its own token
+  // (Src/lex.c: `unset(IGNOREBRACES) && !sub && lexbuf.len > 1 &&
+  // peek == STRING && lexbuf.ptr[-1] == '}'`). The `len > 1` guard is the
+  // "not the whole word" test: a lone `}` stays a word.
+  if unquoted &&
+    self.dialect is Zsh &&
+    rbrace_end == self.pos &&
+    self.pos > start + 1 &&
+    !newline_in_group {
+    let text = lit.to_string()
+    if text.length() > 0 && text.get_char(text.length() - 1) == Some('}') {
+      lit.reset()
+      lit.write_string(text.unsafe_substring(start=0, end=text.length() - 1))
+      self.pos -= 1
+    }
+  }
   flush_lit(parts, lit)
   parts
+}
+
+///|
+/// True when the character just before the cursor is an unescaped `$` that is
+/// itself inside the word being read. zsh's lexer sets `in_brace_param` when a
+/// `$` is immediately followed by `{` (Src/lex.c, the String case), and that
+/// flag, not the character before the brace in the abstract, is what keeps
+/// blanks, `|`, `;` and `<`/`>` inside the word afterwards. `$${x` is the
+/// spelling that reaches this code: a real `${` is consumed by `read_dollar`
+/// before the brace is ever seen here.
+fn Lexer::dollar_brace_before(self : Lexer, start : Int) -> Bool {
+  if self.pos <= start {
+    return false
+  }
+  let at = self.pos - 1
+  if self.src.get_char(at) != Some('$') {
+    return false
+  }
+  let mut backslashes = 0
+  let mut j = at - 1
+  while j >= 0 && self.src.get_char(j) == Some('\\') {
+    backslashes += 1
+    j -= 1
+  }
+  backslashes % 2 == 0
 }
 
 ///|

@@ -661,3 +661,25 @@ test "arithmetic keeps counting every paren, not just the leading ones" {
     content="D:/tmp/y",
   )
 }
+
+///|
+test "an unmatched right brace is pushed back the way zsh does" {
+  // zsh's lexer pushes an unmatched `}` back into the stream (Src/lex.c, the
+  // `{foo}` hack), so the brace does not end the word. That is why
+  // `f () {echo x}` runs there and `echo a}` is refused, and why a word-ending
+  // `}` keeps its literal meaning instead of opening a group.
+  debug_inspect(zstatus("f () {echo x}"), content="Complete")
+  debug_inspect(zstatus("echo {a,b}"), content="Complete")
+  debug_inspect(zstatus("echo {"), content="Complete")
+  debug_inspect(zstatus("echo a}"), content="Unsupported")
+  debug_inspect(zstatus("echo }"), content="Unsupported")
+  // bash has no such rule: there all of these are ordinary text.
+  debug_inspect(analyze("echo a}").status, content="Complete")
+  debug_inspect(analyze("echo {a,b}").status, content="Complete")
+  // Guards: brace expansion, the zsh brace parameters and quoting stay intact.
+  debug_inspect(zstatus("for i in {1..3}; do :; done"), content="Complete")
+  debug_inspect(zstatus("a=({1..3})"), content="Complete")
+  debug_inspect(zstatus("echo \"{a,b}\""), content="Complete")
+  debug_inspect(zstatus("case x in {a,b}) : ;; esac"), content="Complete")
+  inspect(ztouched("echo $${x<y}"), content="U:$${x<y}")
+}
