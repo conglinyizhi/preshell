@@ -94,7 +94,11 @@ pub(all) enum Cmd {
   /// whole form.
   AnonFunc(body~ : Cmd, args~ : Array[Word], redirects~ : Array[Redirect])
   Arith(String)
-  Cond(String) // [[ ... ]] kept as raw text in the spike
+  /// `[[ ... ]]`. The condition text is opaque to an audit -- patterns and
+  /// parameters touch no paths -- but command substitutions inside it do run,
+  /// so they are carried separately. Dropping them made
+  /// `[[ -f "$(cat secret.txt)" ]]` report nothing at all.
+  Cond(raw~ : String, subs~ : Array[Seq])
   /// Any compound command may carry its own redirections:
   /// `( ls ) 2>/dev/null`, `{ echo x; } >&2`, `while ...; done < file`.
   /// bash spells this as `shell_command redirection_list`.

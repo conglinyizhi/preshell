@@ -52,7 +52,7 @@ fn collect_cmd_bashisms(
     // difference in meaning rather than a syntax error.
     Cmd::Arith(_) => add_bashism(differs, "(( ))")
     // `[[` is a keyword to bash and an ordinary command name to dash.
-    Cmd::Cond(_) => add_bashism(differs, "[[ ]]")
+    Cmd::Cond(..) => add_bashism(differs, "[[ ]]")
     Cmd::Simple(s) => {
       for a in s.assigns {
         if a.array {

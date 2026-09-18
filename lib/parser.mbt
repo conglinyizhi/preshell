@@ -468,13 +468,24 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
         // zsh's `repeat N { body }` and `repeat N do ... done`. The count is a
         // word like any other and is carried as the loop's word list: what
         // matters for an audit is that the body runs.
-        Some("repeat") => self.parse_repeat()
+        Some("repeat") if self.lex.dialect is Zsh => self.parse_repeat()
         Some("while") => self.parse_loop(false)
         Some("until") => self.parse_loop(true)
         Some("for") => self.parse_for()
         Some("select") => self.parse_for()
+        // zsh's csh-style spelling of the same loop.
+        Some("foreach") if self.lex.dialect is Zsh =>
+          self.parse_for(foreach=true)
         Some("case") => self.parse_case()
         Some("function") => self.parse_function_kw()
+        Some(kw) if is_stray_keyword(kw, self.lex.dialect) => {
+          // These words only continue or close a construct. With nothing open
+          // they are errors in both shells, so accepting them turned
+          // `do :; done` into a command that cannot run.
+          self.lex.fail("unexpected keyword " + kw)
+          self.advance()
+          Cmd::Simple({ assigns: [], words: [], redirects: [], })
+        }
         Some("time") => {
           self.advance()
           self.parse_command()
@@ -548,10 +559,21 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
 fn Parser::parse_cond(self : Parser) -> Cmd {
   let start = self.cur_start + 2
   self.advance()
+  // A command substitution inside the brackets is a command that runs, so it
+  // is collected here even though the condition text itself is opaque.
+  let subs : Array[Seq] = []
   for ;; {
     match self.cur {
       TEof => break
-      TWord(w) => if w.plain() == Some("]]") { break } else { self.advance() }
+      TWord(w) =>
+        if w.plain() == Some("]]") {
+          break
+        } else {
+          for s in w.subcommands() {
+            subs.push(s)
+          }
+          self.advance()
+        }
       _ => self.advance()
     }
   }
@@ -561,7 +583,7 @@ fn Parser::parse_cond(self : Parser) -> Cmd {
   } else {
     self.lex.fail("unexpected end of input in [[ ]]")
   }
-  Cmd::Cond(raw)
+  Cmd::Cond(raw~, subs~)
 }
 
 ///|
@@ -614,7 +636,17 @@ fn Parser::parse_repeat(self : Parser) -> Cmd {
     }
     _ => empty_word(self.lex.line)
   }
-  self.skip_newlines()
+  // zsh's par_repeat skips separators after the count (`while (tok == SEPER)`),
+  // so `repeat 2; do ... done` and `repeat 2 { ... }` are both fine. Without
+  // this the body was left as separate commands and `repeat 2; do rm -rf x;
+  // done` reported two fake Execs and no Delete at all.
+  for ;; {
+    if self.cur is TNewline || self.cur is TOp(";") {
+      self.advance()
+    } else {
+      break
+    }
+  }
   let body = if self.reserved() == Some("do") {
     self.advance()
     let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
@@ -650,7 +682,7 @@ fn Parser::parse_loop(self : Parser, until : Bool) -> Cmd {
 }
 
 ///|
-fn Parser::parse_for(self : Parser) -> Cmd {
+fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   self.advance()
   let mut name = ""
   match self.cur {
@@ -759,7 +791,23 @@ fn Parser::parse_for(self : Parser) -> Cmd {
     }
   }
   self.lex.in_for_words = false
-  self.skip_newlines()
+  // Both `for x in ...` and `for ((...))` may be followed by a separator
+  // before the body. Without this the arithmetic form left `do ... done` as
+  // separate commands: the body ran nowhere and `do` even errored. The skip is
+  // speculative, because a csh-style loop may have no body of its own.
+  let before_seps = self.mark()
+  for ;; {
+    if self.cur is TNewline || self.cur is TOp(";") {
+      self.advance()
+    } else {
+      break
+    }
+  }
+  if !foreach &&
+    !(self.reserved() == Some("do") || self.reserved() == Some("{")) {
+    // No body after all: the separators belong to whoever called us.
+    self.restore(before_seps)
+  }
   let body = if self.reserved() == Some("do") {
     self.advance()
     let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
@@ -771,6 +819,15 @@ fn Parser::parse_for(self : Parser) -> Cmd {
     self.advance()
     let b = self.parse_seq_in({ words: ["}"], ops: [], }, "loop")
     if self.reserved() == Some("}") {
+      self.advance()
+    }
+    b
+  } else if foreach {
+    // `foreach x ( a b ) body end`: the body is a plain command list closed by
+    // `end`. Measured: `for x (a b) :; end` is refused by zsh, so `end` only
+    // closes the csh spelling.
+    let b = self.parse_seq_in({ words: ["end"], ops: [], }, "loop")
+    if self.reserved() == Some("end") {
       self.advance()
     }
     b
@@ -981,6 +1038,52 @@ fn parse_fd(s : String) -> Int {
     v = v * 10 + (c.to_int() - '0'.to_int())
   }
   v
+}
+
+///|
+/// Words that only continue or close a construct. With nothing open they are
+/// errors in both shells, so they must not be read as commands. bash also
+/// refuses `in` while zsh runs a command by that name (measured); inside
+/// `for` and `case` these words never reach the dispatcher.
+fn is_stray_keyword(kw : String, dialect : Dialect) -> Bool {
+  match kw {
+    "do" | "done" | "then" | "fi" | "elif" | "else" | "esac" => true
+    "in" => dialect is Bash
+    _ => false
+  }
+}
+
+///|
+/// A token-stream position, so a speculative skip can be undone. The `for` loop
+/// needs one: it may skip separators before a body, but a csh-style loop such
+/// as `foreach x (a b); body; end` has no body of its own, and eating the `;`
+/// then leaves the caller without the separator it needs.
+struct Mark {
+  pos : Int
+  cur : Tok
+  cur_start : Int
+  la : Tok?
+  la_start : Int
+}
+
+///|
+fn Parser::mark(self : Parser) -> Mark {
+  {
+    pos: self.lex.pos,
+    cur: self.cur,
+    cur_start: self.cur_start,
+    la: self.la,
+    la_start: self.la_start,
+  }
+}
+
+///|
+fn Parser::restore(self : Parser, m : Mark) -> Unit {
+  self.lex.pos = m.pos
+  self.cur = m.cur
+  self.cur_start = m.cur_start
+  self.la = m.la
+  self.la_start = m.la_start
 }
 
 ///|

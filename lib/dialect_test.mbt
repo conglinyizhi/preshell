@@ -339,7 +339,9 @@ test "zsh's csh forms for and repeat run their body for real" {
     analyze("for x ( a b ); do :; done").status,
     content="Unsupported",
   )
-  debug_inspect(analyze("repeat 3 { echo hi }").status, content="Unsupported")
+  // bash has no `repeat`, so this is only a command named repeat followed by a
+  // group -- which it accepts (bash -n rc=0), so Complete is the honest answer.
+  debug_inspect(analyze("repeat 3 { echo hi }").status, content="Complete")
   // The classic shapes stay common ground.
   debug_inspect(zstatus("for x in a b; do echo $x; done"), content="Complete")
   debug_inspect(zstatus("for ((i=0;i<3;i++)); do :; done"), content="Complete")
@@ -500,4 +502,24 @@ test "probe from bytes takes the same path as probe from text" {
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].kind, content="Note")
   inspect(r.impact.uncertain, content="true")
+}
+
+///|
+test "repeat takes a separator before its body" {
+  // zsh's par_repeat skips separators after the count. Without that, the body
+  // became separate commands: `repeat 2; do rm -rf /tmp/rp; done` reported two
+  // fake Execs and no Delete at all.
+  debug_inspect(
+    zstatus("repeat 2; do rm -rf /tmp/rp; done"),
+    content="Complete",
+  )
+  inspect(ztouched("repeat 2; do rm -rf /tmp/rp; done"), content="D:/tmp/rp")
+  inspect(ztouched("repeat 2; { rm -rf /tmp/rp; }"), content="D:/tmp/rp")
+  inspect(ztouched("repeat 2 { rm -rf /tmp/rp; }"), content="D:/tmp/rp")
+  inspect(ztouched("repeat 2\ndo rm -rf /tmp/rp; done"), content="D:/tmp/rp")
+  // bash has no repeat at all.
+  debug_inspect(
+    analyze("repeat 2; do rm -rf /tmp/rp; done").status,
+    content="Unsupported",
+  )
 }

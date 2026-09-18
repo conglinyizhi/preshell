@@ -148,3 +148,33 @@ test "a hash inside arithmetic is an operand, not a comment" {
   inspect(touched("(( i++ )) ; echo a # > /tmp/x"), content="")
   inspect(touched("echo a > /tmp/x # so what"), content="W:/tmp/x")
 }
+
+///|
+test "a quoted double bracket is a string, not a condition" {
+  // The `[[` keyword rule is positional and quote-sensitive: inside quotes it
+  // is ordinary text. Missing the quote guard made `x="[[y]"` a parse failure
+  // in both dialects, which zsh accepts.
+  debug_inspect(analyze("x=\"[[y]\"").status, content="Complete")
+  debug_inspect(analyze_dialect("x=\"[[y]\"", Zsh).status, content="Complete")
+  debug_inspect(analyze("echo \"[[y]\"").status, content="Complete")
+  // The keyword itself still works, and a bracket expression still globs.
+  debug_inspect(
+    analyze("if [[ \"$x\" == a ]] then :; fi").status,
+    content="Complete",
+  )
+  inspect(touched("rm [[:alpha:]]"), content="D:[[:alpha:]] U:[[:alpha:]]")
+}
+
+///|
+test "a command substitution inside [[ ]] still runs" {
+  // The condition text is opaque, but `$(...)` in it is a real command. This
+  // used to report Complete with no effects at all.
+  inspect(
+    touched("[[ -f \"$(cat /tmp/secret.txt)\" ]]"),
+    content="R:/tmp/secret.txt",
+  )
+  inspect(touched("[[ -n $(cat a) && $(cat b) ]]"), content="R:a R:b")
+  // A condition with no substitution stays quiet.
+  inspect(touched("[[ -f x ]]"), content="")
+  debug_inspect(analyze("[[ -f x ]]").status, content="Complete")
+}

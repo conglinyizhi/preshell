@@ -438,7 +438,14 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
       self.walk_seq(Seq::{
         items: [{ pipeline: { negated: false, cmds: [body], }, op: Semi, }],
       })
-    Cmd::Arith(_) | Cmd::Cond(_) => ()
+    Cmd::Arith(_) => ()
+    Cmd::Cond(subs~, ..) =>
+      // The condition text touches nothing, but a `$(...)` inside it runs.
+      for seq in subs {
+        let saved = self.saved_cwd()
+        self.walk_seq(seq)
+        self.restore_cwd(saved)
+      }
     Cmd::Redirected(inner~, redirects~) => {
       self.walk_cmd(inner)
       for r in redirects {
