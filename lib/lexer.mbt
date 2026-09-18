@@ -306,6 +306,11 @@ fn Lexer::next_raw(self : Lexer) -> Tok {
     // position it is the subshell operator in both shells.
     let paren_in_word = c == '(' &&
       self.dialect is Zsh &&
+      // Inside `(( ))` every `(` is an operator: the shell hands the whole
+      // expression to its arithmetic parser, so no paren there opens a pattern
+      // group. Without this the parser's token-based depth count came up one
+      // short and the expression closed early, leaving an orphan `)`.
+      !self.in_arith &&
       (!self.cmd_pos || self.array_elems || self.in_casepat) &&
       !self.in_for_words &&
       !self.array_open &&

@@ -881,6 +881,9 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
       self.lex.fail("expected an arithmetic expression after for ((")
     }
     // for ((init; cond; step)) -- the condition may itself contain parens
+    // Inside the arithmetic a `#` is an operand and every `(` is an operator,
+    // same as the `(( ))` command form.
+    self.lex.in_arith = true
     self.advance()
     self.advance()
     let mut depth = 2
@@ -904,6 +907,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     if self.cur is TOp(")") {
       self.advance()
     }
+    self.lex.in_arith = false
   } else {
     if self.lex.dialect is Zsh && self.cur is TOp("(") {
       // `for x ( a b )`: the parens belong to the word list.

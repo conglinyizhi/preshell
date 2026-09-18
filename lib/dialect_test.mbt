@@ -636,3 +636,28 @@ test "every sub-parse inherits the dialect it was opened in" {
     content="Complete",
   )
 }
+
+///|
+test "arithmetic keeps counting every paren, not just the leading ones" {
+  // The zsh lexer treated a `(` inside `(( ))` as a pattern group, so the
+  // parser's token-based depth count came up short, the expression closed
+  // early and the leftover `)` errored. zsh and bash both hand the whole
+  // expression to an arithmetic parser, so paren counting has to line up.
+  for
+    c in [
+      "(( a + (b > c) ))", "(( hash += (hash << 5) + ##$chr ))", "(( a + (b & c) ))",
+      "(( a + (b | c) ))", "(( a + (b) > (c) ))", "for (( i = (a > b) ? 1 : 2; i < 3; i++ )); do :; done",
+    ] {
+    debug_inspect(zstatus(c), content="Complete")
+    debug_inspect(analyze(c).status, content="Complete")
+  }
+  // The failure used to swallow the whole conditional: no Delete at all.
+  inspect(
+    ztouched("if (( a + (b > c) )); then rm -rf /tmp/x; fi"),
+    content="D:/tmp/x",
+  )
+  inspect(
+    ztouched("while (( i + (j > k) )); do rm -rf /tmp/y; i=0; done"),
+    content="D:/tmp/y",
+  )
+}
