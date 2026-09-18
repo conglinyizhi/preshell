@@ -33,6 +33,13 @@ pub(all) enum OptVal {
   ReadPath
   /// Takes a value that is a write path.
   WritePath
+  /// Takes a value that is a path, but which direction it counts in depends on
+  /// the mode the program was invoked in. tar's `-f` is the archive that
+  /// create/append/update write and extract/list read, and its `-C` is the
+  /// directory members are read from on create and written into on extract.
+  /// The value is recorded here so it does not land on the operand side; the
+  /// effects layer is what gives it a direction.
+  Path
   /// Takes a value that is a directory; file operands are written inside it.
   TargetDir
   /// Optional value that must be attached (`-iSUF`, `--long=SUF`); on its own
@@ -292,9 +299,51 @@ pub fn opts_of(n : String) -> ProgOpts {
         opt("-s", NotPath),
         opt("--size", NotPath),
       ])
+    // tar's operation letter decides what its arguments mean: create, append
+    // and update write the archive that -f names, extract writes into -C, and
+    // list only reads. -f and -C are therefore recorded as plain paths whose
+    // direction the effects layer gives them.
+    //
+    // The operation letters are listed so mode detection reads option names
+    // instead of matching substrings: the old `letters.contains("c")` over
+    // concatenated raw text read `--create` as create by accident, and would
+    // have read `--checkpoint` the same way.
+    //
+    // --exclude and -X/--exclude-from are here because their values are not
+    // paths (a pattern) or are paths of their own (a pattern list); without
+    // the rows `--exclude zz dir` reported `zz` as a member tar reads.
+    "tar" =>
+      prog([
+        opt("-f", Path),
+        opt("--file", Path),
+        opt("-C", Path),
+        opt("--directory", Path),
+        opt("--exclude", NotPath),
+        opt("-X", ReadPath),
+        opt("--exclude-from", ReadPath),
+        opt("-c", NoVal),
+        opt("-r", NoVal),
+        opt("-u", NoVal),
+        opt("-x", NoVal),
+        opt("-t", NoVal),
+        opt("-A", NoVal),
+        opt("--create", NoVal),
+        opt("--append", NoVal),
+        opt("--update", NoVal),
+        opt("--extract", NoVal),
+        opt("--get", NoVal),
+        opt("--list", NoVal),
+        opt("--catenate", NoVal),
+        opt("--concatenate", NoVal),
+      ])
     // Compressors: -c/--stdout means the operand is only read, nothing is
     // written (snapshot: `gzip -c f.txt` leaves f.txt and adds no file).
     // gzip/xz -S/--suffix is a suffix, not a path.
+    //
+    // -d/--decompress is the other direction (gunzip/bunzip2/unxz/unzstd are
+    // that mode under another name), -k/--keep leaves the source in place,
+    // -t/--test and -l/--list only read, and -r/--recursive derives its
+    // products from directory entries rather than from the operand.
     "gzip" =>
       prog(
         [
@@ -302,13 +351,36 @@ pub fn opts_of(n : String) -> ProgOpts {
           opt("--stdout", NoVal),
           opt("-S", NotPath),
           opt("--suffix", NotPath),
+          opt("-d", NoVal),
+          opt("--decompress", NoVal),
+          opt("--uncompress", NoVal),
+          opt("-k", NoVal),
+          opt("--keep", NoVal),
+          opt("-t", NoVal),
+          opt("--test", NoVal),
+          opt("-l", NoVal),
+          opt("--list", NoVal),
+          opt("-r", NoVal),
+          opt("--recursive", NoVal),
         ],
         to_stdout=["-c", "--stdout"],
       )
     "bzip2" =>
-      prog([opt("-c", NoVal), opt("--stdout", NoVal)], to_stdout=[
-        "-c", "--stdout",
-      ])
+      prog(
+        [
+          opt("-c", NoVal),
+          opt("--stdout", NoVal),
+          opt("-d", NoVal),
+          opt("--decompress", NoVal),
+          opt("-k", NoVal),
+          opt("--keep", NoVal),
+          opt("-t", NoVal),
+          opt("--test", NoVal),
+        ],
+        to_stdout=["-c", "--stdout"],
+      )
+    // xz -T/--threads takes a count in both spellings (`xz -T 2 f.txt` and
+    // `xz --threads 2 f.txt`, measured: `2` is never a path).
     "xz" =>
       prog(
         [
@@ -316,13 +388,42 @@ pub fn opts_of(n : String) -> ProgOpts {
           opt("--stdout", NoVal),
           opt("-S", NotPath),
           opt("--suffix", NotPath),
+          opt("-d", NoVal),
+          opt("--decompress", NoVal),
+          opt("--uncompress", NoVal),
+          opt("-k", NoVal),
+          opt("--keep", NoVal),
+          opt("-t", NoVal),
+          opt("--test", NoVal),
+          opt("-l", NoVal),
+          opt("--list", NoVal),
+          opt("-T", NotPath),
+          opt("--threads", NotPath),
         ],
         to_stdout=["-c", "--stdout"],
       )
+    // zstd -T is attached-only (measured: `zstd -T 2 f.txt` reads `2` as an
+    // input file and fails), while --threads also takes a separate count.
     "zstd" =>
-      prog([opt("-c", NoVal), opt("--stdout", NoVal)], to_stdout=[
-        "-c", "--stdout",
-      ])
+      prog(
+        [
+          opt("-c", NoVal),
+          opt("--stdout", NoVal),
+          opt("-d", NoVal),
+          opt("--decompress", NoVal),
+          opt("--uncompress", NoVal),
+          opt("-k", NoVal),
+          opt("--keep", NoVal),
+          opt("-t", NoVal),
+          opt("--test", NoVal),
+          opt("-l", NoVal),
+          opt("--list", NoVal),
+          opt("--rm", NoVal),
+          opt("-T", Attached),
+          opt("--threads", NotPath),
+        ],
+        to_stdout=["-c", "--stdout"],
+      )
     _ => prog([])
   }
 }
@@ -525,6 +626,20 @@ pub fn value_of(scan : ArgScan, names : Array[String]) -> String? {
   for v in scan.values {
     if names.contains(v.opt) && v.text != "" {
       return Some(v.text)
+    }
+  }
+  None
+}
+
+///|
+/// The same value with its hole flag kept. It matters when the tool derives a
+/// second path from it: `tar -czf $A dir` writes an archive nobody can name,
+/// and `gzip -S $S f.txt` writes a product whose name depends on the suffix,
+/// so both derived paths have to stay dynamic.
+pub fn value_entry_of(scan : ArgScan, names : Array[String]) -> OptValue? {
+  for v in scan.values {
+    if names.contains(v.opt) && v.text != "" {
+      return Some(v)
     }
   }
   None

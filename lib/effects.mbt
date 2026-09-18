@@ -214,8 +214,11 @@ fn is_path_modeled(n : String) -> Bool {
     | "gzip"
     | "gunzip"
     | "bzip2"
+    | "bunzip2"
     | "xz"
+    | "unxz"
     | "zstd"
+    | "unzstd"
     | "source"
     | "."
     | "ls"
@@ -644,6 +647,16 @@ fn Collector::classify(
   s : SimpleCmd,
   line : Int,
 ) -> Unit {
+  // A wrapper runs the program it is handed, so that program is the real
+  // subject of the report: `env rm -rf x` deletes x, and reporting only "env
+  // ran, unmodelled" says nothing about it.
+  match wrapper_target(n, s.words) {
+    Some(target) => {
+      self.wrapper_effects(n, s, target, line)
+      return
+    }
+    None => ()
+  }
   let items = arg_items(s)
   // Option values are the table's business (lib/opts.mbt): an option that
   // consumes a value must not leave it on the operand side. Programs without
@@ -861,18 +874,14 @@ fn Collector::classify(
         }
         [] => ()
       }
-    "gzip" | "bzip2" | "xz" | "zstd" =>
-      // These rewrite their operand in place unless told otherwise; with
-      // -c/--stdout the result goes to stdout and the operand is only read.
-      match operands {
-        [(t, d), ..] => {
-          self.push(Read, t, d, line)
-          if !scan.to_stdout {
-            self.push(Write, t, d, line)
-          }
-        }
-        [] => ()
-      }
+    "gzip"
+    | "gunzip"
+    | "bzip2"
+    | "bunzip2"
+    | "xz"
+    | "unxz"
+    | "zstd"
+    | "unzstd" => self.compressor_effects(n, scan, operands, line)
     "dd" =>
       for it in items {
         let (t, _) = it
@@ -893,50 +902,7 @@ fn Collector::classify(
           )
         }
       }
-    "tar" => {
-      // tar does three different things depending on its mode flag, and it
-      // writes somewhere different in each: create writes the archive, extract
-      // writes into -C (or the cwd), list only reads.
-      let dest = flag_value(items, ["-C", "--directory"])
-      // The mode letter can arrive as `-czf` or as the classic no-dash form
-      // `czf`, and both spellings are common in the wild.
-      let cluster = match short_flag_cluster(operands) {
-        Some(c) => c
-        None => ""
-      }
-      let dashed = flags.fold(init="", (acc, f) => acc + f)
-      let letters = cluster + dashed
-      let archive_written = letters.contains("c") ||
-        flags.any(fn(f) { f == "--create" })
-      let listing = letters.contains("t") || flags.any(fn(f) { f == "--list" })
-      let args = drop_flag_value(drop_short_flag_cluster(operands), dest)
-      if archive_written {
-        match args {
-          [(t, d), .. members] => {
-            self.push(Write, t, d, line)
-            for it in members {
-              let (m, md) = it
-              self.push(Read, m, md, line)
-            }
-          }
-          [] => ()
-        }
-      } else {
-        match dest {
-          Some(d) => if !listing { self.push(Write, d, false, line) }
-          None =>
-            if !listing {
-              self.push(
-                Unknown,
-                "tar: extraction point is the working directory",
-                true,
-                line,
-              )
-            }
-        }
-        reads(args)
-      }
-    }
+    "tar" => self.tar_effects(scan, items, operands, flags, line)
     "unzip" => {
       let dest = flag_value(items, ["-d"])
       match dest {
@@ -1059,6 +1025,354 @@ fn has_flag_text(flags : Array[String], f : String) -> Bool {
 }
 
 ///|
+/// The value of `-f`/`-C` when a tar command writes them without a dash, and
+/// the words left over for the members. In the old-style form the values are
+/// the words after the cluster, taken in the order their letters appear:
+/// `tar cf out dir` and `tar xfC in.tgz dest`.
+fn tar_take_cluster_values(
+  cluster : String,
+  args : Array[(String, Bool)],
+) -> ((String, Bool)?, (String, Bool)?, Array[(String, Bool)]) {
+  let mut archive : (String, Bool)? = None
+  let mut dir : (String, Bool)? = None
+  let mut i = 0
+  for k in 0..<cluster.length() {
+    match cluster.get_char(k) {
+      Some('f') =>
+        if i < args.length() {
+          archive = Some(args[i])
+          i += 1
+        }
+      Some('C') =>
+        if i < args.length() {
+          dir = Some(args[i])
+          i += 1
+        }
+      _ => ()
+    }
+  }
+  (archive, dir, args[i:].to_array())
+}
+
+///|
+/// The operation letters a tar command carries, gathered from both spellings:
+/// the dashed options through the option table, and the old-style cluster.
+/// Only whole option names map to a letter here. The old code folded the raw
+/// flag text into one string and tested it with `contains`, so `--create` read
+/// as the letter `c` on purpose and `--exclude` would have read as extract.
+fn tar_operation_letters(scan : ArgScan, cluster : String) -> String {
+  let sb = StringBuilder()
+  for o in scan.opts {
+    match o {
+      "-c" | "-r" | "-u" | "-x" | "-t" | "-A" =>
+        sb.write_string(o.unsafe_substring(start=1, end=2))
+      "--create" => sb.write_string("c")
+      "--append" => sb.write_string("r")
+      "--update" => sb.write_string("u")
+      "--extract" | "--get" => sb.write_string("x")
+      "--list" => sb.write_string("t")
+      "--catenate" | "--concatenate" => sb.write_string("A")
+      _ => ()
+    }
+  }
+  sb.write_string(cluster)
+  sb.to_string()
+}
+
+///|
+/// tar's old-style form writes its options without a dash, and only in the
+/// first argument. That is tar's own rule, not a guess: measured, `tar dir`
+/// and `tar abc` both make GNU tar read the word as options (`old option 'b'
+/// requires an argument`). What used to be wrong was where this tool applied
+/// it: to the first leftover *operand*, where the `out` that `-f` consumes
+/// looked like a cluster and the real member `dir` looked like the archive.
+fn tar_old_style_word(items : Array[(String, Bool)]) -> String? {
+  match items {
+    [(t, _), ..] =>
+      if t.length() > 0 &&
+        !t.has_prefix("-") &&
+        t.to_string().all(fn(c) { c.is_ascii_alphabetic() }) {
+        Some(t)
+      } else {
+        None
+      }
+    [] => None
+  }
+}
+
+///|
+/// The letters of an old-style cluster this tool can account for. tar's short
+/// options are `AcdrtuxGnSkUWOmpsMBiajJzZhPlRvwo` plus the thirteen that take
+/// a value, `bCfFgHIKLNTVX` (from `tar --usage`). Everything listed here takes
+/// no value or is one of the two value letters modelled above (`f`, `C`), so a
+/// cluster made of them splits exactly. `d` (--diff) is an operation this tool
+/// does not model and is left out; so are the value letters it cannot place,
+/// because a cluster with one of those cannot be split into options and
+/// operands without guessing (`tar ab` says "old option 'b' requires an
+/// argument").
+fn tar_cluster_letters() -> String {
+  "AcrtuxGnSkUWOmpsMBiajJzZhPlRvwofC"
+}
+
+///|
+/// tar does three different things depending on its operation letter, and it
+/// writes somewhere different in each: create, append and update write the
+/// archive, extract writes into -C (or the cwd), list only reads.
+///
+/// Measured with the shim:
+///
+/// - `tar -czf out dir` creates `out` and opens `dir`
+/// - `tar --create --file=arc.tar dir` creates `arc.tar`
+/// - `tar rf arc.tar new.txt` opens `arc.tar` for writing, reads `new.txt`
+/// - `tar czf - dir` creates no file: the archive is stdout
+/// - `tar xzf in.tgz -C out` opens `in.tgz`, writes inside `out`
+/// - `tar tf arc.tar` only opens `arc.tar`
+/// - `tar --help`, `tar --version`, `tar -f a.tar` and `tar` open nothing
+fn Collector::tar_effects(
+  self : Collector,
+  scan : ArgScan,
+  items : Array[(String, Bool)],
+  operands : Array[(String, Bool)],
+  flags : Array[String],
+  line : Int,
+) -> Unit {
+  if flags.contains("--help") || flags.contains("--version") {
+    return
+  }
+  let mut cluster = ""
+  let mut args = operands
+  let mut cluster_archive : (String, Bool)? = None
+  let mut cluster_dir : (String, Bool)? = None
+  match tar_old_style_word(items) {
+    Some(w) => {
+      if !w.to_string().all(fn(c) { tar_cluster_letters().contains_char(c) }) {
+        self.push(
+          Unknown,
+          "tar: old-style option cluster not modelled",
+          true,
+          line,
+        )
+        return
+      }
+      cluster = w
+      if operands.length() > 0 {
+        args = operands[1:].to_array()
+      }
+      // A bare `-` is the archive on stdout (`tar czf - dir`). The option
+      // scanner reads it as a flag, so it is missing from `operands`, and the
+      // cluster's value letters have to see it where it was written.
+      if flags.contains("-") {
+        let merged : Array[(String, Bool)] = [("-", false)]
+        for it in args {
+          merged.push(it)
+        }
+        args = merged
+      }
+      let (a, d, rest) = tar_take_cluster_values(cluster, args)
+      cluster_archive = a
+      cluster_dir = d
+      args = rest
+    }
+    None => ()
+  }
+  let letters = tar_operation_letters(scan, cluster)
+  let archive_written = letters.contains("c") ||
+    letters.contains("r") ||
+    letters.contains("u") ||
+    letters.contains("A")
+  let listing = letters.contains("t")
+  let extracting = letters.contains("x")
+  if !archive_written && !listing && !extracting {
+    // Measured: `tar -f a.tar` and `tar` exit 2 without opening anything
+    // ("you must specify one of -Acdtrux").
+    self.push(Unknown, "tar: no operation letter was given", true, line)
+    return
+  }
+  let archive = match value_entry_of(scan, ["-f", "--file"]) {
+    Some(v) => Some((v.text, v.dynamic))
+    None => cluster_archive
+  }
+  let dir = match value_entry_of(scan, ["-C", "--directory"]) {
+    Some(v) => Some((v.text, v.dynamic))
+    None => cluster_dir
+  }
+  if archive_written {
+    match archive {
+      Some((a, ad)) => if a != "-" { self.push(Write, a, ad, line) }
+      None =>
+        self.push(
+          Unknown,
+          "tar: the archive name is not on the command line",
+          true,
+          line,
+        )
+    }
+    for it in args {
+      let (m, md) = it
+      self.push(Read, m, md, line)
+    }
+  } else if listing {
+    // The operands of a list run are member names inside the archive, not
+    // paths on disk, so only the archive itself is read.
+    match archive {
+      Some((a, ad)) => if a != "-" { self.push(Read, a, ad, line) }
+      None => ()
+    }
+  } else {
+    match dir {
+      Some((d, dd)) => self.push(Write, d, dd, line)
+      None =>
+        self.push(
+          Unknown,
+          "tar: extraction point is the working directory",
+          true,
+          line,
+        )
+    }
+    match archive {
+      Some((a, ad)) => if a != "-" { self.push(Read, a, ad, line) }
+      None => ()
+    }
+  }
+}
+
+///|
+/// The suffixes a compressor appends, and the ones it strips when
+/// decompressing. Measured: each is a plain string glued to the whole operand,
+/// path prefix and all (`gzip sub/f.txt` writes `sub/f.txt.gz`), and zstd also
+/// reads back `.zstd`.
+fn compressor_suffixes(n : String, decompress : Bool) -> Array[String] {
+  match n {
+    "gzip" | "gunzip" => [".gz"]
+    "bzip2" | "bunzip2" => [".bz2"]
+    "xz" | "unxz" => [".xz"]
+    "zstd" | "unzstd" => if decompress { [".zst", ".zstd"] } else { [".zst"] }
+    _ => []
+  }
+}
+
+///|
+fn strip_suffix(t : String, suffixes : Array[(String, Bool)]) -> String? {
+  for it in suffixes {
+    let (s, _) = it
+    if s.length() > 0 && t.has_suffix(s) && t.length() > s.length() {
+      return Some(t.unsafe_substring(start=0, end=t.length() - s.length()))
+    }
+  }
+  None
+}
+
+///|
+fn any_dynamic(xs : Array[(String, Bool)]) -> Bool {
+  xs.any(fn(it) {
+    let (_, d) = it
+    d
+  })
+}
+
+///|
+/// What a compressor does to each of its operands.
+///
+/// Every line here is measured with the shim over the real binary in a scratch
+/// directory:
+///
+/// - `gzip f.txt`: opens f.txt, creates f.txt.gz, unlinks f.txt
+/// - `gzip -k f.txt` / `--keep`: the same, without the unlink
+/// - `gzip -c f.txt`: opens f.txt only, nothing lands on disk
+/// - `gunzip f.txt.gz`: opens it, creates f.txt, unlinks f.txt.gz
+/// - `gzip -t f.txt.gz` / `-l`: opens it only
+/// - `gzip -S .zz f.txt` writes f.txt.zz, `gunzip -S .GZ f.txt.GZ` writes f.txt
+/// - `xz f.txt`, `bzip2 f.txt`: the same shape, products .xz / .bz2
+/// - `zstd f.txt`: product f.txt.zst and the source STAYS in place (zstd's
+///   default; only --rm removes it), and `zstd f.txt.zst` makes f.txt.zst.zst
+/// - `gzip -r sub`: the products are the entries inside sub
+///
+/// Before this, `gzip f.txt` reported `R:f.txt W:f.txt`: a write to a file the
+/// program never writes, and no sign of the file it does write or of the
+/// source it removes.
+fn Collector::compressor_effects(
+  self : Collector,
+  n : String,
+  scan : ArgScan,
+  operands : Array[(String, Bool)],
+  line : Int,
+) -> Unit {
+  let decompress = match n {
+    "gunzip" | "bunzip2" | "unxz" | "unzstd" => true
+    _ =>
+      scan.opts.any(fn(o) {
+        o == "-d" || o == "--decompress" || o == "--uncompress"
+      })
+  }
+  // -c, -t and -l never write a file next to the operand. Measured: `gzip -t
+  // f.txt.gz`, `gzip -l f.txt.gz`, `xz -l f.txt.xz`, `zstd -l f.txt.zst` and
+  // `bzip2 -t f.txt.bz2` only open the operand.
+  let read_only = scan.to_stdout ||
+    scan.opts.any(fn(o) {
+      o == "-t" || o == "--test" || o == "-l" || o == "--list"
+    })
+  let recursive = scan.opts.any(fn(o) { o == "-r" || o == "--recursive" })
+  // zstd keeps its input unless --rm; the others remove it unless -k/--keep.
+  let removes_source = if n == "zstd" || n == "unzstd" {
+    scan.opts.contains("--rm")
+  } else {
+    !scan.opts.any(fn(o) { o == "-k" || o == "--keep" })
+  }
+  let suffixes : Array[(String, Bool)] = match
+    value_entry_of(scan, ["-S", "--suffix"]) {
+    Some(v) => if v.text != "" { [(v.text, v.dynamic)] } else { [] }
+    None => {
+      let out : Array[(String, Bool)] = []
+      for s in compressor_suffixes(n, decompress) {
+        out.push((s, false))
+      }
+      out
+    }
+  }
+  for it in operands {
+    let (t, d) = it
+    self.push(Read, t, d, line)
+    if read_only || recursive || suffixes.length() == 0 {
+      continue
+    }
+    if decompress {
+      // A name that carries none of the suffixes has no product this tool can
+      // name, and gzip refuses it ("unknown suffix -- ignored"), so only the
+      // read is reported.
+      match strip_suffix(t, suffixes) {
+        Some(base) => {
+          self.push(Write, base, d || any_dynamic(suffixes), line)
+          if removes_source {
+            self.push(Delete, t, d, line)
+          }
+        }
+        None => ()
+      }
+    } else {
+      let (suffix, sd) = suffixes[0]
+      // Measured: gzip, xz and bzip2 leave a name that already carries their
+      // suffix alone ("already has .gz suffix"), while zstd happily makes
+      // f.txt.zst.zst.
+      let already = (n != "zstd" && n != "unzstd") && t.has_suffix(suffix)
+      if !already {
+        self.push(Write, t + suffix, d || sd, line)
+        if removes_source {
+          self.push(Delete, t, d, line)
+        }
+      }
+    }
+  }
+  if recursive {
+    self.push(
+      Unknown,
+      n + " -r: the products are the entries inside each directory",
+      true,
+      line,
+    )
+  }
+}
+
+///|
 /// `eval "..."` and `sh -c "..."` with a static string: the string is a real
 /// command line, so it gets parsed and folded into the same summary.
 fn Collector::recurse_static(
@@ -1092,24 +1406,299 @@ fn Collector::recurse_static(
 }
 
 ///|
-/// Without a per-command option table we cannot tell `xzf` from a filename.
-/// This is the narrow case of a general gap: an option string that does not
-/// start with `-` is indistinguishable from a path operand.
-fn short_flag_cluster(xs : Array[(String, Bool)]) -> String? {
-  if xs.length() > 0 {
-    let (first, _) = xs[0]
-    if first.length() > 1 &&
-      first.to_string().all(fn(c) { c.is_ascii_alphabetic() }) {
-      return Some(first)
+/// What a wrapper does with the words after it.
+enum Wrapped {
+  /// It runs no program: a bare `env`, or `command -v` which only asks where
+  /// a name is.
+  Nothing
+  /// The command starts at this index of the wrapper's own argument list.
+  Command(Int)
+  /// The command line lives inside a string option (`env -S "rm -rf x"`),
+  /// which this tool does not take apart.
+  FromString
+}
+
+///|
+/// Programs that run another program and hand it their own command line.
+/// Measured with the shim: `env rm -rf victim.txt`, `timeout 5 rm -f x`,
+/// `nice -n 5 rm`, `nohup rm`, `stdbuf -oL rm`, `setsid rm`, `command rm` and
+/// `xargs rm` all end up deleting the file they are handed. Before this, each
+/// of them reported only "an unmodelled program ran", which is true and says
+/// nothing about what it ran.
+fn is_wrapper(n : String) -> Bool {
+  match n {
+    "env"
+    | "nice"
+    | "nohup"
+    | "timeout"
+    | "stdbuf"
+    | "setsid"
+    | "command"
+    | "xargs" => true
+    _ => false
+  }
+}
+
+///|
+/// The wrapper's own options that take the next word as their value. The
+/// lists are measured against the real program (`nice -n 5 rm`, `timeout -s
+/// KILL 5 rm`, `env -u FOO rm`, `env -a argv0 rm`, `stdbuf -o L rm`,
+/// `xargs -I{} rm`, ...). `setsid -c` is deliberately absent: it is --ctty and
+/// takes no value, so consuming the next word after it would eat the command.
+fn wrapper_value_opts(n : String) -> Array[String] {
+  match n {
+    "env" =>
+      [
+        "-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-a", "--argv0",
+      ]
+    "timeout" => ["-s", "--signal", "-k", "--kill-after"]
+    "nice" => ["-n", "--adjustment"]
+    "stdbuf" => ["-i", "-o", "-e", "--input", "--output", "--error"]
+    "xargs" =>
+      [
+        "-E", "-I", "-L", "-n", "-P", "-s", "-d", "-a", "--eof", "--replace", "--max-lines",
+        "--max-args", "--max-procs", "--max-chars", "--delimiter", "--arg-file",
+      ]
+    _ => []
+  }
+}
+
+///|
+/// How many words one option token takes with it: 0 when the value is glued to
+/// the token (`-n1`, `--unset=FOO`) or the option takes none, 1 when the value
+/// is the next word. A short cluster can carry a value letter anywhere, so it
+/// is walked letter by letter.
+fn wrapper_option_extra_words(value_opts : Array[String], t : String) -> Int {
+  if t.has_prefix("--") {
+    match t.find("=") {
+      Some(_) => 0
+      None => if value_opts.contains(t) { 1 } else { 0 }
+    }
+  } else {
+    let mut k = 1
+    while k < t.length() {
+      let name = "-" + t.unsafe_substring(start=k, end=k + 1)
+      if value_opts.contains(name) {
+        return if k + 1 < t.length() { 0 } else { 1 }
+      }
+      k += 1
+    }
+    0
+  }
+}
+
+///|
+/// Whether this word is `NAME=VALUE` before an `env` command name. It is part
+/// of the environment, not the program to run: `env FOO=1 rm x` runs rm.
+fn is_env_assign(t : String) -> Bool {
+  match t.find("=") {
+    Some(eq) =>
+      eq > 0 &&
+      !t.unsafe_substring(start=0, end=eq).contains("/") &&
+      is_name_text(t.unsafe_substring(start=0, end=eq))
+    None => false
+  }
+}
+
+///|
+fn is_name_text(t : String) -> Bool {
+  if t.length() == 0 {
+    return false
+  }
+  let first = match t.get_char(0) {
+    Some(c) => c.is_ascii_alphabetic() || c == '_'
+    None => false
+  }
+  first &&
+  t
+  .to_string()
+  .all(fn(c) { c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '_' })
+}
+
+///|
+/// Where the program a wrapper runs starts, or None when `n` is not a wrapper.
+/// The wrapper's own options are skipped, an `env` assignment is skipped, and
+/// `timeout`'s DURATION is skipped because it is a number, not a command.
+fn wrapper_target(n : String, words : Array[Word]) -> Wrapped? {
+  if !is_wrapper(n) {
+    return None
+  }
+  let value_opts = wrapper_value_opts(n)
+  // timeout's first non-option word is its DURATION.
+  let mut prologue = if n == "timeout" { 1 } else { 0 }
+  let mut i = 1
+  while i < words.length() {
+    let t = words[i].literal_text()
+    if t == "--" {
+      i += 1
+      break
+    }
+    if !t.has_prefix("-") || t == "-" {
+      if n == "env" && is_env_assign(t) {
+        i += 1
+        continue
+      }
+      if prologue > 0 {
+        prologue -= 1
+        i += 1
+        continue
+      }
+      break
+    }
+    // `command -v rm` asks where rm is; it does not run it. Measured: the
+    // file the argument names is still there afterwards.
+    if n == "command" && (t == "-v" || t == "-V") {
+      return Some(Wrapped::Nothing)
+    }
+    // `env -S "rm -rf x"` runs the string, not a word of its own.
+    if n == "env" && (t == "-S" || t == "--split-string") {
+      return Some(Wrapped::FromString)
+    }
+    i += 1 + wrapper_option_extra_words(value_opts, t)
+  }
+  if i >= words.length() {
+    // `env` on its own prints the environment and runs nothing.
+    return Some(Wrapped::Nothing)
+  }
+  Some(Wrapped::Command(i))
+}
+
+///|
+/// The value of one of `names` in a raw word list, with its hole flag, for the
+/// three spellings `-a list`, `-alist` and `--arg-file=list`. Wrappers are
+/// scanned from their words rather than from the option table, so the one path
+/// option they have (`xargs -a`) is found here.
+fn option_word_value(
+  words : Array[Word],
+  names : Array[String],
+) -> (String, Bool)? {
+  for i, w in words {
+    let t = w.literal_text()
+    let dynamic = w.has_hole() || w.has_glob()
+    for n in names {
+      if t == n && i + 1 < words.length() {
+        let v = words[i + 1]
+        return Some((v.literal_text(), v.has_hole() || v.has_glob()))
+      }
+      if t.has_prefix(n + "=") {
+        return Some(
+          (t.unsafe_substring(start=n.length() + 1, end=t.length()), dynamic),
+        )
+      }
+      if !n.has_prefix("--") && t.has_prefix(n) && t.length() > n.length() {
+        return Some(
+          (t.unsafe_substring(start=n.length(), end=t.length()), dynamic),
+        )
+      }
     }
   }
   None
 }
 
 ///|
-fn drop_short_flag_cluster(xs : Array[(String, Bool)]) -> Array[(String, Bool)] {
-  match short_flag_cluster(xs) {
-    Some(_) => xs[1:].to_array()
-    None => xs
+/// Whether an xargs command uses a replacement string (`-I{}`, `--replace=`,
+/// or the old `-i`). Every argument that spells it becomes a placeholder for
+/// the input, so the command's argv cannot be read as literal paths.
+fn xargs_replaces(words : Array[Word]) -> Bool {
+  for i, w in words {
+    if i == 0 {
+      continue
+    }
+    let t = w.literal_text()
+    if t.has_prefix("-I") || t.has_prefix("-i") || t.has_prefix("--replace") {
+      return true
+    }
   }
+  false
+}
+
+///|
+/// Wrappers that exec a file: `env`, `nice`, `nohup`, `timeout`, `stdbuf`,
+/// `setsid` and `xargs` all end in execvp, so a shell word cannot be the
+/// program they run. `cd` and `eval` are the two whose effects would be
+/// invented if followed: a moved working directory and a parsed string for a
+/// command that fails. `command` is the exception, it runs builtins in the
+/// current shell.
+fn wrapper_runs_shell_words(n : String) -> Bool {
+  n == "command"
+}
+
+///|
+/// Wrappers nest for free: the inner command goes back through classify, so
+/// `env timeout 5 rm -f x` and `nice -n 5 xargs rm` work the same way.
+fn Collector::wrapper_effects(
+  self : Collector,
+  n : String,
+  s : SimpleCmd,
+  target : Wrapped,
+  line : Int,
+) -> Unit {
+  // The wrapper itself runs and touches nothing of its own.
+  self.push(Exec, n, false, line)
+  match target {
+    Wrapped::Nothing => ()
+    Wrapped::FromString =>
+      self.push(
+        Unknown,
+        n + ": the command line is inside a string option",
+        true,
+        line,
+      )
+    Wrapped::Command(i) => {
+      if self.depth >= max_wrapper_depth() {
+        self.push(Unknown, n + ": wrapper depth limit", true, line)
+        return
+      }
+      let inner = s.words[i:].to_array()
+      let name = inner[0].literal_text()
+      if n == "xargs" {
+        // -a/--arg-file: the list is read from a file instead of stdin, and
+        // that file is a path. Measured: `xargs -a list rm` opens list.
+        match option_word_value(s.words, ["-a", "--arg-file"]) {
+          Some((f, fd)) => self.push(Read, f, fd, line)
+          None => ()
+        }
+        if xargs_replaces(s.words) {
+          // -I/--replace (and the old -i) substitute each input line into
+          // every occurrence of a string in the command. Those words are
+          // placeholders, not paths: following `xargs -I{} rm {}` reported
+          // `{}` as a file to delete.
+          self.push(Exec, name, false, line, modeled=false)
+          self.push(
+            Unknown,
+            "xargs: the replaced arguments come from its input",
+            true,
+            line,
+          )
+          return
+        }
+      }
+      if !wrapper_runs_shell_words(n) && (name == "cd" || name == "eval") {
+        self.push(Exec, name, false, line, modeled=false)
+      } else {
+        let cmd : SimpleCmd = { assigns: [], words: inner, redirects: [], }
+        self.depth += 1
+        self.classify(name, cmd, line)
+        self.depth -= 1
+      }
+      if n == "xargs" {
+        // The words xargs appends come from its input, which this tool does
+        // not read. The fixed part above still counts; this says what is
+        // missing from it.
+        self.push(
+          Unknown,
+          "xargs: the argument list comes from its input",
+          true,
+          line,
+        )
+      }
+    }
+  }
+}
+
+///|
+/// Wrapper nesting is bounded like every other recursion here: a command line
+/// of 10000 `env` words must not decide whether this process survives.
+fn max_wrapper_depth() -> Int {
+  16
 }

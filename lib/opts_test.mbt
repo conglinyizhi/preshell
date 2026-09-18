@@ -22,6 +22,7 @@ fn kind_name(v : OptVal) -> String {
     NotPath => "NotPath"
     ReadPath => "ReadPath"
     WritePath => "WritePath"
+    Path => "Path"
     TargetDir => "TargetDir"
     Attached => "Attached"
   }
@@ -146,8 +147,8 @@ test "the scan records target directory, stdout mode and file-supplied patterns"
 ///|
 test "programs without a table keep the pre-table split" {
   inspect(
-    scan_render("tar", ["-C", "/tmp", "xzf", "a.tgz"]),
-    content="opts=[] values=[] operands=[/tmp,xzf,a.tgz] tdir=- stdout=false fromopt=false",
+    scan_render("unzip", ["-d", "/tmp", "in.zip"]),
+    content="opts=[] values=[] operands=[/tmp,in.zip] tdir=- stdout=false fromopt=false",
   )
   inspect(
     scan_render("ls", ["-la", "dir"]),
@@ -188,4 +189,36 @@ test "value_of finds the appended value for the derived write" {
   debug_inspect(value_of(scan, ["-i", "--in-place"]), content="Some(\".bak\")")
   let bare = scan_args(opts_of("sed"), scan_items(["-i", "s/a/b/", "data.txt"]))
   debug_inspect(value_of(bare, ["-i", "--in-place"]), content="None")
+}
+
+///|
+/// tar's `-f` and `-C` are paths whose direction depends on the operation
+/// letter, so the table records them as `Path` and the effects layer decides.
+/// What the table has to get right is that they leave the operand side, that
+/// the operation letters are read as option names, and that a value inside a
+/// cluster (`-czf out`) still finds its way.
+test "tar's archive and directory values leave the operand side" {
+  inspect(
+    scan_render("tar", ["-czf", "out", "dir"]),
+    content="opts=[-c,-f] values=[-f=out:Path] operands=[dir] tdir=- stdout=false fromopt=false",
+  )
+  inspect(
+    scan_render("tar", ["--create", "--file=arc.tar", "dir"]),
+    content="opts=[--create,--file] values=[--file=arc.tar:Path] operands=[dir] tdir=- stdout=false fromopt=false",
+  )
+  inspect(
+    scan_render("tar", ["-C", "/tmp", "xzf", "a.tgz"]),
+    content="opts=[-C] values=[-C=/tmp:Path] operands=[xzf,a.tgz] tdir=- stdout=false fromopt=false",
+  )
+  // A value that is a hole stays a hole: the archive of `tar -czf $A dir` is
+  // a name nobody can write down yet.
+  let scan = scan_args(opts_of("tar"), [
+    ("-czf", false),
+    ("$A", true),
+    ("dir", false),
+  ])
+  debug_inspect(
+    value_entry_of(scan, ["-f", "--file"]),
+    content="Some({ opt: \"-f\", val: Path, text: \"$A\", dynamic: true })",
+  )
 }
