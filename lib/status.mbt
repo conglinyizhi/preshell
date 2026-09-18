@@ -393,7 +393,7 @@ fn analyze_clean(src : String, dialect : Dialect) -> Report {
   } else {
     Complete
   }
-  let base = impact(seq)
+  let base = impact(seq, dialect~)
   // A POSIX script that uses bash-only syntax gets its analysis called out: the
   // parse succeeded, so the status still says so, but the note and the
   // uncertainty say the answer is not what that shell would do.

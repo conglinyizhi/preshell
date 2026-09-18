@@ -266,19 +266,24 @@ struct Collector {
   mut dropped : Int
   mut uncertain : Bool
   mut depth : Int
+  /// Grammar the surrounding command line is being read with. A nested script
+  /// (`eval`, `zsh -c`) has to be read with it too, or a zsh-only construct
+  /// inside gets read as bash and the effects come out wrong.
+  dialect : Dialect
   /// Directory the command line itself moved into, or None when it has not
   /// moved or could not be modelled. See cwd.mbt.
   mut cwd : String?
 }
 
 ///|
-pub fn impact(seq : Seq) -> Impact {
+pub fn impact(seq : Seq, dialect? : Dialect = Bash) -> Impact {
   let c : Collector = {
     items: [],
     roots: [],
     dropped: 0,
     uncertain: false,
     depth: 0,
+    dialect,
     cwd: None,
   }
   c.walk_seq(seq)
@@ -1068,7 +1073,13 @@ fn Collector::recurse_static(
   }
   match eval_script(s, n) {
     Some(script) => {
-      let (seq, _) = parse(script)
+      // A shell named on the command line decides the inner grammar; `eval`
+      // keeps the one we are already reading.
+      let inner_dialect = match Dialect::from_shell_name(n) {
+        Some(d) => d
+        None => self.dialect
+      }
+      let (seq, _) = parse_dialect(script, inner_dialect)
       // `bash -c "cd /tmp; rm x"` runs in its own process.
       let saved = self.saved_cwd()
       self.depth += 1

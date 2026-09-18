@@ -105,7 +105,7 @@ fn Lexer::read_subscript(self : Lexer) -> Array[WordPart] {
       }
       // Re-lex the inside so that holes in `a[$i]` and quotes in `a["k]k"]`
       // are still visible to the audit, not flattened into text.
-      let sub = Lexer::new(inner)
+      let sub = Lexer::with_dialect(inner, self.dialect)
       let parts = sub.read_parts(true)
       for e in sub.errors {
         self.fail(e)

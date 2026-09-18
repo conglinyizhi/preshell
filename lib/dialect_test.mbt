@@ -554,3 +554,25 @@ test "the sibling command substitution already carries the dialect" {
   inspect(touched("x=$(echo >! f)"), content="W:!")
   inspect(ztouched("cat <(echo >! f)"), content="W:f R:<() U:<()")
 }
+
+///|
+test "every sub-parse inherits the dialect it was opened in" {
+  // Three entry points re-read a piece of text as shell, and each one used to
+  // fall back to bash: a subscript, `eval`, and the backquote form (that one is
+  // covered above). `zsh -c '...'` is the exception -- the program named on the
+  // command line decides, so it stays zsh even from a bash command line.
+  inspect(ztouched("a[`echo >! f`]=1"), content="W:f")
+  inspect(touched("a[`echo >! f`]=1"), content="W:!")
+  inspect(ztouched("eval 'echo >! f'"), content="W:f")
+  inspect(touched("eval 'echo >! f'"), content="W:!")
+  inspect(ztouched("zsh -c 'echo >! f'"), content="W:f")
+  inspect(touched("zsh -c 'echo >! f'"), content="W:f")
+  inspect(ztouched("sh -c 'echo >! f'"), content="W:!")
+  inspect(touched("sh -c 'echo >! f'"), content="W:!")
+  // Plain sub-commands keep their effects either way.
+  inspect(ztouched("a[`cat x`]=1"), content="R:x")
+  debug_inspect(
+    zstatus("eval 'for i j in a b; do :; done'"),
+    content="Complete",
+  )
+}
