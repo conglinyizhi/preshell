@@ -196,3 +196,43 @@ test "programs outside the modelled set are marked, not guessed" {
     }
   }
 }
+
+///|
+test "a for loop may put its in on the next line" {
+  // Measured: bash and zsh both accept `for x` / `in x` / `do ... done` split
+  // across lines, and the body still runs.
+  debug_inspect(
+    analyze("for x\nin a\ndo\nrm -f b\ndone").status,
+    content="Complete",
+  )
+  inspect(touched("for x\nin a\ndo\nrm -f b\ndone"), content="D:b")
+  debug_inspect(
+    analyze_dialect("for x\nin a\ndo\nrm -f b\ndone", Zsh).status,
+    content="Complete",
+  )
+  // The body-less form is still fine.
+  debug_inspect(
+    analyze("for x\nin a b\ndo\n:\ndone").status,
+    content="Complete",
+  )
+}
+
+///|
+test "a named descriptor prefix before a redirect" {
+  // `{fd}<file` assigns a fresh descriptor; for an audit only the target
+  // matters. Measured: both shells take it inside a command, and only bash
+  // takes it attached to a compound command.
+  inspect(touched(": {fd}<file"), content="R:file")
+  inspect(touched("exec {fd}>out"), content="W:out")
+  inspect(touched("{fd}<file"), content="R:file")
+  debug_inspect(
+    analyze("while :; do :; done {fd}<file").status,
+    content="Complete",
+  )
+  debug_inspect(
+    analyze_dialect("while :; do :; done {fd}<file", Zsh).status,
+    content="Unsupported",
+  )
+  // A brace word that is not a valid name stays an ordinary word.
+  debug_inspect(analyze("echo {not a fd}").status, content="Complete")
+}

@@ -342,6 +342,12 @@ fn Parser::parse_redirect_list(self : Parser) -> Array[Redirect] {
                 self.advance()
                 out.push(self.parse_redirect(Some(parse_fd(digits))))
                 continue
+              } else if self.lex.dialect is Bash && is_named_fd(digits) {
+                // Measured: bash takes `done {fd}<file`, zsh refuses it. The
+                // other call site (inside a simple command) is common ground.
+                self.advance()
+                out.push(self.parse_redirect(None))
+                continue
               } else {
                 break
               }
@@ -685,6 +691,9 @@ fn Parser::parse_for(self : Parser) -> Cmd {
     }
   }
   let words : Array[Word] = []
+  // `for x` and its `in` may sit on different lines: measured, bash and zsh
+  // both accept `for x\nin x\ndo ... done`.
+  self.skip_newlines()
   if self.cur is TOp("(") && self.next_is_adjacent("(") {
     // `for ((...))` requires arithmetic: bash errors out here instead of
     // falling back to subshells (parse.y:parse_dparen, the FOR case).
@@ -1187,6 +1196,29 @@ fn Parser::next_is_adjacent(self : Parser, op : String) -> Bool {
 }
 
 ///|
+/// Whether a word is the `{varname}` descriptor prefix bash and zsh accept
+/// before a redirect: `{fd}<file`, `exec {fd}>out`. The descriptor number is
+/// assigned at run time, so for an audit only the redirect's target matters.
+fn is_named_fd(text : String) -> Bool {
+  if text.length() < 3 || !text.has_prefix("{") || !text.ends_with("}") {
+    return false
+  }
+  let name = text.unsafe_substring(start=1, end=text.length() - 1)
+  let mut i = 0
+  for c in name {
+    if i == 0 {
+      if !is_name_start(c) {
+        return false
+      }
+    } else if !is_name_char(c) {
+      return false
+    }
+    i += 1
+  }
+  i > 0
+}
+
+///|
 /// `2>&1` is a redirect on fd 2 only when the digit is glued to the operator;
 /// `echo 2 > f` is just a word and a redirect on stdout.
 fn Parser::fd_adjacent(self : Parser, w : Word) -> Bool {
@@ -1203,11 +1235,16 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
       TWord(w) => {
         if self.peek_is_redirect() && self.fd_adjacent(w) {
           match w.plain() {
-            Some(digits) if all_digits(digits) => {
-              self.advance()
-              redirs.push(self.parse_redirect(Some(parse_fd(digits))))
-              continue
-            }
+            Some(text) =>
+              if all_digits(text) {
+                self.advance()
+                redirs.push(self.parse_redirect(Some(parse_fd(text))))
+                continue
+              } else if is_named_fd(text) {
+                self.advance()
+                redirs.push(self.parse_redirect(None))
+                continue
+              }
             _ => ()
           }
         }
