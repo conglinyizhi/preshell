@@ -17,12 +17,38 @@ pub(all) struct Parser {
   /// unbounded one is a crash: 40k nested `if` used to overflow the stack and
   /// take the process down with SIGSEGV. Real scripts nest a few dozen deep.
   mut depth : Int
+  /// zsh lets an `if`/`while`/`until` condition be followed by a brace group
+  /// instead of `then ... fi` / `do ... done`. The `{` only counts at a command
+  /// position and only when no separator came first, so the condition list has
+  /// to stop and hand it to the construct: if the sequence loop parses it as an
+  /// ordinary command, the body is gone and the construct reads as unfinished.
+  /// Only the condition call sites turn this on, and it stays on for everything
+  /// the condition parses directly.
+  mut brace_body : Bool
+  /// Set by `parse_seq_in` when it stopped on such a brace, so the caller can
+  /// tell a body from a stray `{` in a sequence that failed for another reason.
+  mut brace_stop : Bool
+  /// Whether the sequence being read may end at end of input without a
+  /// complaint. zsh's SHORTLOOPS allows `while cond` with no body at all, and
+  /// `while true; { : }` is that shape: the brace group joins the condition
+  /// (a separator lets the list continue) and the loop keeps an empty body.
+  mut eof_ok : Bool
 }
 
 ///|
 pub fn Parser::Parser(lex : Lexer) -> Parser {
   let cur = lex.next()
-  { lex, cur, cur_start: lex.tok_start, la: None, la_start: 0, depth: 0, }
+  {
+    lex,
+    cur,
+    cur_start: lex.tok_start,
+    la: None,
+    la_start: 0,
+    depth: 0,
+    brace_body: false,
+    brace_stop: false,
+    eof_ok: false,
+  }
 }
 
 ///|
@@ -135,6 +161,71 @@ fn is_closer(op : String) -> Bool {
 }
 
 ///|
+///
+/// Is the current token the `{` that opens a group? In zsh a lone `{` at a
+/// command position is the reserved word `{`, and it is the only spelling a
+/// brace body has.
+fn Parser::at_body_brace(self : Parser) -> Bool {
+  match self.cur {
+    TWord(w) => w.plain() == Some("{")
+    _ => false
+  }
+}
+
+///|
+/// Does a command leave the parser at a command position? This is zsh's
+/// `incmdpos`, and it is what tells `if [[ x ]] { : }` from `if true { : }`:
+/// `[[ ]]`, `(( ))`, a subshell, a group and an assignment alone all end at a
+/// command position, while a simple command's word does not (zsh's par_simple
+/// clears the flag before it reads the next token).
+fn cmd_ends_at_cmdpos(cmd : Cmd) -> Bool {
+  match cmd {
+    Simple(s) => s.words.length() == 0
+    _ => true
+  }
+}
+
+///|
+fn pipeline_ends_at_cmdpos(p : Pipeline) -> Bool {
+  match p.cmds {
+    [] => false
+    cmds => cmd_ends_at_cmdpos(cmds[cmds.length() - 1])
+  }
+}
+
+///|
+/// Read an `if`/`while`/`until` condition with that rule switched on. `eof_ok`
+/// says the condition is allowed to run out of input, which zsh permits for a
+/// loop (SHORTLOOPS) and not for an `if`.
+fn Parser::parse_cond_seq(
+  self : Parser,
+  stop : Stop,
+  label : String,
+  eof_ok : Bool,
+) -> Seq {
+  let saved_body = self.brace_body
+  let saved_eof = self.eof_ok
+  self.brace_body = true
+  self.eof_ok = eof_ok
+  let seq = self.parse_seq_in(stop, label)
+  self.brace_body = saved_body
+  self.eof_ok = saved_eof
+  seq
+}
+
+///|
+/// Consume a `{ ... }` body, the zsh spelling that replaces `then ... fi` and
+/// `do ... done`. The caller has already checked that the brace is there.
+fn Parser::parse_brace_body(self : Parser, label : String) -> Seq {
+  self.advance()
+  let body = self.parse_seq_in({ words: ["}"], ops: [], }, label)
+  if self.reserved() == Some("}") {
+    self.advance()
+  }
+  body
+}
+
+///|
 fn Parser::at_stop(self : Parser, stop : Stop) -> Bool {
   match self.cur {
     TEof => true
@@ -161,6 +252,11 @@ pub fn Parser::parse_seq(self : Parser, stop : Stop) -> Seq {
 pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
   let started_at = self.lex.line
   let items : Array[AndOr] = []
+  // One-shot, unlike `brace_body`: a nested construct inside a loop condition
+  // still has to report its own unterminated input.
+  let eof_ok = self.eof_ok
+  self.eof_ok = false
+  let mut stopped_at_brace = false
   for ;; {
     self.skip_newlines()
     if self.at_stop(stop) {
@@ -173,6 +269,13 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
       None => {
         items.push({ pipeline, op: Semi, })
         if self.cur is TEof {
+          break
+        }
+        if self.brace_body &&
+          self.at_body_brace() &&
+          pipeline_ends_at_cmdpos(pipeline) {
+          // The condition ends here and the `{` belongs to the construct.
+          stopped_at_brace = true
           break
         }
         if !self.stop_matches(stop) {
@@ -191,12 +294,16 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
       self.advance()
     }
   }
-  if (stop.ops.length() > 0 || stop.words.length() > 0) && self.cur is TEof {
+  if !eof_ok &&
+    (stop.ops.length() > 0 || stop.words.length() > 0) &&
+    self.cur is TEof {
     let what = if label == "" { "construct" } else { label }
     // Point at where the construct opened: end of input is where the parser
     // noticed, not where the problem is.
     self.lex.fail_at("unexpected end of input in " + what, started_at)
   }
+  self.eof_ok = eof_ok
+  self.brace_stop = stopped_at_brace
   { items, }
 }
 
@@ -579,6 +686,11 @@ fn Parser::parse_cond(self : Parser) -> Cmd {
   }
   let raw = self.lex.slice(start, self.cur_start)
   if self.reserved() == Some("]]") {
+    // zsh's parser is at a command position again once the brackets close
+    // (par_dinbrack sets incmdpos), so `if [[ x ]] { : }` has a brace body.
+    // Setting it before the next token is read is what makes `[[ x ]] {}`
+    // read as the empty group rather than as one word.
+    self.lex.cmd_pos = true
     self.advance()
   } else {
     self.lex.fail("unexpected end of input in [[ ]]")
@@ -589,26 +701,39 @@ fn Parser::parse_cond(self : Parser) -> Cmd {
 ///|
 fn Parser::parse_if(self : Parser) -> Cmd {
   self.advance()
-  let cond = self.parse_seq_in({ words: ["then"], ops: [], }, "if")
+  let cond = self.parse_cond_seq({ words: ["then"], ops: [], }, "if", false)
+  // zsh: `if cond { body }` -- a brace group in place of `then ... fi`, and
+  // then `fi` is not needed either. Measured: `if [[ x ]] { : }` parses and
+  // `if true { : }` is a syntax error, because a plain word leaves the parser
+  // outside a command position.
+  let mut usebrace = self.brace_stop && self.at_body_brace()
   if self.reserved() == Some("then") {
     self.advance()
   }
-  let then_ = self.parse_seq_in(
-    { words: ["elif", "else", "fi"], ops: [], },
-    "if",
-  )
+  let then_ = if usebrace {
+    self.parse_brace_body("if")
+  } else {
+    self.parse_seq_in({ words: ["elif", "else", "fi"], ops: [], }, "if")
+  }
   let elifs : Array[(Seq, Seq)] = []
   for ;; {
     if self.reserved() == Some("elif") {
       self.advance()
-      let c = self.parse_seq_in({ words: ["then"], ops: [], }, "if")
+      let c = self.parse_cond_seq({ words: ["then"], ops: [], }, "if", false)
+      let elif_brace = self.brace_stop && self.at_body_brace()
       if self.reserved() == Some("then") {
         self.advance()
       }
-      let b = self.parse_seq_in(
-        { words: ["elif", "else", "fi"], ops: [], },
-        "if",
-      )
+      let b = if elif_brace {
+        self.parse_brace_body("if")
+      } else {
+        self.parse_seq_in({ words: ["elif", "else", "fi"], ops: [], }, "if")
+      }
+      if elif_brace {
+        // zsh keeps one `usebrace` flag for the whole chain: a brace body
+        // anywhere in it means the `else` may take one too.
+        usebrace = true
+      }
       elifs.push((c, b))
     } else {
       break
@@ -616,7 +741,13 @@ fn Parser::parse_if(self : Parser) -> Cmd {
   }
   let else_ = if self.reserved() == Some("else") {
     self.advance()
-    Some(self.parse_seq_in({ words: ["fi"], ops: [], }, "if"))
+    if usebrace && self.at_body_brace() {
+      // zsh: when the `if` itself took a brace body, `else` may take one too,
+      // and then there is no `fi` to close either of them.
+      Some(self.parse_brace_body("if"))
+    } else {
+      Some(self.parse_seq_in({ words: ["fi"], ops: [], }, "if"))
+    }
   } else {
     None
   }
@@ -670,13 +801,30 @@ fn Parser::parse_repeat(self : Parser) -> Cmd {
 ///|
 fn Parser::parse_loop(self : Parser, until : Bool) -> Cmd {
   self.advance()
-  let cond = self.parse_seq_in({ words: ["do"], ops: [], }, "loop")
-  if self.reserved() == Some("do") {
+  let cond = self.parse_cond_seq({ words: ["do"], ops: [], }, "loop", true)
+  let brace_body_here = self.brace_stop && self.at_body_brace()
+  let body = if self.reserved() == Some("do") {
     self.advance()
-  }
-  let body = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
-  if self.reserved() == Some("done") {
-    self.advance()
+    let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
+    if self.reserved() == Some("done") {
+      self.advance()
+    }
+    b
+  } else if brace_body_here {
+    self.parse_brace_body("loop")
+  } else if self.cur is TEof {
+    // zsh's SHORTLOOPS: with no `do ... done` the loop body is the empty
+    // list, which is what `while true; { : }` is -- there the brace group
+    // joins the condition instead (a separator lets the list continue), and
+    // the loop itself keeps the empty body. Refusing this used to report the
+    // whole input as unfinished.
+    Seq::empty()
+  } else {
+    let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
+    if self.reserved() == Some("done") {
+      self.advance()
+    }
+    b
   }
   Cmd::Loop(until~, cond~, body~)
 }
@@ -779,11 +927,22 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
       for ;; {
         match self.cur {
           TWord(w) => {
+            // zsh's `}` is a reserved word wherever it stands, so it ends the
+            // word list instead of becoming one of its words. What follows then
+            // has to be a separator, which is why `for i in a { : }` is a
+            // syntax error there rather than a loop with an empty body. In
+            // bash a `}` here is just a word, so this stays zsh-only.
+            if self.lex.dialect is Zsh && w.plain() == Some("}") {
+              break
+            }
             words.push(w)
             self.advance()
           }
           _ => break
         }
+      }
+      if self.lex.dialect is Zsh && self.reserved() == Some("}") {
+        self.lex.fail("unexpected token in for word list")
       }
     }
     if self.cur is TOp(";") {
@@ -1401,6 +1560,13 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
         // argument, so a group needs no separator before its closing brace:
         // `{ echo a }` is fine there and a syntax error in bash.
         if self.lex.dialect is Zsh && w.plain() == Some("}") {
+          break
+        }
+        // An assignment leaves the parser at a command position in zsh, so a
+        // `{` straight after one is the construct's brace body and not an
+        // argument: `if x=1 { : }` parses there. Only a condition asks for
+        // that reading, so it stays behind `brace_body`.
+        if self.brace_body && words.length() == 0 && self.at_body_brace() {
           break
         }
         words.push(w)

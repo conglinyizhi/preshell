@@ -352,6 +352,66 @@ test "zsh's csh forms for and repeat run their body for real" {
 }
 
 ///|
+test "a brace body belongs to an if, a while or an until" {
+  // Measured against zsh 5.9.2. The judge is zsh's `incmdpos`: the `{` counts
+  // only at a command position -- after a compound command, after an assignment
+  // or at the start -- and the condition list has to stop and hand it over.
+  // Accepting `if true { : }` by mistake would be the same class of error as
+  // the corpus's "too lenient" quadrant, so the rejects are pinned too.
+  let accepts : Array[String] = [
+    "if [[ x ]] { : }", "if (( 1 )) { : }", "if x=1 { : }", "while (true) { : }",
+    "while { true } {}", "while true; { : }", "for i in a; { : }", "for x (a b) { : }",
+  ]
+  for c in accepts {
+    debug_inspect(zstatus(c), content="Complete")
+    // bash refuses every one of these: there `{ : }` needs a separator before
+    // the closing brace (`{ :; }`), so reading them as bash must say so.
+    debug_inspect(analyze(c).status, content="Unsupported")
+  }
+  // The body is audited, not merely accepted.
+  inspect(ztouched("if [[ x ]] { rm -rf /tmp/ifx }"), content="D:/tmp/ifx")
+  inspect(ztouched("if x=1 { rm -rf /tmp/asx }"), content="D:/tmp/asx")
+  inspect(ztouched("while { true } { rm -f /tmp/whx }"), content="D:/tmp/whx")
+  inspect(ztouched("for i in a; { rm -f /tmp/forx }"), content="D:/tmp/forx")
+  inspect(ztouched("for x (a b) { rm -f /tmp/forf }"), content="D:/tmp/forf")
+  inspect(
+    ztouched("if [[ x ]] { : } else { rm -f /tmp/elx }"),
+    content="D:/tmp/elx",
+  )
+  // With a brace body the `fi` of the ordinary spelling is not required, and
+  // an `if` chain may mix the two.
+  debug_inspect(zstatus("if [[ x ]] { : } fi"), content="Complete")
+  debug_inspect(
+    zstatus("if [[ x ]] { : } elif [[ y ]] { : }"),
+    content="Complete",
+  )
+  debug_inspect(zstatus("if [[ x ]] { : } else { : }"), content="Complete")
+  debug_inspect(zstatus("if x; then :; else { : }; fi"), content="Complete")
+  // The empty group: zsh closes the brackets and is at a command position
+  // again, so `{}` there is two tokens and not one word.
+  debug_inspect(zstatus("if [[ x ]] {}"), content="Complete")
+  debug_inspect(zstatus("while { true } {}"), content="Complete")
+  // The rejects: every one of these is a syntax error in zsh as well.
+  let rejects : Array[String] = [
+    // A plain word leaves the parser outside a command position, so the `{`
+    // there is a word and not a body.
+    "if true { : }", "while true { : }", "until false { : }",
+    // `}` ends the `in` word list, and what follows has to be a separator.
+     "for i in a { : }",
+    // A separator lets the condition list keep going, so here the group joins
+    // the condition and the `if` is then missing its `fi`.
+     "if true; { : }",
+  ]
+  for c in rejects {
+    debug_inspect(zstatus(c), content="Unsupported")
+  }
+  // The words keep their meaning away from a command position.
+  debug_inspect(zstatus("echo {a,b}"), content="Complete")
+  inspect(ztouched("echo {a,b}"), content="")
+  debug_inspect(zstatus("for i in {a,b}; do :; done"), content="Complete")
+}
+
+///|
 test "zsh spells the clobber redirect with a bang, bash does not" {
   // Measured: every one of these writes the file `out` in zsh and a file called
   // `!` in bash. Reporting zsh's `>!` as a write to a file named `!` is a wrong

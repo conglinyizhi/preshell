@@ -599,6 +599,7 @@ fn looks_like_array_head_text(text : String, with_equals : Bool) -> Bool {
 /// double-quoted string, where only `"` stops the scan and `\` only escapes
 /// a few characters.
 fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
+  let start = self.pos
   let parts : Array[WordPart] = []
   let lit = StringBuilder()
   // Depth of a zsh pattern group: `*(.)`, `(a|b)`, `(#i)foo`. Inside one, the
@@ -765,6 +766,23 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
         flush_lit(parts, lit)
         self.advance(2)
         parts.push(Lit("[["))
+        break
+      }
+      '{' if unquoted &&
+        self.dialect is Zsh &&
+        self.pos == start &&
+        self.cmd_pos &&
+        !self.in_casepat &&
+        !self.in_for_words &&
+        !self.array_elems => {
+        // zsh's lexer returns the `{` on its own as soon as it opens a word at
+        // a command position (Src/lex.c, the Inbrace case), so `{}` is the
+        // empty group rather than one word named `{}`. Anywhere else the
+        // braces belong to the word: `echo {a,b}` is still one word, and so is
+        // each element of `for i in {a,b}`.
+        flush_lit(parts, lit)
+        self.advance(1)
+        parts.push(Lit("{"))
         break
       }
       '[' if unquoted && self.looks_like_subscript() => {
