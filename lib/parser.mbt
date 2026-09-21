@@ -977,6 +977,17 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
 }
 
 ///|
+/// Skip the separators zsh allows between a `case` subject and its `in`.
+fn Parser::skip_case_separators(self : Parser) -> Unit {
+  for ;; {
+    match self.cur {
+      TNewline | TOp(";") => self.advance()
+      _ => break
+    }
+  }
+}
+
+///|
 fn Parser::parse_case(self : Parser) -> Cmd {
   self.advance()
   let subject = match self.cur {
@@ -986,7 +997,14 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     }
     _ => empty_word(self.lex.line)
   }
-  self.skip_newlines()
+  // Between the subject and `in` zsh's parser eats any run of `;` and
+  // newlines (`case x; in a) : ;; esac` is legal there), while bash accepts
+  // newlines only. Both dialects take the `;` spelling here: giving up on a
+  // script zsh runs would cost the caller the facts about it, and the shape
+  // we accept this way is the same one `case x esac` already covered.
+  // `;;` is a single token and is not one of these separators, which matches
+  // zsh refusing `case x;;in a) : ;; esac`.
+  self.skip_case_separators()
   if self.reserved() == Some("in") {
     // From here the patterns are words: zsh reads `(net|open)bsd*)` as one
     // pattern with a glob group in it, not as the pattern list's own paren

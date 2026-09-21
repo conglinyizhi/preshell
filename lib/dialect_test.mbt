@@ -283,6 +283,33 @@ test "zsh spells case fallthrough ;| and refuses bash's ;;&" {
 }
 
 ///|
+test "a separator may stand between the case subject and its in" {
+  // Measured: zsh 5.9.2 takes a run of `;` and newlines between the subject
+  // and `in`, bash 5.3 takes newlines only. Real scripts use the `;` spelling
+  // (_darcs in the zsh corpus), so both dialects read it rather than giving up
+  // on the file.
+  let sep = "case $x; in\n  a) rm -rf /tmp/tA ;;\n  b|c) echo hi ;;\nesac"
+  let classic = "case $x in\n  a) rm -rf /tmp/tA ;;\n  b|c) echo hi ;;\nesac"
+  debug_inspect(zstatus(sep), content="Complete")
+  debug_inspect(zstatus(classic), content="Complete")
+  debug_inspect(analyze(sep).status, content="Complete")
+  debug_inspect(analyze(classic).status, content="Complete")
+  // Accepting the spelling is not enough: the facts have to be the same ones
+  // the classic form gives, including the delete buried in a branch.
+  inspect(ztouched(sep), content="U:$x D:/tmp/tA")
+  inspect(ztouched(classic), content="U:$x D:/tmp/tA")
+  // An empty case takes the separator too.
+  debug_inspect(zstatus("case x; in esac"), content="Complete")
+  debug_inspect(analyze("case x; in esac").status, content="Complete")
+  // `;;` is one token and no separator: zsh refuses this, and so do we.
+  debug_inspect(zstatus("case x;;in a) : ;; esac"), content="Unsupported")
+  debug_inspect(
+    analyze("case x;;in a) : ;; esac").status,
+    content="Unsupported",
+  )
+}
+
+///|
 test "a case pattern is a word, so its parens are a glob group" {
   // zsh's `incasepat`: `(net|open)bsd*)` is one pattern. Reading the leading
   // `(` as the pattern list's own paren split it in two and choked.
