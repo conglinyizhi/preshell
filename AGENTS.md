@@ -76,8 +76,9 @@ still errors」，而且是 POSIX 模式下的错误；非 POSIX 模式 bash 接
 zsh 语料（1244 个文件）**缺口 0**：从最初的 353 一路做到零，逐刀数字与实测规则在
 docs/zsh-plan.md。
 
-读取侧（35 条常见调用）**29 条能给出路径结论**，剩 6 条只有 Exec + uncertain：
-find -delete、sqlite3、make -C、docker run -v、pip install、npm install。
+读取侧（35 条常见调用）**35 条都能给出路径结论**：find、sqlite3、make、docker 与
+包管理器的分支在 lib/tools.mbt（容器挂载按只读与否分读写，找不到的报洞）。
+
 
 ## 「我们太宽松」那一格：3 个，全是 oracle 局限
 
