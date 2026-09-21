@@ -704,6 +704,10 @@ fn Parser::parse_if(self : Parser) -> Cmd {
   let mut usebrace = self.brace_stop && self.at_body_brace()
   if self.reserved() == Some("then") {
     self.advance()
+  } else if !usebrace {
+    // Measured: `if true` and `if true; then :` without `fi` are refused by
+    // both shells, and neither accepts a missing `then`.
+    self.lex.fail("expected then after the if condition")
   }
   let then_ = if usebrace {
     self.parse_brace_body("if")
@@ -813,6 +817,12 @@ fn Parser::parse_loop(self : Parser, until : Bool) -> Cmd {
     // joins the condition instead (a separator lets the list continue), and
     // the loop itself keeps the empty body. Refusing this used to report the
     // whole input as unfinished.
+    //
+    // Measured: bash refuses a loop with no body at all (`while true`,
+    // `while read x`), so that part is zsh-only.
+    if self.lex.dialect is Bash {
+      self.lex.fail("expected do...done after while")
+    }
     Seq::empty()
   } else {
     let b = self.parse_seq_in({ words: ["done"], ops: [], }, "loop")
@@ -1022,12 +1032,21 @@ fn Parser::skip_case_separators(self : Parser) -> Unit {
 ///|
 fn Parser::parse_case(self : Parser) -> Cmd {
   self.advance()
+  // zsh takes the subject in parentheses: measured, `case (x) in a) : ;; esac`
+  // runs there and is a syntax error in bash.
+  let paren_subject = self.lex.dialect is Zsh && self.cur is TOp("(")
+  if paren_subject {
+    self.advance()
+  }
   let subject = match self.cur {
     TWord(w) => {
       self.advance()
       w
     }
     _ => empty_word(self.lex.line)
+  }
+  if paren_subject && self.cur is TOp(")") {
+    self.advance()
   }
   // Between the subject and `in` zsh's parser eats any run of `;` and
   // newlines (`case x; in a) : ;; esac` is legal there). bash accepts newlines
@@ -1044,6 +1063,11 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     // followed by two alternatives.
     self.lex.in_casepat = true
     self.advance()
+  } else {
+    // Measured: `case $x` and `case $x in` are refused by both shells, so a
+    // `case` without its subject or without `in` cannot be reported as a
+    // command that runs.
+    self.lex.fail("expected in after the case subject")
   }
   let items : Array[CaseItem] = []
   for ;; {
@@ -1055,6 +1079,8 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     }
     if self.cur is TEof {
       self.lex.in_casepat = false
+      // Measured: `case $x in` with no `esac` is refused by both shells.
+      self.lex.fail("expected esac to close the case")
       break
     }
     let before = self.lex.pos
