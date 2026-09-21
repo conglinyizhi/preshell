@@ -657,6 +657,32 @@ fn Collector::classify(
     }
     None => ()
   }
+  // Programs whose effect is decided by a flag or a subcommand rather than by
+  // an operand list get their own branch (lib/tools.mbt). Each one returns
+  // early: mixing them with the operand model would invent paths.
+  match n {
+    "find" => {
+      self.find_effects(s, line)
+      return
+    }
+    "sqlite3" => {
+      self.sqlite_effects(s, line)
+      return
+    }
+    "make" | "gmake" => {
+      self.make_effects(s, line)
+      return
+    }
+    "docker" | "podman" => {
+      self.container_effects(s, line)
+      return
+    }
+    "pip" | "pip3" | "uv" | "npm" | "pnpm" | "yarn" | "bun" => {
+      self.package_effects(n, s, line)
+      return
+    }
+    _ => ()
+  }
   // git gets its own table (lib/git.mbt): which paths a subcommand touches is
   // a measured fact per subcommand, not something to derive from operands, and
   // a subcommand we do not model has to come back unmodelled rather than

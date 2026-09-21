@@ -181,10 +181,13 @@ test "programs outside the modelled set are marked, not guessed" {
   // Every one of these runs and touches things this tool does not model: the
   // answer is the marker, and it must not be a clean report. git used to be on
   // this list; it now has its own measured table (lib/git.mbt), and
-  // `git filter-branch` is the spelling that still has no entry.
+  // `git filter-branch` is the spelling that still has no entry. git, make and
+  // docker used to be on this list; all three now have their own branches
+  // (lib/git.mbt, lib/tools.mbt), so the examples are programs without one.
   for
     src in [
-      "git filter-branch --all", "node build.js", "make -j8", "python3 -m pytest", "docker run img",
+      "git filter-branch --all", "node build.js", "rustc -O x.rs", "python3 -m pytest",
+      "cmake ..",
     ] {
     let r = analyze(src)
     if touched(src) != "" {

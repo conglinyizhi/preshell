@@ -11,16 +11,11 @@
 /// Codes as elsewhere: R read, W write, D delete, N network, S spawn,
 /// U unknown. `Exec` is left out of `touched`.
 test "read-only subcommands report no writes" {
-  for c in [
-    "git status",
-    "git status --porcelain",
-    "git diff",
-    "git log --oneline",
-    "git rev-parse HEAD",
-    "git blame a.txt",
-    "git clean -n",
-    "git clean --dry-run",
-  ] {
+  for
+    c in [
+      "git status", "git status --porcelain", "git diff", "git log --oneline", "git rev-parse HEAD",
+      "git blame a.txt", "git clean -n", "git clean --dry-run",
+    ] {
     inspect(touched(c), content="R:.")
     debug_inspect(analyze(c).status, content="Complete")
   }
@@ -54,13 +49,19 @@ test "a named path is reported exactly" {
   inspect(touched("git rm p.txt"), content="D:p.txt W:.git/index")
   inspect(touched("git add p.txt"), content="R:p.txt W:.git")
   inspect(touched("git branch newb"), content="W:.git/refs/heads/newb W:.git")
-  inspect(touched("git checkout -b newb"), content="W:.git/refs/heads/newb W:.git/HEAD")
+  inspect(
+    touched("git checkout -b newb"),
+    content="W:.git/refs/heads/newb W:.git/HEAD",
+  )
 }
 
 ///|
 test "a repository somewhere else keeps its prefix" {
   inspect(touched("git -C sub status"), content="R:sub")
-  inspect(touched("git -C sub rm p.txt"), content="D:sub/p.txt W:sub/.git/index")
+  inspect(
+    touched("git -C sub rm p.txt"),
+    content="D:sub/p.txt W:sub/.git/index",
+  )
   // A config override is skipped, not mangled into the subcommand.
   inspect(touched("git -c core.pager=cat status"), content="R:.")
 }
@@ -69,7 +70,10 @@ test "a repository somewhere else keeps its prefix" {
 test "clone reads its source and writes its destination" {
   inspect(touched("git clone /src dst"), content="R:/src W:dst")
   // A URL is a network contact, and the host is the part worth naming.
-  inspect(touched("git clone https://example.com/x.git dst"), content="N:example.com W:dst")
+  inspect(
+    touched("git clone https://example.com/x.git dst"),
+    content="N:example.com W:dst",
+  )
   // The destination derives from the source name, so it is a hole.
   inspect(analyze("git clone /src").impact.uncertain, content="true")
 }
@@ -78,7 +82,10 @@ test "clone reads its source and writes its destination" {
 test "a remote name is a hole, and an unknown subcommand is unmodelled" {
   // `origin` resolves through .git/config, which static analysis does not read.
   inspect(touched("git fetch origin"), content="W:.git U:origin")
-  inspect(touched("git fetch https://example.com/x.git"), content="W:.git N:example.com")
+  inspect(
+    touched("git fetch https://example.com/x.git"),
+    content="W:.git N:example.com",
+  )
   // A subcommand with no entry stays unmodelled rather than half-modelled.
   let unknown = analyze("git filter-branch --all")
   inspect(unknown.impact.uncertain, content="true")

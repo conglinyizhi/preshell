@@ -91,11 +91,12 @@ test "parent_dir normalizes" {
 
 ///|
 test "a program we do not model is reported instead of ignored" {
-  // `make`'s writes are decided at run time. The answer is not "no writes":
-  // it is "this ran, and everything below is a lower bound".
-  let im = impact_of("make -j8")
+  // `rustc`'s writes are decided at run time. The answer is not "no writes":
+  // it is "this ran, and everything below is a lower bound". (`make` used to
+  // serve as this example; it now has a branch of its own in lib/tools.mbt.)
+  let im = impact_of("rustc -O x.rs")
   debug_inspect(im.uncertain, content="true")
-  debug_inspect(targets_of(im, Exec), content="[\"make\"]")
+  debug_inspect(targets_of(im, Exec), content="[\"rustc\"]")
   debug_inspect(im.effects[0].modeled, content="false")
 }
 

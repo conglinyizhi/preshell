@@ -42,7 +42,10 @@ fn git_argv(s : SimpleCmd) -> Array[GitArg] {
   let out : Array[GitArg] = []
   for i, w in s.words {
     if i > 0 {
-      out.push({ text: w.literal_text(), dynamic: w.has_hole() || w.has_glob(), })
+      out.push({
+        text: w.literal_text(),
+        dynamic: w.has_hole() || w.has_glob(),
+      })
     }
   }
   out
@@ -173,7 +176,11 @@ fn net_from_arg(text : String) -> String? {
 }
 
 ///|
-fn Collector::git_net(self : Collector, args : Array[GitArg], line : Int) -> Unit {
+fn Collector::git_net(
+  self : Collector,
+  args : Array[GitArg],
+  line : Int,
+) -> Unit {
   let mut named = false
   for a in args {
     if a.text == "" || a.text.has_prefix("-") {
@@ -205,9 +212,23 @@ fn Collector::git_dispatch(
   match sub {
     // Measured: these read the repository and write nothing at all. That is a
     // stronger guarantee than "we do not know", so they get their own entries.
-    "status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "ls-tree" | "blame"
-    | "describe" | "shortlog" | "cat-file" | "whatchanged" | "reflog" | "symbolic-ref"
-    | "name-rev" | "var" | "help" => {
+    "status"
+    | "diff"
+    | "log"
+    | "show"
+    | "rev-parse"
+    | "ls-files"
+    | "ls-tree"
+    | "blame"
+    | "describe"
+    | "shortlog"
+    | "cat-file"
+    | "whatchanged"
+    | "reflog"
+    | "symbolic-ref"
+    | "name-rev"
+    | "var"
+    | "help" => {
       self.push(Exec, "git", false, line)
       self.push(Read, repo, false, line)
     }
@@ -218,9 +239,11 @@ fn Collector::git_dispatch(
       // `-f`, `-fd`, `-fdx`: the force letter inside a short cluster.
       let forced = rest.any(fn(a) {
         a.text == "--force" ||
-        (a.text.has_prefix("-") &&
+        (
+          a.text.has_prefix("-") &&
           !a.text.has_prefix("--") &&
-          a.text.contains_char('f'))
+          a.text.contains_char('f')
+        )
       })
       // Without `-f` a real run refuses to delete anything, so the only thing
       // that comes back is the read.
@@ -248,7 +271,9 @@ fn Collector::git_dispatch(
           self.push(Write, repo, true, line)
         }
         self.push(Write, git_path(prefix, ".git/index"), false, line)
-      } else if has_arg(rest, "-b") || has_arg(rest, "-B") || has_arg(rest, "-c") {
+      } else if has_arg(rest, "-b") ||
+        has_arg(rest, "-B") ||
+        has_arg(rest, "-c") {
         // A new branch: measured, the working tree is left alone and only the
         // ref, its reflog and HEAD change.
         self.git_new_ref(prefix, rest, line)
@@ -260,7 +285,13 @@ fn Collector::git_dispatch(
         self.push(Write, gitdir, true, line)
       }
     }
-    "reset" | "restore" | "merge" | "rebase" | "cherry-pick" | "revert" | "am" => {
+    "reset"
+    | "restore"
+    | "merge"
+    | "rebase"
+    | "cherry-pick"
+    | "revert"
+    | "am" => {
       self.push(Exec, "git", false, line)
       self.push(Write, repo, true, line)
       self.push(Write, gitdir, true, line)
@@ -306,7 +337,14 @@ fn Collector::git_dispatch(
       }
       self.push(Write, gitdir, true, line)
     }
-    "commit" | "init" | "gc" | "repack" | "maintenance" | "update-ref" | "tag" | "branch" => {
+    "commit"
+    | "init"
+    | "gc"
+    | "repack"
+    | "maintenance"
+    | "update-ref"
+    | "tag"
+    | "branch" => {
       self.push(Exec, "git", false, line)
       match sub {
         "init" =>
@@ -335,7 +373,12 @@ fn Collector::git_dispatch(
         }
       }
       if operands.length() > 1 {
-        self.push(Write, git_path(prefix, operands[1].text), operands[1].dynamic, line)
+        self.push(
+          Write,
+          git_path(prefix, operands[1].text),
+          operands[1].dynamic,
+          line,
+        )
       } else {
         // The destination derives from the source name, so it is a hole.
         self.push(Write, repo, true, line)
@@ -377,7 +420,12 @@ fn Collector::git_new_ref(
   }
   match first_operand(rest) {
     Some(a) =>
-      self.push(Write, git_path(prefix, ".git/refs/heads/" + a.text), false, line)
+      self.push(
+        Write,
+        git_path(prefix, ".git/refs/heads/" + a.text),
+        false,
+        line,
+      )
     None => ()
   }
 }
