@@ -488,31 +488,7 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
         // so the adjacency is what tells the two apart.
         self.advance()
         self.advance()
-        let body = self.parse_command()
-        let args : Array[Word] = []
-        let redirects : Array[Redirect] = []
-        for ;; {
-          match self.cur {
-            TWord(w) => {
-              args.push(w)
-              self.advance()
-            }
-            TOp(op) =>
-              if is_redirect_op(op) {
-                redirects.push(self.parse_redirect(None))
-              } else {
-                break
-              }
-            _ => break
-          }
-        }
-        if is_empty_command(body) &&
-          args.length() == 0 &&
-          redirects.length() == 0 {
-          // `()` with nothing after it: zsh refuses this too.
-          self.lex.fail("expected a command after the anonymous function")
-        }
-        Cmd::AnonFunc(body~, args~, redirects~)
+        self.parse_anon_func(self.parse_command())
       } else if self.next_is_adjacent("(") &&
         self.lex.is_arith_at(self.cur_start) {
         let start = self.cur_start + 2
@@ -1089,6 +1065,24 @@ fn Parser::parse_case(self : Parser) -> Cmd {
 ///|
 fn Parser::parse_function_kw(self : Parser) -> Cmd {
   self.advance()
+  // zsh's anonymous function in its `function` spelling. Measured with zsh
+  // 5.9: `function { echo $1 } extra` prints `extra`, and `function () { : }`
+  // does the same, so both open a body that runs right there with the words
+  // after it as arguments -- the same construct as `() { body }`. A *named*
+  // definition takes no argument list: `function foo { : } extra` is a parse
+  // error in zsh.
+  if self.lex.dialect is Zsh && self.at_body_brace() {
+    return self.parse_anon_func(self.parse_command())
+  }
+  if self.lex.dialect is Zsh &&
+    self.cur is TOp("(") &&
+    self.next_is_adjacent(")") {
+    // `function ()`: the parens carry no name, so they are the anonymous
+    // marker rather than part of a definition.
+    self.advance()
+    self.advance()
+    return self.parse_anon_func(self.parse_command())
+  }
   let name = match self.cur {
     TWord(w) => {
       self.advance()
@@ -1104,6 +1098,41 @@ fn Parser::parse_function_kw(self : Parser) -> Cmd {
   }
   let body = self.parse_command()
   Cmd::FuncDef(name~, body~, keyword=true)
+}
+
+///|
+/// The tail of zsh's anonymous function: the words it is called with, then its
+/// own redirections. Shared by `() { body } args` and `function { body } args`.
+fn Parser::parse_anon_func(self : Parser, body : Cmd) -> Cmd {
+  let args : Array[Word] = []
+  let redirects : Array[Redirect] = []
+  for ;; {
+    match self.cur {
+      TWord(w) =>
+        // zsh reads a lone `}` as the closing reserved word wherever it
+        // stands, so it ends the argument list instead of becoming one:
+        // `function { : } { echo y }` and `() { : } }` are parse errors
+        // there, and taking the `}` as an argument made us accept them.
+        if w.plain() == Some("}") {
+          break
+        } else {
+          args.push(w)
+          self.advance()
+        }
+      TOp(op) =>
+        if is_redirect_op(op) {
+          redirects.push(self.parse_redirect(None))
+        } else {
+          break
+        }
+      _ => break
+    }
+  }
+  if is_empty_command(body) && args.length() == 0 && redirects.length() == 0 {
+    // `()` with nothing after it: zsh refuses this too.
+    self.lex.fail("expected a command after the anonymous function")
+  }
+  Cmd::AnonFunc(body~, args~, redirects~)
 }
 
 ///|

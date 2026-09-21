@@ -454,6 +454,38 @@ test "zsh's anonymous function runs its body with its arguments" {
 }
 
 ///|
+test "zsh's function keyword also spells the anonymous function" {
+  // Measured with zsh 5.9.2: `function { echo $1 } extra` prints `extra`, and
+  // `function () { echo $1 } extra` does the same, so both are the anonymous
+  // function that runs right there -- the same construct as `() { body }`.
+  debug_inspect(zstatus("function { echo x }"), content="Complete")
+  debug_inspect(zstatus("function { echo $1 } a b"), content="Complete")
+  debug_inspect(zstatus("function () { : }"), content="Complete")
+  // The body runs and the words after it are the arguments it is called with,
+  // so a command substitution in either place is a command that runs.
+  inspect(
+    ztouched("function { rm -rf /tmp/fnx } one two"),
+    content="D:/tmp/fnx",
+  )
+  inspect(
+    ztouched("function { echo $1 } $(rm -rf /tmp/fy)"),
+    content="U:$1 D:/tmp/fy",
+  )
+  inspect(ztouched("function { cat a } > /tmp/fo"), content="R:a W:/tmp/fo")
+  // bash refuses the keyword form (`syntax error near 'echo'`), while our bash
+  // reading takes the `{` for the name and never sees the `}`. That leniency is
+  // older than this form, and it is not what this change is about.
+  // A *named* definition takes no argument list: `function foo { : } extra`
+  // is a parse error in zsh, and so is a stray `}` where an argument stands.
+  debug_inspect(zstatus("function foo { : }"), content="Complete")
+  debug_inspect(zstatus("function foo() { : }"), content="Complete")
+  debug_inspect(zstatus("foo() { : }"), content="Complete")
+  debug_inspect(zstatus("function foo { : } extra"), content="Unsupported")
+  debug_inspect(zstatus("function { : } { echo y }"), content="Unsupported")
+  debug_inspect(zstatus("() { : } }"), content="Unsupported")
+}
+
+///|
 test "the conditional keyword is a word, not a bracket expression" {
   // `[[` at command position was read as a glob bracket, so the whole
   // condition became a single command word and `if [[ ... ]] then` fell apart.
