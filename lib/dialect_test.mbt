@@ -325,7 +325,6 @@ test "a separator may stand between the case subject and its in" {
   let classic = "case $x in\n  a) rm -rf /tmp/tA ;;\n  b|c) echo hi ;;\nesac"
   debug_inspect(zstatus(sep), content="Complete")
   debug_inspect(zstatus(classic), content="Complete")
-  debug_inspect(analyze(sep).status, content="Complete")
   debug_inspect(analyze(classic).status, content="Complete")
   // Accepting the spelling is not enough: the facts have to be the same ones
   // the classic form gives, including the delete buried in a branch.
@@ -333,7 +332,10 @@ test "a separator may stand between the case subject and its in" {
   inspect(ztouched(classic), content="U:$x D:/tmp/tA")
   // An empty case takes the separator too.
   debug_inspect(zstatus("case x; in esac"), content="Complete")
-  debug_inspect(analyze("case x; in esac").status, content="Complete")
+  // bash has no `;` form: measured, `bash -n` refuses it, so reading it as bash
+  // and saying Complete would be a claim the shell does not back up.
+  debug_inspect(analyze(sep).status, content="Unsupported")
+  debug_inspect(analyze("case x; in esac").status, content="Unsupported")
   // `;;` is one token and no separator: zsh refuses this, and so do we.
   debug_inspect(zstatus("case x;;in a) : ;; esac"), content="Unsupported")
   debug_inspect(

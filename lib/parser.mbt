@@ -998,13 +998,14 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     _ => empty_word(self.lex.line)
   }
   // Between the subject and `in` zsh's parser eats any run of `;` and
-  // newlines (`case x; in a) : ;; esac` is legal there), while bash accepts
-  // newlines only. Both dialects take the `;` spelling here: giving up on a
-  // script zsh runs would cost the caller the facts about it, and the shape
-  // we accept this way is the same one `case x esac` already covered.
-  // `;;` is a single token and is not one of these separators, which matches
-  // zsh refusing `case x;;in a) : ;; esac`.
-  self.skip_case_separators()
+  // newlines (`case x; in a) : ;; esac` is legal there). bash accepts newlines
+  // only: measured, `bash -n -c 'case x; in a) : ;; esac'` is a syntax error
+  // while zsh runs it, so the `;` spelling stays a zsh-only shape.
+  if self.lex.dialect is Zsh {
+    self.skip_case_separators()
+  } else {
+    self.skip_newlines()
+  }
   if self.reserved() == Some("in") {
     // From here the patterns are words: zsh reads `(net|open)bsd*)` as one
     // pattern with a glob group in it, not as the pattern list's own paren
