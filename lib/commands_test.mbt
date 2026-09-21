@@ -179,10 +179,12 @@ test "the shell itself is followed when the string is static" {
 ///|
 test "programs outside the modelled set are marked, not guessed" {
   // Every one of these runs and touches things this tool does not model: the
-  // answer is the marker, and it must not be a clean report.
+  // answer is the marker, and it must not be a clean report. git used to be on
+  // this list; it now has its own measured table (lib/git.mbt), and
+  // `git filter-branch` is the spelling that still has no entry.
   for
     src in [
-      "git pull", "node build.js", "make -j8", "python3 -m pytest", "docker run img",
+      "git filter-branch --all", "node build.js", "make -j8", "python3 -m pytest", "docker run img",
     ] {
     let r = analyze(src)
     if touched(src) != "" {

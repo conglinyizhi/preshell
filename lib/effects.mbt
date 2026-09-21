@@ -657,6 +657,14 @@ fn Collector::classify(
     }
     None => ()
   }
+  // git gets its own table (lib/git.mbt): which paths a subcommand touches is
+  // a measured fact per subcommand, not something to derive from operands, and
+  // a subcommand we do not model has to come back unmodelled rather than
+  // half-modelled.
+  if n == "git" {
+    self.git_effects(s, line)
+    return
+  }
   let items = arg_items(s)
   // Option values are the table's business (lib/opts.mbt): an option that
   // consumes a value must not leave it on the operand side. Programs without
