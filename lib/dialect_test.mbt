@@ -233,6 +233,39 @@ test "a brace inside an expansion nests only when zsh is not quoting" {
 }
 
 ///|
+test "a lone quote inside an expansion does not eat the closing brace" {
+  // The expansion scanner treated every `'` as the start of a quoted string,
+  // and a `"` as one that a backslash cannot escape, so an unmatched quote ran
+  // past the `}` and turned text zsh accepts into a reported gap. Measured
+  // against zsh 5.9.2 and bash 5.3, same text:
+  //   zsh   x="${a:-'}"    accepted, the `'` is text inside a quoted expansion
+  //   zsh   x=${a:-'}      unmatched '
+  //   both  x=${a"b\"c"}   accepted, `\"` does not close the nested quote
+  //   both  x=${a"b\"}     unmatched "
+  // Two corpus files need this: compinstall line 19 has the lone `'` in a
+  // backquoted `q'`, _perforce line 1255 the escaped quote.
+  debug_inspect(zstatus("x=\"${a:-'}\""), content="Complete")
+  debug_inspect(zstatus("x=\"${a'b}\""), content="Complete")
+  debug_inspect(
+    zstatus("read -k key\"${1:---- Hit newline or \\`q' to exit --- }\""),
+    content="Complete",
+  )
+  debug_inspect(zstatus("x=${a\"b\\\"c\"}"), content="Complete")
+  debug_inspect(zstatus("x=\"${a\"b\\\"c\"}\""), content="Complete")
+  // bash has no such rule for `'`: there it opens a quote and the file ends
+  // inside it, so the same text read as bash must keep saying so.
+  debug_inspect(analyze("x=\"${a:-'}\"").status, content="Invalid")
+  debug_inspect(analyze("x=${a\"b\\\"c\"}").status, content="Complete")
+  // Both shells refuse these, and the scanner must not round them off.
+  debug_inspect(zstatus("x=${a:-'}"), content="Unsupported")
+  debug_inspect(zstatus("x=${a\"b\\\"}"), content="Unsupported")
+  // Guards: the quoting that was already right stays as it was.
+  debug_inspect(zstatus("echo \"${a:-'b'}\""), content="Complete")
+  debug_inspect(zstatus("echo \"a'b\""), content="Complete")
+  debug_inspect(zstatus("echo \"${a:-{}}\""), content="Complete")
+}
+
+///|
 test "an array element may start with a parenthesis" {
   // The elements of `name=( ... )` are words, so a `(` inside one is a pattern.
   // Measured: without that, `argv+=( (a|b) )` read the element as a subshell and

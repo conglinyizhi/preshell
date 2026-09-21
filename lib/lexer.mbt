@@ -1248,6 +1248,25 @@ fn Lexer::read_dollar(
 }
 
 ///|
+/// Skip the body of a `"` that opened inside `${...}`, closing quote included.
+/// Only the end position matters here: a backslash escapes the next character
+/// and everything else, `}` included, stays literal. Measured against zsh
+/// 5.9.2: `x=${a"b}c"}` is one expansion whose body holds the brace.
+fn Lexer::read_nested_dquote(self : Lexer) -> Unit {
+  for ;; {
+    match self.peek() {
+      None => break
+      Some('\\') => self.advance(2)
+      Some('"') => {
+        self.advance(1)
+        break
+      }
+      Some(_) => self.advance(1)
+    }
+  }
+}
+
+///|
 /// `${ ... }` with nesting: `${a:-${b}}` is one parameter expansion.
 fn Lexer::read_braced(self : Lexer, in_dquote : Bool) -> String {
   let start = self.pos
@@ -1289,19 +1308,32 @@ fn Lexer::read_braced(self : Lexer, in_dquote : Bool) -> String {
           depth -= 1
           self.advance(1)
         }
-      Some('\'') => {
-        self.advance(1)
-        ignore(self.read_until('\''))
-        if self.peek() == Some('\'') {
+      Some('\'') =>
+        if self.dialect is Zsh && in_dquote {
+          // A lone `'` inside a double-quoted expansion is text in zsh: the
+          // `}` still ends the expansion. Measured, same shape in both
+          // quotings:
+          //   zsh  x="${a:-'}"   accepted, value `'`
+          //   zsh  x=${a:-'}     unmatched '
+          // compinstall line 19 needs this (a backquoted `q'` inside `${1:...}`).
           self.advance(1)
+        } else {
+          self.advance(1)
+          ignore(self.read_until('\''))
+          if self.peek() == Some('\'') {
+            self.advance(1)
+          }
         }
-      }
       Some('"') => {
+        // A `"` inside the expansion opens a nested quoted string in both
+        // shells, and a backslash in there escapes the next character, so
+        // `\"` does not close it:
+        //   x=${a"b\"c"}   accepted in zsh and bash
+        //   x=${a"b\"}     unmatched " in both
+        // read_until() alone stopped at the escaped quote, then went looking
+        // for a partner and ate the closing brace. _perforce line 1255 needs it.
         self.advance(1)
-        ignore(self.read_until('"'))
-        if self.peek() == Some('"') {
-          self.advance(1)
-        }
+        self.read_nested_dquote()
       }
       Some('\\') => self.advance(2)
       Some(_) => self.advance(1)
