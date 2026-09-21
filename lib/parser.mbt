@@ -1158,36 +1158,37 @@ fn Parser::parse_anon_func(self : Parser, body : Cmd) -> Cmd {
 fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
   // `name()` is a function definition; `name=(...)` is an array assignment,
   // and bash happily accepts function names that are not identifiers (`:`).
+  // The name does not have to be a plain word either: measured, all three
+  // shells take `<(:) () { ... }` as a definition of a function whose name
+  // happens to be a process substitution. Requiring `plain()` here skipped
+  // that branch and left the construct unparsed (func5 in the bash corpus).
   let is_assign = match split_assignment(w) {
     Some(_) => true
     None => false
   }
-  match w.plain() {
-    Some(name) =>
-      if !is_assign {
-        match self.peek_tok() {
-          TOp("(") => {
-            self.advance()
-            self.advance()
-            if self.cur is TOp(")") {
-              self.advance()
-              return Cmd::FuncDef(
-                name~,
-                body=self.parse_command(),
-                keyword=false,
-              )
-            }
-            self.lex.fail("expected ) in function definition")
-            return Cmd::FuncDef(
-              name~,
-              body=Cmd::Simple({ assigns: [], words: [], redirects: [], }),
-              keyword=false,
-            )
-          }
-          _ => ()
+  let name = w.literal_text()
+  if !is_assign && name != "" {
+    match self.peek_tok() {
+      TOp("(") => {
+        self.advance()
+        self.advance()
+        if self.cur is TOp(")") {
+          self.advance()
+          return Cmd::FuncDef(
+            name~,
+            body=self.parse_command(),
+            keyword=false,
+          )
         }
+        self.lex.fail("expected ) in function definition")
+        return Cmd::FuncDef(
+          name~,
+          body=Cmd::Simple({ assigns: [], words: [], redirects: [], }),
+          keyword=false,
+        )
       }
-    None => ()
+      _ => ()
+    }
   }
   self.parse_simple()
 }
