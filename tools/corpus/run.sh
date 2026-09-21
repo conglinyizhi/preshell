@@ -26,6 +26,12 @@ set -uo pipefail
 # oracle 可换：默认 bash -n；做 zsh 方言时用 ORACLE="zsh -n"。
 ORACLE="${ORACLE:-bash -n}"
 
+# 关掉核心转储：zsh 在受限环境里对带 =( ) 进程替换的文件会 abort（栈顶 getoutputfile，
+# 建临时文件的系统调用被沙箱挡住后它自己的出错路径崩了），而 systemd-coredump 会把每次
+# 崩溃都记一份。语料里这类文件很多，一趟差分就是上千次 zsh 调用，dump 能攒到几百 MB。
+# 这一行只影响本脚本进程及其子进程，不改系统设置。
+ulimit -c 0 2>/dev/null || true
+
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bin="$root/_build/native/release/build/cmd/preshell/preshell.exe"
 
