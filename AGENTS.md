@@ -19,6 +19,7 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   - `ast.mbt` 语法树；`word.mbt` word 分类；`lexer.mbt` 词法；`parser.mbt` 递归下降
   - `subscript.mbt` 数组下标；`cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化
   - `effects.mbt` 影响面提取（对外的核心答案）；`facts.mbt` 命令分类等事实
+  - `opts.mbt` 选项值语义表；`git.mbt` git 子命令实测表；`shell.mbt`/`bashism.mbt` 方言边界
   - `status.mbt` 解析状态与 Report
 - `cmd/preshell/` — CLI：argv 或 stdin 进，JSON 出
 - `tools/corpus/` — 与 `bash -n` 的差分证据生成器
@@ -66,14 +67,17 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 收紧语法规则时默认会让缺口变大：实测一次过度修正让缺口从 12 涨到 81。
 所以改完必须同时看两个格子，并把合法写法钉进回归护栏。
 
-## 已知缺口（5 个文件）
+## 已知缺口
 
-已完成：分隔符规则、声明类内建赋值、命令词前重定向、数组下标（含引号）、
-复合命令重定向、空命令、嵌套算术、here-doc × 命令替换、未闭合构造、
-`<<-` 定界符去 tab、工作目录跟踪。
+bash 语料（451 个 .sub）剩 **1 个**：`func5` 里的 `<(:) ()`，文件自己注明「these are
+still errors」，而且是 POSIX 模式下的错误；非 POSIX 模式 bash 接受，我们报 Unsupported
+（保守方向）。
 
-仍然缺的（都是边角）：`comsub-posix6`、`extglob8`（模式开关）、`func5`、
-`posix2syntax`、`vredir2`。
+zsh 语料（1244 个文件）**缺口 0**：从最初的 353 一路做到零，逐刀数字与实测规则在
+docs/zsh-plan.md。
+
+读取侧（35 条常见调用）**29 条能给出路径结论**，剩 6 条只有 Exec + uncertain：
+find -delete、sqlite3、make -C、docker run -v、pip install、npm install。
 
 ## 「我们太宽松」那一格：3 个，全是 oracle 局限
 
