@@ -575,6 +575,18 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
         }
         Some("coproc") => {
           self.advance()
+          // `coproc [NAME] compound-command`: the name is optional and what
+          // follows it is the body, so `coproc r { :; }` defines a coprocess
+          // rather than running a command named `r` with a brace for an
+          // argument. Reading it the second way used to pass the corpus with a
+          // tree that was simply wrong.
+          match self.cur {
+            TWord(w) =>
+              if w.plain() != None && self.next_is_group_body() {
+                self.advance()
+              }
+            _ => ()
+          }
           self.parse_command()
         }
         Some("{") => {
@@ -586,7 +598,9 @@ fn Parser::parse_command_base(self : Parser) -> Cmd {
           // zsh's try/finally: `{ ... } always { ... }`. The second block runs
           // whether or not the first one succeeded, so both contribute effects
           // and the AST keeps them apart.
-          if self.reserved() == Some("always") {
+          // `always` is zsh's try/finally. bash has no such word, so reading
+          // it there would be a claim the shell does not back up.
+          if self.lex.dialect is Zsh && self.reserved() == Some("always") {
             self.advance()
             if self.reserved() == Some("{") {
               self.advance()
@@ -847,6 +861,11 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     }
   }
   let words : Array[Word] = []
+  // Whether the loop named an explicit word list (`in ...` or `( ... )`). That
+  // is what decides the body-less case at the end: `for i in a` cannot run in
+  // either shell, while `for i` is a valid zsh loop over `$@` that does
+  // nothing, and bash refuses even that.
+  let mut had_words = false
   // `for x` and its `in` may sit on different lines: measured, bash and zsh
   // both accept `for x\nin x\ndo ... done`.
   self.skip_newlines()
@@ -887,6 +906,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   } else {
     if self.lex.dialect is Zsh && self.cur is TOp("(") {
       // `for x ( a b )`: the parens belong to the word list.
+      had_words = true
       self.advance()
       for ;; {
         match self.cur {
@@ -903,6 +923,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
         }
       }
     } else if self.reserved() == Some("in") {
+      had_words = true
       self.advance()
       for ;; {
         match self.cur {
@@ -971,6 +992,12 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     }
     b
   } else {
+    // A `for` that named a word list has to say what to do with it: measured,
+    // both shells refuse `for i in a` and `for i in`. Without a word list the
+    // shells disagree, so that case is split by dialect.
+    if !(self.lex.dialect is Zsh && !had_words) {
+      self.lex.fail("expected do...done after for")
+    }
     Seq::empty()
   }
   Cmd::For(name~, words~, body~)
@@ -1116,6 +1143,11 @@ fn Parser::parse_function_kw(self : Parser) -> Cmd {
     }
   }
   let body = self.parse_command()
+  // bash refuses a body-less `function g` (measured: `bash -n -c 'function g'`
+  // is a syntax error) while zsh takes it as a definition with an empty body.
+  if self.lex.dialect is Bash && is_empty_command(body) {
+    self.lex.fail("expected a body after the function definition")
+  }
   Cmd::FuncDef(name~, body~, keyword=true)
 }
 
@@ -1167,6 +1199,14 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
     None => false
   }
   let name = w.literal_text()
+  // A lone `}` is a reserved word in bash only where a command could start:
+  // `echo }` runs (measured) while `{ echo a; } }` does not. zsh treats it as
+  // reserved everywhere, which the word reader already handles.
+  if self.lex.dialect is Bash && name == "}" {
+    self.lex.fail("unexpected token after command")
+    self.advance()
+    return Cmd::Simple({ assigns: [], words: [], redirects: [], })
+  }
   if !is_assign && name != "" {
     match self.peek_tok() {
       TOp("(") => {
@@ -1250,6 +1290,15 @@ fn parse_fd(s : String) -> Int {
     v = v * 10 + (c.to_int() - '0'.to_int())
   }
   v
+}
+
+///|
+/// Whether the token after the current one opens a `{ ... }` group.
+fn Parser::next_is_group_body(self : Parser) -> Bool {
+  match self.peek_tok() {
+    TWord(w) => w.plain() == Some("{")
+    _ => false
+  }
 }
 
 ///|
@@ -1574,6 +1623,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
               let from_array = value.length() == 0 && self.cur is TOp("(")
               if from_array {
                 self.advance()
+                let mut closed = false
                 for ;; {
                   match self.cur {
                     TWord(item) => {
@@ -1584,11 +1634,17 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                     }
                     TOp(")") => {
                       self.advance()
+                      closed = true
                       break
                     }
                     TEof => break
                     _ => self.advance()
                   }
+                }
+                if !closed {
+                  // `arr=(1` never closes: both shells refuse it, so accepting
+                  // it would report a command that cannot run.
+                  self.lex.fail("expected ) to close the array assignment")
                 }
               }
               assigns.push({ name, append, array: from_array, index, value, })
