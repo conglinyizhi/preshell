@@ -316,18 +316,22 @@ fn Parser::parse_separator(self : Parser) -> BinOp? {
   match self.cur {
     TOp("&&") => {
       self.advance()
+      self.check_operator_sequence()
       Some(And)
     }
     TOp("||") => {
       self.advance()
+      self.check_operator_sequence()
       Some(Or)
     }
     TOp("&") => {
       self.advance()
+      self.check_operator_sequence()
       Some(Amp)
     }
     TOp(";") => {
       self.advance()
+      self.check_operator_sequence()
       Some(Semi)
     }
     TNewline => {
@@ -368,6 +372,7 @@ fn Parser::parse_pipeline(self : Parser) -> Pipeline {
     match self.cur {
       TOp("|") | TOp("|&") => {
         self.advance()
+        self.check_operator_sequence()
         self.skip_newlines()
         cmds.push(self.parse_command())
       }
@@ -1214,11 +1219,7 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
         self.advance()
         if self.cur is TOp(")") {
           self.advance()
-          return Cmd::FuncDef(
-            name~,
-            body=self.parse_command(),
-            keyword=false,
-          )
+          return Cmd::FuncDef(name~, body=self.parse_command(), keyword=false)
         }
         self.lex.fail("expected ) in function definition")
         return Cmd::FuncDef(
@@ -1290,6 +1291,35 @@ fn parse_fd(s : String) -> Int {
     v = v * 10 + (c.to_int() - '0'.to_int())
   }
   v
+}
+
+///|
+/// Whether an operator is one of the connectors between commands rather than
+/// a redirection. A redirection after a connector is fine (`cmd && > f` runs a
+/// redirect-only command); two connectors in a row are not.
+fn is_control_operator(op : String) -> Bool {
+  match op {
+    "&&" | "||" | "|" | "|&" | "&" | ";" | ";;" | ";&" | ";;&" | ";|" => true
+    _ => false
+  }
+}
+
+///|
+/// A connector has to be followed by a command. Measured: both shells refuse
+/// `cmd &&& x`, `cmd ||| x`, `cmd && || x`, `cmd | | x` and `cmd & & x`.
+/// zsh is the lenient one here: it takes `cmd && ; x` and `cmd ; ; x`, so an
+/// empty command between separators is allowed there and nowhere else.
+fn Parser::check_operator_sequence(self : Parser) -> Unit {
+  if self.cur is TNewline || self.cur is TEof {
+    return
+  }
+  match self.cur {
+    TOp(op) =>
+      if is_control_operator(op) && !(self.lex.dialect is Zsh && op == ";") {
+        self.lex.fail("unexpected operator after operator")
+      }
+    _ => ()
+  }
 }
 
 ///|

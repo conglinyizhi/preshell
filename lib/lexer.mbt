@@ -394,7 +394,10 @@ fn Lexer::read_operator(self : Lexer) -> String {
     Some('>') =>
       if self.peek() == Some('>') {
         self.pos += 1
-        if self.peek() == Some('&') {
+        if self.peek() == Some('&') && self.dialect is Zsh {
+          // `>>&N` is a zsh spelling; measured, bash refuses `echo a >>&2`
+          // (`&>>` is its form). Leaving the `&` alone there turns the input
+          // into two operators in a row, which is where it becomes an error.
           self.pos += 1
           self.take_clobber_variant()
         } else {

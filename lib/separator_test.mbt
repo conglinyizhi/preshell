@@ -54,3 +54,29 @@ test "redirections may precede the command word" {
   debug_inspect(status_of("> /tmp/out echo hi"), content="Complete")
   debug_inspect(status_of("2>&1 cmd"), content="Complete")
 }
+
+///|
+test "a connector is followed by a command, not by another connector" {
+  // Measured: both shells refuse every one of these. They are the shapes a
+  // differential fuzzer found us accepting.
+  for
+    c in [
+      "true &&& x", "true ||| x", "true && || x", "true | | x", "true & & x", "echo a >>&2",
+    ] {
+    debug_inspect(analyze(c).status, content="Unsupported")
+  }
+  // zsh is the lenient one about empty commands between separators, and about
+  // its own `>>&` spelling; bash is strict on both.
+  debug_inspect(zstatus("true && ; x"), content="Complete")
+  debug_inspect(zstatus("true ; ; x"), content="Complete")
+  debug_inspect(analyze("true && ; x").status, content="Unsupported")
+  debug_inspect(zstatus("echo a >>&2"), content="Complete")
+  // A redirection after a connector starts a redirect-only command, which is
+  // legal in both shells, and the ordinary connectors keep working.
+  for
+    c in [
+      "true && > f", "true && (x)", "true && { x; }", "echo a &>> f", "echo a >> f",
+    ] {
+    debug_inspect(analyze(c).status, content="Complete")
+  }
+}
