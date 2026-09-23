@@ -69,15 +69,34 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 
 ## 已知缺口
 
-bash 语料（451 个 .sub）剩 **1 个**：`func5` 里的 `<(:) ()`，文件自己注明「these are
-still errors」，而且是 POSIX 模式下的错误；非 POSIX 模式 bash 接受，我们报 Unsupported
-（保守方向）。
+**两套语料的缺口都是 0。**
 
-zsh 语料（1244 个文件）**缺口 0**：从最初的 353 一路做到零，逐刀数字与实测规则在
-docs/zsh-plan.md。
+bash 语料（451 个 .sub）：434 通过 / 0 缺口 / 3 太宽松（oracle 局限）/ 0 崩溃。
+最后一个缺口 `func5` 的 `<(:) () { ... }` 是个把带进程替换的词当函数名的定义，
+修法是函数名不必是普通词（三种 shell 实测都接受）。
+
+zsh 语料（1244 个文件）：**1237 到 1239 通过 / 0 缺口 / 5 到 7 太宽松（同前）/ 0 崩溃**。
+两种跑法差两个文件，因为受限沙箱里 `zsh -n` 会对带进程替换的文件 abort；缺口与崩溃
+两栏是稳定的。从最初的 353 一路做到零，逐刀数字与实测规则在 docs/zsh-plan.md。
 
 读取侧（35 条常见调用）**35 条都能给出路径结论**：find、sqlite3、make、docker 与
 包管理器的分支在 lib/tools.mbt（容器挂载按只读与否分读写，找不到的报洞）。
+
+## 刻意保留的取舍
+
+这些是选择，不是待发现的 bug：
+
+- **`[[ ... ]]` 整块不透明**：只找到配对的 `]]`，条件文本留作方言判断，表达式本身
+  不解析（里面的命令替换照常审计）。所以语法畸形的条件会读成 Complete，而实现
+  条件语法本体不划算
+- **实参位置的赋值保守拒绕**（`f x=1`）：bash 会真执行它，报「没解析出来」是安全方向
+- **花括号与词粘连**（`f () {echo x}`）是长尾：zsh 的右花括号 pushback 已实现，
+  但粘连写法在某些形状下仍报 Unsupported
+- **没建模的程序必须自报**：报成 `modeled: false` 的 Exec 并强制 uncertain，
+  下面的效果列表是下界。这条是「不做无界枚举」的前提
+- **oracle 不是纯语法检查器**：`zsh -n` 会求值一部分内容（除零、fd 号、进程替换），
+  语料文件是函数体而它按顶层脚本读。每条分歧都附 oracle 原文，由人判断
+- **非 Linux 未验证**：只在 Linux 上跑过，macOS 的 shell 差异没有环境验证
 
 
 ## 「我们太宽松」那一格：3 个，全是 oracle 局限
@@ -163,7 +182,7 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 已知还没修的一类：二元算符后面又跟一个算符（`cmd &&& x`、`2>>&1`），两个 shell 都拒，
 我们接受。修法是在算符序列上做检查，属于下一个工作日。
 
-## 加固的三件套（每次改动都要过）
+## 加固的四件套（每次改动都要过）
 
 1. `moon test --target native` — 库内行为：逐命令语义、畸形输入、递归边界、输入规范化
 2. `tools/corpus/run.sh` — 与 bash -n 的差分。默认语料是仓库里的
@@ -173,6 +192,11 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 3. `tools/probe/malformed.sh` 与 `tools/fuzz/mutate.js` — 进程不许死。
    fuzzer 的 `--n`、`--seed` 可复现；它还会打印解析状态分布，
    用来确认变异体真的打到了解析器（全是进门即拒的话这个 fuzz 没有强度）
+4. `tools/fuzz/differential.js` — 拿真 shell 当 oracle 的差分模糊，见上一节。
+   它负责的方向是语料看不见的那个：shell 拒绕而我们报 Complete
+
+zsh 侧的差分另有跑法：`ORACLE="zsh -n" PFLAGS="--shell=zsh"`，语料用
+`tools/corpus/zsh_corpus.sh` 从 zsh 源码树的 Completion 与 Functions 采集。
 
 三件套都在 `.github/workflows/check.yml` 里，提交即跑。CI 不依赖网络：语料随仓库分发。
 
@@ -194,7 +218,7 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 
 ## bash 侧记分牌（451 个 .sub）
 
-**433 通过 / 1 缺口 / 3 太宽松 / 3 两边报错 / 0 崩溃**（会话开始时是 431/3/3/3/0）。
+**434 通过 / 0 缺口 / 3 太宽松 / 3 两边报错 / 0 崩溃**（会话开始时是 431/3/3/3/0）。
 
 那 3 个「太宽松」全是 oracle 的问题，不是漏判，两个成因都要记住：
 
@@ -203,13 +227,10 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 - `exportfunc1.sub` 第 14 行有十个立即文档，撞上 bash 的立即文档数量上限
   （`超出最大立即文档计数`）。这是资源上限，不是语法规则。
 
-剩下那 1 个缺口是 `func5.sub` 的 `<(:) ()`，文件自己注明「these are still errors」，
-而且是 POSIX 模式下的错误；非 POSIX 模式 bash 接受，我们报 Unsupported（保守方向）。
+## zsh 支持
 
-## zsh 支持（进行中）
-
-按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单和工作量
-估计在 docs/zsh-plan.md；这里只放记分牌和口径。
+按 zsh 语义解析 zsh，不是只报一句「没建模」。完整计划、侦察结论、切片清单在
+docs/zsh-plan.md；这里只放记分牌和口径。**缺口已经到零。**
 
 - CLI：`--shell=auto|bash|zsh|probe`（auto 按 shebang，无 shebang 默认 bash；
   probe 按「声明的方言 → bash → zsh」回退，最后用的方言用 Note 写进报告）、`--evidence`
@@ -217,12 +238,14 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 - 语料是 zsh 源码树的真实代码：1244 文件、131822 行（Completion + Functions），
   采集脚本 tools/corpus/zsh_corpus.sh，oracle 用 `zsh -n`。注意这些文件没有 shebang，
   量的时候要显式 `PFLAGS=--shell=zsh`
-- 基线 886/353 → 现在 **1218 通过 / 21 缺口 / 5 太宽松 / 0 崩溃**（zsh 语料 1244 个文件）。
+- 基线 886/353 → 现在 **1237 到 1239 通过 / 0 缺口 / 5 到 7 太宽松 / 0 崩溃**
+  （语料 1244 个文件，区间来自 oracle 的环境敏感，见上）。
   缺口逐刀下降：方言分派 353 → 词位置括号 284 → 右花括号 264 → 数字范围 256 →
   展开花括号 255 → 数组元素括号 181 → case 模式分组 50 → csh 循环 47 →
   `>!` 与 `>&` 45 → 匿名函数 26 → 命令位置的 `[[` 23 → 算术里的 `#` 21 →
   引号内的 `[[` 不再当关键字 17 → 子解析沿用方言 15 → 引号里的进程替换/glob 12 →
-  if/while 花括号体 8 → 算术里每个括号都计数 5
+  if/while 花括号体 8 → 算术里每个括号都计数 5 → 右花括号 pushback 4 →
+  function 匿名函数与 case 的 in 3 → 花括号展开里的引号 2 → 函数名不必是普通词 0
 - 「太宽松」那 5 条全是 oracle 的局限，差分脚本现在会附上 oracle 原文以便当场判断。
   更根本的一条：语料文件是**函数体**（autoload/source 用），zsh -n 按顶层脚本解析，
   顶层没有位置参数，`$5` 这类引用会被判错；这个象限先怀疑 oracle

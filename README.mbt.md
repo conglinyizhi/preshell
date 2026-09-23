@@ -137,12 +137,42 @@ claims confirmed, 0 false alarms, 0 missed dialect uses that matter (2 polyglots
 21 files we flag for other reasons, 1102 in agreement). Zero false alarms is
 what CI enforces; the coarseness of the attribution is a known weakness.
 
+## Where it stands
+
+Measured against the two dialect corpora, as of the latest run:
+
+| corpus | files | parsed | our gaps | we are too permissive | crashes |
+|---|---|---|---|---|---|
+| bash 5.3 syntax tests | 451 | 434 | 0 | 3 | 0 |
+| zsh 5.9.2 Completion and Functions | 1244 | 1237 to 1239 | 0 | 5 to 7 | 0 |
+
+The zsh row is a range because `zsh -n` is not a pure syntax checker: in a sandbox
+that blocks the temporary file process substitution needs, it also aborts on a
+couple of files, which moves them into the last column. The gap column and the
+crash column are stable; see `AGENTS.md` for the measurements behind both.
+
+"Our gaps" means the shell accepts a file and this tool does not: that number
+reached zero on both corpora. The "too permissive" column is the dangerous
+direction, and every entry in it is now a known quirk of the oracle rather than
+a hole in the parser (see `Differential fuzzing` below and `AGENTS.md`).
+
+On the command side, 35 common invocations were measured against what they
+truly do (an LD_PRELOAD shim plus before/after directory snapshots): all 35 now
+produce path conclusions rather than a bare "ran something".
+
 ## Which shell
 
-This tool parses **bash** semantics, and it says so when the input declares
-something else. The claims are split by how a POSIX shell actually fails,
-because both kinds exist and they are not the same statement (each of these was
-checked with `dash -n`):
+Two grammars are read: bash and zsh. `--shell=auto` (the default) follows the
+shebang, `--shell=bash` and `--shell=zsh` force one, and `--shell=probe` tries
+the declared one first, then the other, and writes into the report which grammar
+it ended up using (`probe: read as zsh, because bash did not parse this input`,
+with `uncertain` set, because the input never said). Anything else (`fish`,
+`python`, ...) is reported as `Unsupported` rather than read with the wrong
+rules.
+
+For POSIX `sh` the answer is split by how the shell actually fails, because both
+kinds exist and they are not the same statement (each of these was checked with
+`dash -n`):
 
 - **rejected at parse time**: arrays (`x=(1 2)`), `<<<`, `<( )`, the `function`
   keyword. "It would not run there" is accurate.
@@ -161,23 +191,46 @@ weakness, recorded in `AGENTS.md`.
 
 ## Hardening
 
-Four checks, all runnable locally and in CI:
+All runnable locally and in CI:
 
 ```bash
 moon test --target native                     # library behaviour
+moon fmt && moon check --target native        # formatting and types
 tools/corpus/run.sh                           # differential against bash -n
+ORACLE="zsh -n" PFLAGS="--shell=zsh" tools/corpus/run.sh --list <list>
 tools/corpus/posix_oracle.sh                  # dialect claims vs a real sh
 tools/probe/malformed.sh                      # the process must not die
 node tools/fuzz/mutate.js --n 2000 --seed 1   # mutation fuzzing, reproducible
+node tools/fuzz/differential.js --n 800 --seed 1
+tools/corpus/snapshot.sh <bin> <list> <out>   # full status snapshot, for diffs
 ```
 
 The differential corpus (bash 5.3's `tests/*.sub`) ships with the repository so
 that CI and local runs use the same input; provenance and licensing are in
 `tools/corpus/bash-tests/README.md`. `tools/corpus/find_scripts.sh` collects real
-scripts from the host for a second, noisier corpus.
+scripts from the host for a second, noisier corpus, and `zsh_corpus.sh` collects
+the zsh tree's own `Completion/` and `Functions/` (1244 files) for the zsh side.
 
 Two numbers to watch, because both were zero and should stay there: crashes, and
 inputs where bash rejects a command this tool accepts.
+
+One environment note: `tools/corpus/run.sh` sets `ulimit -c 0` for itself and its
+children. `zsh -n` aborts on files that use process substitution when the sandbox
+blocks the temporary file it needs (`getoutputfile` in the stack), and
+systemd-coredump records one dump per crash, which a corpus run multiplies by
+the thousand. The line only affects that script.
+
+## Differential fuzzing
+
+`mutate.js` asks whether the tool dies. `differential.js` asks whether it is
+right, with a real shell as the judge: mutations of a construct zoo are fed to
+both, and the two directions are reported separately -- the shell accepts and we
+do not (a gap), and the shell refuses while we report `Complete` (the dangerous
+direction). Its first run found sixteen cases of the second kind, none of which
+the corpora could see, including `always` accepted under the bash dialect, a
+`for` with no body, an unclosed array, and a lone `}` where a command should be.
+Every failure is printed with the oracle's own message, because the oracle has
+known quirks of its own.
 
 ## Evidence rather than taste
 
@@ -197,6 +250,29 @@ four-quadrant table, and enforces one invariant:
 
 The corpus bounds the strength of that guarantee, which is why an empty list is
 a perfectly good state: it means "never claim it".
+
+## Deliberate limits
+
+These are choices, not bugs waiting to be found:
+
+- **`[[ ... ]]` is opaque.** The tokenizer finds the closing `]]` and keeps the
+  text for the dialect checks, but the expression inside is not parsed;
+  command substitutions in it are audited, because they run. A malformed
+  condition therefore reads as `Complete`, and implementing the condition
+  grammar would cost more than it returns.
+- **An assignment in argument position is refused** (`f x=1`). bash performs it;
+  saying "not parsed" is the safe direction, and the corpus does not contain it.
+- **A brace glued to a word** (`f () {echo x}`) is a long tail: zsh pushes an
+  unmatched `}` back and we model that, but the glued spelling still reports
+  `Unsupported` in some shapes.
+- **A program we do not model says so.** It is reported as `Exec` with
+  `modeled: false`, which forces `uncertain`; the effect list below it is a
+  lower bound. That is what keeps this from being an unbounded enumeration
+  problem.
+- **The oracle is not a pure syntax checker.** `zsh -n` evaluates part of what
+  it reads (division by zero, file descriptor numbers, process substitution),
+  and the corpus files are function bodies that it reads as top-level scripts.
+  Every disagreement is printed with the oracle's message so a human can tell.
 
 ## Build and test
 
