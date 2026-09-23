@@ -160,6 +160,16 @@ On the command side, 35 common invocations were measured against what they
 truly do (an LD_PRELOAD shim plus before/after directory snapshots): all 35 now
 produce path conclusions rather than a bare "ran something".
 
+A larger, less flattering corpus is the one the sessions on this machine already
+contain: 38250 distinct real bash commands and 423 sandbox-allow requests were
+pulled from the agent's own logs and run through the tool. 99% of the commands
+parse, 83% yield a path conclusion, no reported target looked like a non-path,
+and every command the tool failed to parse was one the shells refuse as well.
+The rest are cases like `python3 <<'PY'`, where a script is handed to a program
+the tool does not model: those say so (`modeled: false`, `uncertain`) instead of
+quietly reporting nothing. See `docs/integration.md` for the table and the
+script.
+
 ## Which shell
 
 Two grammars are read: bash and zsh. `--shell=auto` (the default) follows the
