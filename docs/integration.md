@@ -1,7 +1,54 @@
-# 调用方式
+# 接入指引
 
-preshell 是**独立工具**，调用它的唯一方式是起子进程。这样调用方用任何语言都行，
-GPL 也停在进程边界上——不链接、不 import、不静态打包。
+给要把 preshell 接进自己项目的读者。读这一份就够：从许可边界到调用姿势、
+到上线前该检查什么。它只做静态分析——**不执行你的命令、不读磁盘、不联网**，
+所以你可以放心把不可信的文本喂给它。
+
+## 只有一种接法：子进程
+
+preshell 是**独立工具**，不是库。接它的唯一方式是起子进程，命令从 stdin 进，
+报告从 stdout 出：
+
+```
+你的程序  ──stdin──▶  preshell  ──stdout──▶  JSON 报告
+```
+
+不链接、不 import、不静态打包。这样调用方用任何语言都行，GPL 也停在进程边界上。
+
+## 许可边界
+
+preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的许可。
+你和它之间只有一条管道，两个程序在手臂长度上通信，自由软件的通行读法不把
+这当成「你的作品包含了我」——所以你的项目可以闭源、可以用任何许可，
+包括与 GPL 不兼容的许可。
+
+越界与不越界：
+
+| 做法 | 结果 |
+|---|---|
+| 把 `lib` 包 import 进你的 MoonBit 程序并链接 | 衍生作品，整体要 GPL-3.0-or-later |
+| 把源码文件拷进你的仓库再用 | 衍生作品 |
+| 改一改再编进你自己的可执行文件 | 衍生作品 |
+| 起子进程，用 stdin/stdout 交换 JSON | **不是**衍生作品，你的代码归你 |
+| 让用户自己装，你只调用 | 零义务，最省事 |
+| 把二进制和你的程序放进同一个安装包一起发 | 聚合，各自的许可不变（GPLv3 §5），但分发义务归你（见下） |
+
+如果你**分发**这个二进制（随包、随镜像、随容器），GPLv3 §6 要求你：
+
+- 给对应源码，或者给一份书面 offer（网络分发时，给同一地点取得源码的等价方式）
+- 保留版权声明与许可全文，即仓库里的 `LICENSE`
+- 你改过就标明改动
+- 不对下游加额外限制
+
+推荐的接法因此是**别分发它**：在文档里写一句「需要 preshell，请自行安装」，
+你只调用 PATH 上的 `preshell`。这样你没有分发义务，也没有跟进版本的义务。
+
+不要做的事：抹掉它的来源与许可；把它说成你自研的实现；把它的 JSON 契约
+换个名字包装成你的私有格式再宣称自研；把它的源码抄进你的实现。
+最后两条的后果和上表第一行一样。
+
+一句免责：以上是 GPL 的通行读法，不是法律意见，法务口径严的团队请让法务过一眼。
+工具本身也不带任何担保，报告是事实不是裁决——别拿它当唯一的闸门。
 
 ## 契约
 
@@ -9,11 +56,20 @@ GPL 也停在进程边界上——不链接、不 import、不静态打包。
 stdin      命令文本，原样传入（推荐）
 stdout     恰好一个 JSON 对象，没有别的
 stderr     帮助、用法、诊断——绝不混进 stdout
-退出码     0 = 产出了报告；非 0 = 工具自己没跑起来
+退出码     0 = stdout 上有一个报告
+           2 = 用法错误（未知选项、未知 --shell 值）：原因在 stderr，stdout 为空
+           其它非 0 = 工具自己没跑起来
            （没有「危险」这种退出码：判断一律读 JSON）
 ```
 
-`--version` 给出版本与 schema 号，调用方据此锁定自己解析的形状：
+空的命令文本**也是一条命令**：你会拿到一份「什么都没碰」的正常报告
+（`status: Complete`、`effects: []`、`uncertain: false`）。之所以强调，是因为
+调用方总是把手上拿到的东西原样塞进来，而「没有报告」和「工具坏了」必须能分开。
+
+开发者模式（`--scan`、`--shadow`、`--bench`、`--evidence`）不满足上面这条契约，
+它们是给我自己调试用的。集成里只用默认模式加 `--shell`。
+
+`--version` 给出版本与 schema 号，调用方据此锁住自己解析的形状：
 
 ```json
 {"tool":"preshell","version":"0.1.0","schema":1}
@@ -21,7 +77,7 @@ stderr     帮助、用法、诊断——绝不混进 stdout
 
 ## 为什么用 stdin 而不是参数
 
-`preshell --json '<一堆指令>'` 能用，但把命令当参数传有三个问题：
+`preshell '<一堆指令>'` 能用，但把命令当参数传有三个问题：
 
 - 命令里本来就有引号、换行、`$`，调用方得先转义一遍；转错了自己看不出来
 - 单个参数有长度上限（Linux 常见 128KB）
@@ -29,7 +85,9 @@ stderr     帮助、用法、诊断——绝不混进 stdout
 
 stdin 没有这些问题：命令原样进去，原样分析。
 
-## 安装
+## 安装与分发
+
+### 你自己装（开发时）
 
 ```bash
 moon build --release --target native
@@ -39,9 +97,26 @@ preshell --version
 
 （`moon install` 也能装，但要等发布到 Mooncakes。）
 
+### 让用户自己装（推荐的集成姿势）
+
+文档里写清依赖，代码里只调用 `preshell`：
+
+```markdown
+本工具需要 preshell（GPL-3.0-or-later），请自行安装：
+<moon build 的说明，或发行版包名>
+```
+
+二进制找不到时报错并提示用户装，**不要静默降级**——降级等于把审查悄悄关掉。
+
+### 你随包分发
+
+照「许可边界」那张表的义务清单办。许可全文在仓库 `LICENSE`，源码就是这个仓库。
+
 ## 从各种语言调用
 
-### Node.js
+### 最小可用
+
+Node.js：
 
 ```js
 import { spawnSync } from "node:child_process";
@@ -53,10 +128,7 @@ export function analyze(command) {
 }
 ```
 
-要点：`input` 而不是把命令拼进 argv；`r.stdout` 直接 `JSON.parse`——
-因为 stdout 上不会有别的东西，不需要从输出里「抠 JSON」。
-
-### Python
+Python：
 
 ```python
 import json, subprocess
@@ -68,7 +140,7 @@ def analyze(command: str) -> dict:
     return json.loads(r.stdout)
 ```
 
-### Rust
+Rust：
 
 ```rust
 use std::process::{Command, Stdio};
@@ -85,11 +157,74 @@ pub fn analyze(command: &str) -> serde_json::Value {
 }
 ```
 
-### Shell
+Shell：
 
 ```bash
 preshell < script.sh | jq .
 ```
+
+要点：命令走 `input`/stdin，不拼进 argv；`stdout` 直接解析，不需要从输出里
+「抠 JSON」——它上面不会有别的东西。
+
+### 生产上要补的四件事
+
+上面那些片段能跑，但不够接生产。真正要处理的是**拿不到报告时怎么办**：
+默认动作应当是「问人」，而不是放行。
+
+Node.js：
+
+```js
+import { spawnSync } from "node:child_process";
+
+const BIN = process.env.PRESHELL_BIN ?? "preshell";
+
+// { ok: true, report } | { ok: false, reason }
+export function analyze(command, { timeoutMs = 2000 } = {}) {
+  const r = spawnSync(BIN, [], { input: command, encoding: "utf8", timeout: timeoutMs });
+  if (r.error?.code === "ENOENT") return { ok: false, reason: "preshell-missing" };
+  if (r.error) return { ok: false, reason: "preshell-failed" };   // 超时也在这类
+  if (r.status !== 0) return { ok: false, reason: "usage-error" }; // stderr 里是原因
+  try {
+    return { ok: true, report: JSON.parse(r.stdout) };
+  } catch {
+    return { ok: false, reason: "bad-json" };
+  }
+}
+```
+
+Python：
+
+```python
+import json, os, subprocess
+
+BIN = os.environ.get("PRESHELL_BIN", "preshell")
+
+class PreshellUnavailable(RuntimeError):
+    """拿不到报告：缺二进制、超时、用法错误、JSON 坏了都归这里。"""
+
+def analyze(command: str, timeout: float = 2.0) -> dict:
+    try:
+        r = subprocess.run([BIN], input=command, capture_output=True,
+                           text=True, timeout=timeout)
+    except FileNotFoundError as e:
+        raise PreshellUnavailable("preshell 不在 PATH 上") from e
+    except subprocess.TimeoutExpired as e:
+        raise PreshellUnavailable("preshell 超时") from e
+    if r.returncode != 0:
+        raise PreshellUnavailable(f"preshell 退出 {r.returncode}: {r.stderr.strip()[:200]}")
+    return json.loads(r.stdout)
+```
+
+四件事：
+
+1. **超时**。单次调用约 1ms，但还是要设上限（比如 2s）：一个卡住的子进程不该
+   拖住你的主流程
+2. **二进制缺失**要报错并提示安装，不降级
+3. **坏 JSON / 非零退出**当成「拿不到报告」，和缺失同样处理
+4. **不确定就是不确定**。`impact.uncertain: true`、`modeled: false` 的 `Exec`/`Spawn`
+   都不是「没问题」，是需要你另想办法的地方
+
+环境变量用 `PRESHELL_BIN` 之类的名字自己定，工具本身不读它——那是你封装的事。
 
 ## 读什么、别读什么
 
@@ -110,6 +245,19 @@ preshell < script.sh | jq .
 
 别把 `uncertain: false` 读成「安全」，也别把 `effects` 里没有 `Write` 读成「不写」——
 先看有没有 `modeled: false` 的 `Exec` 或 `Spawn`：那是「有程序跑了，它碰什么我们不建模」。
+
+拿到报告之后干什么，是另一个问题，见 [`example-policy.md`](example-policy.md)。
+
+## 上线前检查单
+
+- [ ] 二进制缺失、超时、JSON 坏了、退出码非 0：这四种的默认动作是「问人」不是放行
+- [ ] `uncertain: true` 或存在 `modeled: false` 的 `Exec`/`Spawn` 时，你有对应动作
+- [ ] 你没有把「`effects` 里没有 `Write`」读成「不写」
+- [ ] 读了 `--version` 的 `schema` 并锁住解析形状；未知字段忽略，未知 `kind` 当
+      `Unknown` 处理（这样工具出新版本不会把你的解析器打挂）
+- [ ] 分发方式定了：用户自装（零义务）还是随包分发（GPLv3 §6 那四条义务）
+- [ ] 命令是原样喂进去的，没有经过二次引用、二次展开
+- [ ] 你没有把它当唯一闸门
 
 ## 在真实命令上的表现
 
@@ -148,6 +296,9 @@ Exec 上带 `modeled: false`，并把 `uncertain` 置真。对「审计指令」
 - `probe`：先按输入自己声明的方言读，声明不了或读不通时再试 bash、zsh，
   取第一个 `status` 为 `Complete` 的结果
 
+给一个工具不认识的 `--shell` 值会在启动时就报用法错误（退出码 2），
+不会被悄悄当成 bash。
+
 probe 的语义边界，调用方必须知道：
 
 - **probe 成功不等于方言确定。** 同一段文本可能两套文法都能解析，但碰的东西不同：
@@ -168,5 +319,6 @@ probe 的语义边界，调用方必须知道：
 ## 性能与状态
 
 - 单次调用约 1ms（进程启动为主，解析 3µs）。一次审查一条命令，不需要常驻
-- 工具无状态、不写任何文件、不发网络请求，可以并发调用
+- 工具无状态、不写任何文件、不读你的磁盘、不发网络请求，可以并发调用
 - 不需要任何权限配置：它只读自己的 stdin
+- 它**不执行**你交给它的命令。这是它唯一的输出，也是你敢把不可信文本喂给它的原因

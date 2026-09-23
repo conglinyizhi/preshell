@@ -14,7 +14,9 @@ whoever asked. For what a caller does with the answer, see
 
 It is a **standalone tool, not a library**: invoke it as a subprocess and read
 JSON. Callers in any language can use it without linking anything in, and the
-GPL stays on this side of the process boundary.
+GPL stays on this side of the process boundary. What that boundary means for
+your project's licence, and how to call it without footguns, is
+[`docs/integration.md`](docs/integration.md).
 
 ## What it is not
 
