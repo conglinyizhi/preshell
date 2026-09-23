@@ -348,7 +348,6 @@ fn Collector::package_effects(
   s : SimpleCmd,
   line : Int,
 ) -> Unit {
-  self.push(Exec, name, false, line)
   let words = s.words
   let mut command = ""
   let mut i = 1
@@ -366,6 +365,33 @@ fn Collector::package_effects(
       break
     }
   }
+  // `uv run CMD`, `pnpm run CMD` and friends are runners: what they touch is
+  // decided by the command they hand control to, and this tool does not model
+  // that command. Claiming to understand the invocation would be the worst
+  // answer available -- Complete, modelled, and saying nothing -- so the
+  // command is named as a hole and the report goes uncertain. Forwarding into
+  // it properly needs each runner's option table measured first.
+  if command == "run" || command == "exec" || command == "dlx" {
+    self.push(Exec, name, false, line)
+    let mut rest = ""
+    let mut k = i + 1
+    while k < words.length() {
+      let t = words[k].literal_text()
+      if t != "" && !t.has_prefix("-") {
+        rest = t
+        break
+      }
+      k += 1
+    }
+    self.push(
+      Unknown,
+      if rest == "" { "what " + name + " runs" } else { rest },
+      true,
+      line,
+    )
+    return
+  }
+  self.push(Exec, name, false, line)
   let is_node = name == "npm" ||
     name == "pnpm" ||
     name == "yarn" ||
