@@ -87,7 +87,19 @@ stdin 没有这些问题：命令原样进去，原样分析。
 
 ## 安装与分发
 
-### 你自己装（开发时）
+### 直接用发布版（不想装工具链）
+
+```bash
+TAG=v0.1
+gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
+cd /tmp/preshell && sha256sum -c SHA256SUMS
+install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell
+```
+
+产物是自仓库那个 tag 构建的 x86_64 Linux 二进制（发布由 `.github/workflows/release.yml`
+自动完成）；不想用二进制就照下面自己编。
+
+### 你自己编（开发时）
 
 ```bash
 moon build --release --target native

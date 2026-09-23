@@ -39,6 +39,12 @@ preshell --scan '<cmd>'           # one line: parse status, issue count, effects
 preshell --bench=2000             # timing loop
 ```
 
+Every [release](https://github.com/conglinyizhi/preshell/releases) carries a
+prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
+`.github/workflows/release.yml`. Building it yourself is one `moon build`; see
+[`docs/integration.md`](docs/integration.md) for both paths and for the licence
+boundary that makes a subprocess call the safe way to use it.
+
 Exit codes describe the tool, never the command: `0` when a report was produced.
 There is no exit code that means "dangerous".
 
