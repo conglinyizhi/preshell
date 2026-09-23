@@ -1,0 +1,123 @@
+name: release
+
+# 打 tag 即发版：构建、跑测试、把二进制挂到 Release 上。
+#
+# 为什么要留一条 workflow_dispatch：
+# tag 触发时 GitHub 用的是**那个 tag 所在提交里的** workflow 文件，所以在
+# 本文件出现之前打的 tag 永远不会被自动发出来。dispatch 从默认分支跑，
+# 可以按 tag 名补发，也可以重跑一次失败的发布。
+#
+# 挂二进制就等于分发 GPL 程序，源码义务由同一个仓库承担——tag 与源码一一对应，
+# 所以 Release 说明里必须把这条写明，而不是只给一个下载链接。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 要发布的 tag 名（已存在的）
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # 读 tag 注解、比对历史都要完整历史，浅克隆拿不到。
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null
+          echo "name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "发布 $TAG ($(git rev-parse --short "$TAG^{commit}"))"
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: moon build --release --target native
+
+      - name: Unit tests
+        run: moon test --target native
+
+      - name: Corpus gate
+        # 发布前跑一次差分。run.sh 本身只对崩溃与佐证表违反退出非零，
+        # 缺口是它只报不拦的——发布版不许可有缺口，所以这里明着一道。
+        # 「太宽松」那一列是 oracle 自身的噪声（±1~2，详见 tools/corpus/run.sh
+        # 与 README 的说明），不作为门。
+        run: |
+          bash tools/corpus/run.sh | tee /tmp/corpus.txt
+          if ! grep -qE '缺口（我们报错，oracle 通过）：0' /tmp/corpus.txt; then
+            echo "语料出现缺口，不发布"
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          BIN=_build/native/release/build/cmd/preshell/preshell.exe
+          "$BIN" --version
+          mkdir -p dist
+          install -Dm755 "$BIN" "dist/preshell-$TAG-$(uname -m)-linux"
+          ( cd dist && sha256sum preshell-* > SHA256SUMS && cat SHA256SUMS )
+
+      - name: Write notes
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          {
+            echo "preshell 是命令行的静态分析器：给它一条 shell 命令，它报出这条命令碰了什么路径、"
+            echo "跑了什么程序、往哪去网络，以及哪里看不懂。它不做裁决，没有策略、没有 allow/deny。"
+            echo
+            echo "它是**独立程序，不是库**：起子进程、stdin 进、stdout 出 JSON。"
+            echo "接入姿势与许可边界见仓库里的 \`docs/integration.md\`。"
+            echo
+            echo "## 本版本"
+            echo
+            BODY=$(git tag -l --format='%(contents:body)' "$TAG")
+            if [ -n "$BODY" ]; then echo "$BODY"; else echo "（这个 tag 没有注解）"; fi
+            echo
+            echo "## 这个二进制"
+            echo
+            echo "\`$(uname -m)\` Linux，构建自本仓库的 tag \`$TAG\`。"
+            echo "按 GPL-3.0-or-later 分发，对应源码就是这个仓库的这个 tag："
+            echo "\`git clone ${{ github.server_url }}/${{ github.repository }} && git checkout $TAG\`。"
+            echo "校验用 \`sha256sum -c SHA256SUMS\`；不想用二进制也可以自己 \`moon build --release --target native\`。"
+            echo
+            echo "## 它不保证什么"
+            echo
+            echo "报告是事实不是裁决，也不是安全证明。\`impact.uncertain: true\`、或者带"
+            echo "\`modeled: false\` 的 \`Exec\`/\`Spawn\`，都表示这份影响面不封闭："
+            echo "那是需要人看一眼的地方，而不是「没问题」。"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # 重跑：说明与产物都覆盖，保持幂等。
+            gh release edit "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" \
+              --title "preshell $TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              dist/*
+          fi
+          gh release view "$TAG" --json url,assets --jq '"\(.url)\n" + ([.assets[].name] | join(", "))'
