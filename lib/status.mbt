@@ -82,8 +82,9 @@ pub fn analyze_bytes(bytes : Bytes) -> Report {
 pub fn analyze_bytes_dialect(bytes : Bytes, dialect : Dialect) -> Report {
   let (text, decode_notes) = decode_command(bytes)
   // Replaced bytes are a caveat, not a parse failure: the analysis ran.
-  let r = add_notes(analyze_dialect(text, dialect), decode_notes, kind=Note)
-  add_notes(r, declared_shell_note(text, dialect), kind=Gap)
+  // The declared-shell note is not added here: `analyze_dialect` already
+  // carries it, and adding it on both paths printed it twice.
+  add_notes(analyze_dialect(text, dialect), decode_notes, kind=Note)
 }
 
 ///|

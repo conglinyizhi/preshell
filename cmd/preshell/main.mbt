@@ -175,22 +175,32 @@ async fn main {
 /// shebang is the best evidence there is; without one, bash, because that is
 /// what a bare snippet almost always is.
 fn dialect_for(src : String, named : String?) -> @lib.Dialect {
-  match named {
-    Some(s) =>
-      match s {
-        "bash" | "sh" => @lib.Dialect::Bash
-        "zsh" => @lib.Dialect::Zsh
-        _ => @lib.Dialect::Bash
-      }
-    None =>
-      match @lib.declared_shell(src) {
-        Some(name) =>
-          match @lib.Dialect::from_shell_name(name) {
-            Some(d) => d
-            None => @lib.Dialect::Bash
-          }
-        None => @lib.Dialect::Bash
-      }
+  // `auto` means "follow the shebang", the same as passing nothing at all.
+  // Treating it as an unknown value and defaulting to bash silently ignored
+  // the declaration, which the report then complained about.
+  let sniff = match named {
+    None => true
+    Some(s) => s == "auto" || s == ""
+  }
+  if sniff {
+    match @lib.declared_shell(src) {
+      Some(name) =>
+        match @lib.Dialect::from_shell_name(name) {
+          Some(d) => d
+          None => @lib.Dialect::Bash
+        }
+      None => @lib.Dialect::Bash
+    }
+  } else {
+    match named {
+      Some(s) =>
+        match s {
+          "bash" | "sh" => @lib.Dialect::Bash
+          "zsh" => @lib.Dialect::Zsh
+          _ => @lib.Dialect::Bash
+        }
+      None => @lib.Dialect::Bash
+    }
   }
 }
 
@@ -204,28 +214,38 @@ fn tool_version() -> String {
 ///|
 async fn usage() -> Unit {
   let text =
-    #|preshell — report what a shell command touches (no verdicts)
+    #|preshell — what a shell command touches, as JSON. It passes no judgement.
     #|
     #|usage: preshell [options] [<command>]
-    #|       preshell < script.sh          # preferred: the command comes from stdin
+    #|       preshell < script.sh      # preferred: the command comes from stdin
     #|
-    #|  --version    print tool and schema version as JSON
-    #|  --help       this text
-    #|  --evidence   print the syntax errors this dialect has evidence for
-    #|  --shell=S    read the input as S: auto (default), bash, zsh or probe.
-    #|               auto follows the shebang and falls back to bash.
-    #|               probe tries the declared dialect, then bash, then zsh,
-    #|               and keeps the first grammar that parses the input. Only
-    #|               bash and zsh exist here, so the chain is two levels deep.
-    #|               A fallback the input does not declare is reported as a
-    #|               Note and makes the impact uncertain; the report names the
-    #|               dialect used. probe success is not proof of the dialect
-    #|  --pretty     indent the JSON for humans
-    #|  --shadow     dump the syntax tree (developer mode)
-    #|  --scan       one line of status, then any issues (developer mode)
-    #|  --bench=N    timing loop (developer mode)
+    #|example:
+    #|  printf 'rm -rf build && tar czf out.tgz src\n' | preshell --pretty
     #|
-    #|stdout carries exactly one JSON object; everything here goes to stderr.
+    #|options:
+    #|  --shell=S   how to read the input: auto (default), bash, zsh, probe
+    #|              auto follows the shebang, then falls back to bash
+    #|              probe tries the declared dialect first, then the others,
+    #|              and names the one it used in the report
+    #|  --pretty    indent the JSON
+    #|  --version   tool and schema version, as JSON
+    #|  --help      this text
+    #|
+    #|reading the answer:
+    #|  stdout carries one JSON object, diagnostics go to stderr, and the exit
+    #|  code is 0 whenever a report was produced. Read "status" first:
+    #|    Complete     parsed end to end
+    #|    Unsupported  valid shell this parser does not handle, so the answer is
+    #|                 a partial one
+    #|    Invalid      there is evidence the shell would refuse it too
+    #|  then read "impact.uncertain": true means the effect list is not a closed
+    #|  set, and an empty list must not be read as "touches nothing".
+    #|
+    #|developer modes (not part of the caller contract):
+    #|  --scan      one line of status, then any issues
+    #|  --shadow    dump the syntax tree
+    #|  --bench=N   timing loop
+    #|  --evidence  the syntax errors this dialect has evidence for
     #|
   @stdio.stderr.write(text)
 }

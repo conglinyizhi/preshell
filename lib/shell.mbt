@@ -66,23 +66,50 @@ fn is_modelled_shell(name : String) -> Bool {
 
 ///|
 /// The note to attach when a script declares a shell this tool does not model.
+///|
+/// What to tell the caller about the shell the input declares, when the
+/// dialect being read is a different one.
+///
+/// Two cases, because they are not the same statement: a shell this tool *can*
+/// read but was not asked to (the caller picked another dialect, so the note is
+/// about that choice), and a shell no dialect here covers at all (where the
+/// caveat is that the grammar is simply not the one being parsed).
 fn declared_shell_note(src : String, dialect : Dialect) -> Array[String] {
   match declared_shell(src) {
     Some(name) =>
-      // A script that declares the dialect we are already reading is not a
-      // caveat. Naming a shell we do not model at all still is.
       if is_modelled_shell(name) ||
         Dialect::from_shell_name(name) == Some(dialect) {
         []
       } else {
-        [
-          "this input declares " +
-          name +
-          ", which is not modelled: the analysis below assumes bash and may not match what " +
-          name +
-          " does with it",
-        ]
+        match Dialect::from_shell_name(name) {
+          Some(_) =>
+            [
+              "this input declares " +
+              name +
+              " but was read as " +
+              dialect_name(dialect) +
+              ": the answer may not match what " +
+              name +
+              " does with it",
+            ]
+          None =>
+            [
+              "this input declares " +
+              name +
+              ", which is not a shell this tool reads: the analysis assumes " +
+              dialect_name(dialect) +
+              " and may not match what it does",
+            ]
+        }
       }
     None => []
+  }
+}
+
+///|
+fn dialect_name(d : Dialect) -> String {
+  match d {
+    Bash => "bash"
+    Zsh => "zsh"
   }
 }
