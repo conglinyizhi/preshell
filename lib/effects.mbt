@@ -677,9 +677,25 @@ fn Collector::classify(
       self.container_effects(s, line)
       return
     }
-    "pip" | "pip3" | "uv" | "npm" | "pnpm" | "yarn" | "bun" => {
+    // A delegation (`uv run CMD`, `npx CMD`, `cargo run`) is its own fact:
+    // the command line hands control to a program whose own language decides
+    // what happens, and that is out of scope rather than half-modelled.
+    // Package managers first: when `uv`/`npm` is *not* delegating, the
+    // measured table still applies to what is left.
+    "uv" | "pip" | "pip3" | "npm" | "pnpm" | "yarn" | "bun" => {
+      if self.runner_effects(n, s, line) {
+        return
+      }
       self.package_effects(n, s, line)
       return
+    }
+    // Runners only: not delegating means we do not model them at all
+    // (`go test`, `cargo build`), which the generic path below reports.
+    "poetry" | "pdm" | "pipx" | "npx" | "bunx" | "go" | "cargo" | "dotnet"
+    | "deno" => {
+      if self.runner_effects(n, s, line) {
+        return
+      }
     }
     _ => ()
   }

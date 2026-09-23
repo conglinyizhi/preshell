@@ -93,14 +93,23 @@ preshell < script.sh | jq .
 
 ## 读什么、别读什么
 
-- `impact.effects` — 事实清单：`Exec` / `Read` / `Write` / `Delete` / `Net` / `Unknown`
+- `impact.effects` — 事实清单：
+  - `Exec` — 跑了一个程序
+  - `Read` / `Write` / `Delete` — 读了、写了、删了哪个路径
+  - `Net` — 往哪去了网络
+  - `Spawn` — **把控制权交给了另一个程序**：命令本身不决定会发生什么，
+    而是在跑 `uv run`、`npx`、`poetry run`、`cargo run` 这类运行器时把命令行
+    交给它。被交出去的那个程序碰什么，不在本工具的建模范围内（追下去等于把
+    每门语言的生态都实现一遍），所以它只报出交接对象并置 `uncertain`。
+    调用方可以把这类条目单独计数：它们是「你需要另想办法」而不是「什么都没发生」
+  - `Unknown` — 有个洞（动态路径、没建模的程序、here-doc 正文之类）
 - `impact.write_roots` — 会被改到的目录
 - `impact.uncertain` — **先看这个**。true 表示这份影响面不是封闭集合
 - `impact.cwd` — 相对路径的基准；字段缺失表示命令内部没有 `cd`，那基准就是调用方自己的
 - `status` — `Complete` / `Unsupported` / `Invalid`，描述我们看懂了多少
 
 别把 `uncertain: false` 读成「安全」，也别把 `effects` 里没有 `Write` 读成「不写」——
-先看有没有 `modeled: false` 的 `Exec`：那是「有程序跑了，它碰什么我们不建模」。
+先看有没有 `modeled: false` 的 `Exec` 或 `Spawn`：那是「有程序跑了，它碰什么我们不建模」。
 
 ## 在真实命令上的表现
 

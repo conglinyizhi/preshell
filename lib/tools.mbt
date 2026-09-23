@@ -342,6 +342,101 @@ fn Collector::mount_effects(
 /// Package managers. The interesting facts are the ones the command line
 /// settles: which local files are read, and which directory under the working
 /// directory gets rewritten. Where the download comes from is a hole.
+///|
+/// Runners: commands whose whole job is to hand control to another program.
+/// What that program touches is decided inside it and by its own language's
+/// conventions, which is not something this tool tries to model -- chasing it
+/// would mean re-implementing every language ecosystem there is.
+///
+/// So they are reported as a delegation: `Spawn` naming the program being
+/// handed control, plus `uncertain`. That is a fact about the command line
+/// (this invocation does not decide what happens next), not a verdict, and it
+/// is what lets a caller count and surface delegations separately from the
+/// programs the tool does understand.
+fn runner_delegate(name : String, s : SimpleCmd) -> String? {
+  let words = s.words
+  // Which word holds the delegate depends on the runner.
+  let takes_subcommand = match name {
+    "npx" | "bunx" => false
+    _ => true
+  }
+  let run_words = ["run", "exec", "dlx", "shell"]
+  let mut i = 1
+  let mut seen_subcommand = !takes_subcommand
+  while i < words.length() {
+    let t = words[i].literal_text()
+    if t == "" {
+      i += 1
+      continue
+    }
+    if t.has_prefix("-") {
+      // An option may swallow the next word; skipping just one is the
+      // conservative reading, because a missed delegate is worse than an
+      // extra candidate.
+      i += 1
+      continue
+    }
+    if takes_subcommand && !seen_subcommand {
+      if run_words.contains(t) {
+        seen_subcommand = true
+        i += 1
+        continue
+      }
+      // Some other subcommand (`uv pip install`, `go test`): not a delegation.
+      return None
+    }
+    return Some(t)
+  }
+  // A runner with nothing to run: `cargo run` uses the package's own binary.
+  Some("")
+}
+
+///|
+/// The runners whose delegation is worth naming. Kept to the ones that
+/// actually show up in real command lines.
+fn is_runner(name : String) -> Bool {
+  match name {
+    "uv"
+    | "poetry"
+    | "pdm"
+    | "pipx"
+    | "npx"
+    | "bunx"
+    | "go"
+    | "cargo"
+    | "dotnet"
+    | "deno"
+    | "npm"
+    | "pnpm"
+    | "yarn"
+    | "bun" => true
+    _ => false
+  }
+}
+
+///|
+/// Report a delegation, if this invocation is one. Returns true when the
+/// command was handled here.
+fn Collector::runner_effects(self : Collector, n : String, s : SimpleCmd, line : Int) -> Bool {
+  if !is_runner(n) {
+    return false
+  }
+  match runner_delegate(n, s) {
+    None => false
+    Some(target) => {
+      self.push(Exec, n, false, line)
+      self.push(
+        Spawn,
+        if target == "" { "what " + n + " runs" } else { target },
+        true,
+        line,
+      )
+      true
+    }
+  }
+}
+
+///|
 fn Collector::package_effects(
   self : Collector,
   name : String,
@@ -364,32 +459,6 @@ fn Collector::package_effects(
       command = t
       break
     }
-  }
-  // `uv run CMD`, `pnpm run CMD` and friends are runners: what they touch is
-  // decided by the command they hand control to, and this tool does not model
-  // that command. Claiming to understand the invocation would be the worst
-  // answer available -- Complete, modelled, and saying nothing -- so the
-  // command is named as a hole and the report goes uncertain. Forwarding into
-  // it properly needs each runner's option table measured first.
-  if command == "run" || command == "exec" || command == "dlx" {
-    self.push(Exec, name, false, line)
-    let mut rest = ""
-    let mut k = i + 1
-    while k < words.length() {
-      let t = words[k].literal_text()
-      if t != "" && !t.has_prefix("-") {
-        rest = t
-        break
-      }
-      k += 1
-    }
-    self.push(
-      Unknown,
-      if rest == "" { "what " + name + " runs" } else { rest },
-      true,
-      line,
-    )
-    return
   }
   self.push(Exec, name, false, line)
   let is_node = name == "npm" ||

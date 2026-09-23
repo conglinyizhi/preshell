@@ -56,6 +56,37 @@ test "redirections may precede the command word" {
 }
 
 ///|
+test "a runner hands control over, and we say so instead of guessing" {
+  // These commands do not decide what happens: they pass the command line to
+  // another program, whose own language decides. Naming the delegate and
+  // marking the answer open is the whole report -- chasing what `python -c`
+  // does would mean modelling every other language's ecosystem.
+  inspect(touched("uv run --no-project python -c \"print(1)\""), content="S:python")
+  inspect(touched("npx tsc --noEmit"), content="S:tsc")
+  inspect(touched("poetry run pytest tests/"), content="S:pytest")
+  inspect(touched("pdm run build"), content="S:build")
+  inspect(touched("go run main.go"), content="S:main.go")
+  inspect(touched("npm run build"), content="S:build")
+  // A runner with nothing named (`cargo run` compiles the package's own
+  // binary): the delegate is a hole, not a word.
+  inspect(touched("cargo run --release"), content="S:what cargo runs")
+  inspect(analyze("go run main.go").impact.uncertain, content="true")
+  // A delegation is a fact, so the command is still Complete.
+  debug_inspect(analyze("go run main.go").status, content="Complete")
+  // Same tools, not delegating: the measured tables still apply.
+  inspect(touched("npm install"),
+    content="R:package.json W:package-lock.json W:node_modules N:package registry",
+  )
+  inspect(touched("uv pip install -r req.txt"),
+    content="R:req.txt U:python environment N:package index",
+  )
+  // And when it is neither a delegation nor modelled (`go test`), the answer
+  // stays the honest empty one.
+  inspect(touched("go test ./..."), content="")
+  inspect(analyze("go test ./...").impact.uncertain, content="true")
+}
+
+///|
 test "a connector is followed by a command, not by another connector" {
   // Measured: both shells refuse every one of these. They are the shapes a
   // differential fuzzer found us accepting.
