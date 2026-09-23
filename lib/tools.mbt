@@ -342,6 +342,7 @@ fn Collector::mount_effects(
 /// Package managers. The interesting facts are the ones the command line
 /// settles: which local files are read, and which directory under the working
 /// directory gets rewritten. Where the download comes from is a hole.
+
 ///|
 /// Runners: commands whose whole job is to hand control to another program.
 /// What that program touches is decided inside it and by its own language's
@@ -417,7 +418,12 @@ fn is_runner(name : String) -> Bool {
 ///|
 /// Report a delegation, if this invocation is one. Returns true when the
 /// command was handled here.
-fn Collector::runner_effects(self : Collector, n : String, s : SimpleCmd, line : Int) -> Bool {
+fn Collector::runner_effects(
+  self : Collector,
+  n : String,
+  s : SimpleCmd,
+  line : Int,
+) -> Bool {
   if !is_runner(n) {
     return false
   }
@@ -427,7 +433,11 @@ fn Collector::runner_effects(self : Collector, n : String, s : SimpleCmd, line :
       self.push(Exec, n, false, line)
       self.push(
         Spawn,
-        if target == "" { "what " + n + " runs" } else { target },
+        if target == "" {
+          "what " + n + " runs"
+        } else {
+          target
+        },
         true,
         line,
       )

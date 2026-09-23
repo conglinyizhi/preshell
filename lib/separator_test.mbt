@@ -61,7 +61,10 @@ test "a runner hands control over, and we say so instead of guessing" {
   // another program, whose own language decides. Naming the delegate and
   // marking the answer open is the whole report -- chasing what `python -c`
   // does would mean modelling every other language's ecosystem.
-  inspect(touched("uv run --no-project python -c \"print(1)\""), content="S:python")
+  inspect(
+    touched("uv run --no-project python -c \"print(1)\""),
+    content="S:python",
+  )
   inspect(touched("npx tsc --noEmit"), content="S:tsc")
   inspect(touched("poetry run pytest tests/"), content="S:pytest")
   inspect(touched("pdm run build"), content="S:build")
@@ -74,10 +77,12 @@ test "a runner hands control over, and we say so instead of guessing" {
   // A delegation is a fact, so the command is still Complete.
   debug_inspect(analyze("go run main.go").status, content="Complete")
   // Same tools, not delegating: the measured tables still apply.
-  inspect(touched("npm install"),
+  inspect(
+    touched("npm install"),
     content="R:package.json W:package-lock.json W:node_modules N:package registry",
   )
-  inspect(touched("uv pip install -r req.txt"),
+  inspect(
+    touched("uv pip install -r req.txt"),
     content="R:req.txt U:python environment N:package index",
   )
   // And when it is neither a delegation nor modelled (`go test`), the answer

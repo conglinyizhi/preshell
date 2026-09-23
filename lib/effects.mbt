@@ -691,12 +691,15 @@ fn Collector::classify(
     }
     // Runners only: not delegating means we do not model them at all
     // (`go test`, `cargo build`), which the generic path below reports.
-    "poetry" | "pdm" | "pipx" | "npx" | "bunx" | "go" | "cargo" | "dotnet"
-    | "deno" => {
-      if self.runner_effects(n, s, line) {
-        return
-      }
-    }
+    "poetry"
+    | "pdm"
+    | "pipx"
+    | "npx"
+    | "bunx"
+    | "go"
+    | "cargo"
+    | "dotnet"
+    | "deno" => if self.runner_effects(n, s, line) { return }
     _ => ()
   }
   // git gets its own table (lib/git.mbt): which paths a subcommand touches is

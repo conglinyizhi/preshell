@@ -66,6 +66,7 @@ fn is_modelled_shell(name : String) -> Bool {
 
 ///|
 /// The note to attach when a script declares a shell this tool does not model.
+
 ///|
 /// What to tell the caller about the shell the input declares, when the
 /// dialect being read is a different one.
