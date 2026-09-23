@@ -48,6 +48,12 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
+      - name: Update registry
+        # 新装的工具链带的注册表索引是旧的，直接 build 会报
+        # "module was not found in the registry"（moonbitlang/async）。
+        # 本地环境早就更新过，所以只有 CI 会碰这个。
+        run: moon update
+
       - name: Build
         run: moon build --release --target native
 
