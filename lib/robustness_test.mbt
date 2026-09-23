@@ -159,3 +159,17 @@ test "a redirection without a target is not a command that runs" {
   debug_inspect(analyze("cat x > out").status, content="Complete")
   debug_inspect(analyze("echo hi >&2").status, content="Complete")
 }
+
+///|
+test "an empty command line gets a report, not silence" {
+  // Callers hand over whatever they were given. The CLI used to answer an
+  // empty input with usage text on stderr, nothing on stdout, and status 0,
+  // which leaves a subprocess caller parsing an empty string -- and a missing
+  // report cannot be told apart from a broken tool.
+  for src in ["", "   ", "\n\t ", "# just a comment", ";"] {
+    let r = analyze(src)
+    debug_inspect(r.status, content="Complete")
+    inspect(r.impact.effects.length(), content="0")
+    inspect(r.impact.uncertain, content="false")
+  }
+}

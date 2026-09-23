@@ -1,4 +1,15 @@
 ///|
+/// libc exit. The async package declares it the same way in its own examples;
+/// a usage error has to be distinguishable from a report, and the only way to
+/// say "this run produced nothing" is a non-zero status.
+extern "C" fn exit(code : Int) = "exit"
+
+///|
+/// What an unusable command line answers with. 0 means "a report is on stdout",
+/// so a usage error cannot also be 0.
+let usage_exit_code : Int = 2
+
+///|
 /// preshell — report what a shell command touches. No verdicts.
 ///
 /// The contract callers rely on is deliberately small:
@@ -10,11 +21,18 @@
 ///   exit code  0 when a report was produced, non-zero when the tool itself
 ///              could not run. There is no exit code that means "dangerous":
 ///              a caller reads the JSON, never the status.
+///              2 is a usage error (unknown option, unknown --shell value),
+///              with the reason on stderr and nothing on stdout.
+///
+/// An empty command line is a command line: it gets a report saying nothing is
+/// touched, not silence. Callers run this on whatever they were handed, and a
+/// missing report is indistinguishable from a broken tool.
 ///
 /// argv is accepted as a convenience for interactive use:
 ///
 ///   preshell 'rm -rf build/'          analyse the arguments
 ///   preshell < script.sh              analyse stdin (what callers should do)
+///   preshell -- ls -la                after --, everything is the command
 ///   preshell --shell=probe < cmd      try each grammar, keep the first hit
 ///   preshell --version                tool and schema version, as JSON
 ///   preshell --help                   this text, on stderr
@@ -33,6 +51,7 @@ async fn main {
   let mut bench = 0
   let mut shell : String? = None
   let mut evidence = false
+  let mut operands_started = false
   let rest : Array[String] = []
   let mut i = 0
   for a in argv {
@@ -71,8 +90,18 @@ async fn main {
       evidence = true
       continue
     }
+    if a == "--" && !operands_started {
+      // Everything after this is the command, even if it looks like an option.
+      operands_started = true
+      continue
+    }
     if a.has_prefix("--shell=") {
-      shell = Some(a.unsafe_substring(start=8, end=a.length()))
+      let name = a.unsafe_substring(start=8, end=a.length())
+      if !is_shell_choice(name) {
+        usage_error("unknown --shell value: \{name}")
+        return
+      }
+      shell = Some(name)
       continue
     }
     if a == "--bench" {
@@ -86,6 +115,15 @@ async fn main {
     if a == "-c" {
       continue
     }
+    // An option before the command that this tool does not know: refuse it.
+    // Reading it as the command instead turned `preshell --prety` into a
+    // report about a program called `--prety`, which is a silent wrong answer
+    // for exactly the caller who cannot check it by eye.
+    if !operands_started && a.length() > 1 && a.has_prefix("-") {
+      usage_error("unknown option: \{a}")
+      return
+    }
+    operands_started = true
     rest.push(a)
   }
   if bench > 0 {
@@ -118,10 +156,10 @@ async fn main {
   } else {
     @lib.decode_command(stdin_bytes.unwrap()).0
   }
-  if src.trim().length() == 0 {
-    usage()
-    return
-  }
+  // An empty command line is still a command line: it touches nothing, and
+  // saying so is a report. This used to print the usage text on stderr and put
+  // nothing at all on stdout while exiting 0, which left every subprocess
+  // caller parsing an empty string. Exit 0 always carries one JSON object.
   // stdin is analysed from its bytes: that is the path a subprocess caller
   // uses, and the only one that sees exactly what arrived (bar the null bytes
   // the shell itself would drop).
@@ -171,6 +209,17 @@ async fn main {
 }
 
 ///|
+/// The shell names `--shell=` accepts. An unknown one is refused rather than
+/// quietly read as bash: the caller asked for a specific grammar, and guessing
+/// a different one produces a report about the wrong language.
+fn is_shell_choice(name : String) -> Bool {
+  match name {
+    "" | "auto" | "bash" | "sh" | "zsh" | "probe" => true
+    _ => false
+  }
+}
+
+///|
 /// Which grammar to read when the caller does not pick one. The input's own
 /// shebang is the best evidence there is; without one, bash, because that is
 /// what a bare snippet almost always is.
@@ -210,6 +259,15 @@ fn tool_version() -> String {
 }
 
 ///|
+
+///|
+/// A command line this tool refuses to read. The reason goes to stderr first,
+/// then the usage text, and the status says no report was produced.
+async fn usage_error(message : String) -> Unit {
+  @stdio.stderr.write("preshell: \{message}\n\n")
+  usage()
+  exit(usage_exit_code)
+}
 
 ///|
 async fn usage() -> Unit {
