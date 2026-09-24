@@ -71,6 +71,11 @@ async fn main {
       usage()
       return
     }
+    if a == "--spec" {
+      // 契约的机读形式。拿得到二进制、拿不到仓库的人和 agent，靠这个把接口问清楚。
+      println(contract_json().stringify())
+      return
+    }
     if a == "--version" {
       println(
         Json::object({
@@ -308,7 +313,8 @@ async fn usage() -> Unit {
     #|preshell — what a shell command touches, as JSON. It passes no judgement.
     #|
     #|usage: preshell [options] [<command>]
-    #|       preshell < script.sh      # preferred: the command comes from stdin
+    #|       preshell < script.sh          one command from stdin (preferred)
+    #|       preshell --stream < cmds      many commands, one per line
     #|
     #|example:
     #|  printf 'rm -rf build && tar czf out.tgz src\n' | preshell --pretty
@@ -318,30 +324,43 @@ async fn usage() -> Unit {
     #|              auto follows the shebang, then falls back to bash
     #|              probe tries the declared dialect first, then the others,
     #|              and names the one it used in the report
-    #|  --pretty    indent the JSON
-    #|  --stream    read many commands: one JSON string per line on stdin, one
-    #|              report per line on stdout, in the same order. Every line is
-    #|              answered, so input and output line up one for one; a line that
-    #|              is not a request gets {"error":...,"line":N} instead.
-    #|              A request may instead be {"id":...,"command":"..."}, and the
-    #|              answer then comes back as {"id":...,"report":{...}} so a
-    #|              parent with several workers can match answers to requests
-    #|              without relying on line order.
+    #|  --pretty    indent the JSON for humans (single-shot mode only)
+    #|  --stream    many commands: one request per line on stdin, one answer per
+    #|              line on stdout, in the same order. A request is a JSON string,
+    #|              or {"id":...,"command":"..."} whose answer comes back as
+    #|              {"id":...,"report":{...}}. Every line is answered, so input
+    #|              and output line up one for one.
+    #|  --spec      this contract in machine-readable form, as JSON
     #|  --version   tool and schema version, as JSON
-    #|  --help      this text
+    #|  --help      this text, on stderr
     #|
-    #|reading the answer:
-    #|  stdout carries one JSON object, diagnostics go to stderr, and the exit
-    #|  code is 0 whenever a report was produced. Read "status" first:
-    #|    Complete     parsed end to end
-    #|    Unsupported  valid shell this parser does not handle, so the answer is
-    #|                 a partial one
-    #|    Invalid      there is evidence the shell would refuse it too
-    #|  then read "impact.uncertain": true means the effect list is not a closed
-    #|  set, and an empty list must not be read as "touches nothing".
+    #|the contract:
+    #|  stdin       the command verbatim; a shell never gets to re-quote it
+    #|  stdout      exactly one JSON object, or one per line under --stream
+    #|  stderr      usage, help and diagnostics, never mixed into stdout
+    #|  exit code   0 = the answers were produced, 2 = usage error (reason on
+    #|              stderr, nothing on stdout), anything else = the tool itself
+    #|              failed. No exit code means "dangerous": read the JSON.
     #|
-    #|  with --stream, stdout stays one JSON object per line: diagnostics and a
-    #|  final count go to stderr.
+    #|reading an answer:
+    #|  status           Complete / Unsupported / Invalid: how much was understood
+    #|  impact.effects   facts: Exec, Read, Write, Delete, Net, Spawn, Unknown
+    #|  impact.uncertain read this first. true means the effect list is not a
+    #|                   closed set, and an empty list must not be read as
+    #|                   "touches nothing"
+    #|  In --stream a refused line answers {"error":...,"line":N}. That is
+    #|  deliberately not a report: it means the line was not a request, never
+    #|  that the command is bad.
+    #|
+    #|calling it from a program — four things the caller must do:
+    #|  1. serialize writes to stdin (POSIX makes only writes <= PIPE_BUF atomic)
+    #|  2. buffer reads by newline; one read is not one line
+    #|  3. ids must be unguessable, not sequential
+    #|  4. do not let other child processes inherit the pipe fd (CLOEXEC)
+    #|
+    #|docs: https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md
+    #|      licence boundary, batch recipe, a runnable parent-process example
+    #|      (also installed as man 1 preshell)
     #|
     #|developer modes (not part of the caller contract):
     #|  --scan      one line of status, then any issues
@@ -519,4 +538,77 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
     @stdio.stderr.write("preshell: reading stdin failed\n")
     exit(io_exit_code)
   }
+}
+
+///|
+/// The contract as data, for a caller that has the binary and nothing else.
+///
+/// This is prose the tool vouches for: when the wire format changes, this and
+/// the help text change with it. It exists because the alternative is an agent
+/// (or a person) reverse-engineering the protocol from behaviour.
+fn contract_json() -> Json {
+  let doc = "https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md"
+  Json::object({
+    "tool": Json::string("preshell"),
+    "version": Json::string(tool_version()),
+    "schema": Json::number(@lib.report_version().to_double()),
+    "doc": Json::string(doc),
+    "one_line": Json::string(
+      "Reports what a shell command touches. Facts, not a verdict: no policy, no allow/deny.",
+    ),
+    "modes": Json::array([
+      Json::object({
+        "name": Json::string("single"),
+        "stdin": Json::string("one shell command, verbatim"),
+        "stdout": Json::string("exactly one JSON report"),
+      }),
+      Json::object({
+        "name": Json::string("stream"),
+        "flag": Json::string("--stream"),
+        "stdin": Json::string(
+          "one request per line: a JSON string, or {\"id\":...,\"command\":\"...\"}",
+        ),
+        "stdout": Json::string(
+          "one answer per line, same order: the report, or {\"id\":...,\"report\":{...}} when the request carried an id",
+        ),
+        "guarantee": Json::string(
+          "every input line is answered exactly once, refusals included",
+        ),
+      }),
+    ]),
+    "exit_codes": Json::object({
+      "0": Json::string("the answers were produced; read stdout"),
+      "2": Json::string("usage error: reason on stderr, nothing on stdout"),
+      "other": Json::string("the tool itself failed"),
+      "note": Json::string(
+        "no exit code means dangerous; the JSON is the answer, and stderr is never mixed into stdout",
+      ),
+    }),
+    "refusal": Json::object({
+      "shape": Json::string(
+        "{\"error\":\"...\",\"line\":N} and, when the line carried an id, \"id\" too",
+      ),
+      "means": Json::string(
+        "the line was not a request; it never means the command is bad",
+      ),
+      "note": Json::string(
+        "a refusal is not a report: it has no version and no status",
+      ),
+    }),
+    "client_obligations": Json::array([
+      Json::string(
+        "serialize writes to stdin: POSIX makes only writes <= PIPE_BUF atomic",
+      ),
+      Json::string("buffer reads by newline: one read is not one line"),
+      Json::string(
+        "ids must be unguessable, not sequential, or a forged answer can displace a real one",
+      ),
+      Json::string(
+        "do not let other child processes inherit the pipe fd (CLOEXEC / close_fds)",
+      ),
+    ]),
+    "how_to_read": Json::string(
+      "read impact.uncertain first: true means the effect list is not a closed set, and an empty list does not mean \"touches nothing\"",
+    ),
+  })
 }

@@ -1,0 +1,199 @@
+.TH PRESHELL 1 "2026-09-24" "preshell 0.2.0" "User Commands"
+.SH NAME
+preshell \- report what a shell command touches, as JSON
+.SH SYNOPSIS
+.B preshell
+[\fIoptions\fR] [\fIcommand\fR]
+.br
+.B preshell
+[\fIoptions\fR] < \fIscript.sh\fR
+.br
+.B preshell --stream
+< \fIcommands.jsonl\fR
+.SH DESCRIPTION
+.B preshell
+reads a shell command and reports what that command touches: which programs run,
+which paths are read, written or removed, what leaves the machine, and where it
+could not tell. That is the entire output.
+.PP
+It does not decide whether any of that is acceptable. There is no allowlist, no
+policy and no verdict here, because whether something should run depends on
+context the tool does not have. It is an analyzer, not an approver.
+.PP
+It never executes the command it is given, never reads your disk and never opens
+a network connection. Handing it untrusted text is the intended use.
+.PP
+.B preshell
+is a standalone program, not a library: call it as a subprocess and read JSON
+from its standard output. That keeps the GPL on the other side of the process
+boundary, and it means callers in any language can use it without linking
+anything in. See the file
+.I docs/integration.md
+in the source tree for the licence boundary, a batch recipe, and a runnable
+parent-process example.
+.SH OPTIONS
+.TP
+.BI \-\-shell= S
+How to read the input: \fBauto\fR (default), \fBbash\fR, \fBzsh\fR or \fBprobe\fR.
+.B auto
+follows the shebang and falls back to bash.
+.B probe
+tries the dialect the input declares first, then the others, and names the one it
+used in the report. An unknown value is a usage error.
+.TP
+.B \-\-pretty
+Indent the JSON for humans. Single-shot mode only.
+.TP
+.B \-\-stream
+Read many commands: one request per line on standard input, one answer per line
+on standard output, in the same order. A request is a JSON string, or an object
+.BR {"id":...,"command":"..."}
+whose answer comes back as
+.BR {"id":...,"report":{...}}
+so a parent process with several workers can match answers to requests without
+relying on line order. Every input line is answered exactly once, including the
+ones refused. Requests are JSON strings rather than bare lines because a command
+can contain newlines (here-documents, multi-line loops).
+.TP
+.B \-\-spec
+Print this contract in machine-readable form, as JSON. For a caller that has the
+binary and nothing else.
+.TP
+.B \-\-version
+Print the tool and schema version, as JSON.
+.TP
+.B \-\-help
+Print the same information as this page, more briefly, on standard error.
+.SH THE CONTRACT
+.TP
+.B stdin
+The command, verbatim. A shell never gets to re-quote it on the way in.
+.TP
+.B stdout
+Exactly one JSON object, or one per line under
+.BR \-\-stream .
+Nothing else is ever written there.
+.TP
+.B stderr
+Usage, help and diagnostics. Never mixed into standard output.
+.TP
+.B exit status
+.B 0
+when the answers were produced, regardless of what they say.
+.B 2
+for a usage error, with the reason on standard error and nothing on standard
+output. Any other non-zero status means the tool itself failed. There is no exit
+code that means dangerous: read the JSON, never the status.
+.SH READING AN ANSWER
+.TP
+.B status
+.BR Complete ,
+.BR Unsupported ,
+or
+.BR Invalid :
+how much of the command was understood. 
+.B Unsupported
+means the answer is a partial one.
+.B Invalid
+means there is evidence the shell would refuse the command too.
+.TP
+.B impact.effects
+The facts: 
+.BR Exec ", " Read ", " Write ", " Delete ", " Net ", " Spawn ", " Unknown .
+.B Spawn
+means control was handed to another program, such as
+.BR "uv run" ", " npx
+or
+.BR "cargo run" ;
+what that program touches is not modelled.
+.TP
+.B impact.uncertain
+Read this first.
+.B true
+means the effect list is not a closed set. An empty list must not be read as
+"touches nothing": look for a
+.B Spawn
+or an
+.B Exec
+with
+.BR "modeled: false" .
+.TP
+.B impact.write_roots
+The directories that would be modified.
+.TP
+.B impact.cwd
+The base for relative paths. Absent when the command itself does not change
+directory, in which case the base is the caller's own.
+.SH REFUSALS UNDER --stream
+A line that is not a request answers
+.BR {"error":"...","line":N} ,
+with the id echoed when the line carried one. That object is deliberately not a
+report: it has no
+.B version
+and no
+.B status
+field. It means the line was not a request, never that the command is bad.
+.SH WHAT THE CALLER MUST DO
+Four things, any of which can otherwise produce a wrong answer:
+.IP "1." 4
+Serialize writes to standard input. POSIX makes only writes of at most
+.B PIPE_BUF
+bytes atomic, so concurrent writers can splice a line.
+.IP "2." 4
+Buffer reads by newline. One read is not one line.
+.IP "3." 4
+Make ids unguessable, not sequential. A guessable id lets a forged answer
+displace a real one if anything else shares the pipe.
+.IP "4." 4
+Do not let other child processes inherit the pipe file descriptor (CLOEXEC, or
+close_fds in Python). Whoever holds the write end can inject requests and can
+hold the pipe open so the caller never sees end of input.
+.SH EXIT STATUS
+0 on success, 2 on a usage error, other non-zero when the tool itself failed.
+See the contract above.
+.SH EXAMPLES
+Analyse a script and pretty-print the report:
+.PP
+.nf
+.RS
+printf 'rm -rf build && tar czf out.tgz src\\n' | preshell --pretty
+.RE
+.fi
+.PP
+Read it as a subprocess from any language:
+.PP
+.nf
+.RS
+preshell < script.sh | jq .
+.RE
+.fi
+.PP
+Analyse many commands in one process:
+.PP
+.nf
+.RS
+jq -Rc . commands.txt | preshell --stream > reports.jsonl
+.RE
+.fi
+.PP
+Ask the binary what its contract is:
+.PP
+.nf
+.RS
+preshell --spec | jq .
+.RE
+.fi
+.SH LIMITS
+Part of shell semantics is not statically decidable, such as
+.BR "eval $X" ", " "$CMD"
+or
+.BR "base64 -d | sh" .
+For those the answer is unknown, never a guess. A report is not a security
+proof; it is a factual list that can be argued with, its own blind spots
+included.
+.SH LICENSE
+GPL\-3.0\-or\-later. The source is the repository this binary was built from; see
+the release notes for the matching tag.
+.SH SEE ALSO
+The full integration guide in the source tree:
+.I docs/integration.md

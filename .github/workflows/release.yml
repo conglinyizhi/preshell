@@ -83,6 +83,7 @@ jobs:
           "$BIN" --version
           mkdir -p dist
           install -Dm755 "$BIN" "dist/preshell-$TAG-$(uname -m)-linux"
+          install -Dm644 docs/preshell.1 dist/preshell.1
           ( cd dist && sha256sum preshell-* > SHA256SUMS && cat SHA256SUMS )
 
       - name: Write notes

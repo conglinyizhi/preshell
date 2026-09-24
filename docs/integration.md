@@ -72,6 +72,10 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 （`status: Complete`、`effects: []`、`uncertain: false`）。之所以强调，是因为
 调用方总是把手上拿到的东西原样塞进来，而「没有报告」和「工具坏了」必须能分开。
 
+上面这些不止在这份文档里：`preshell --help` 是同一份契约的速查（带地址），
+`preshell --spec` 是它的机读形式（JSON，给拿得到二进制、拿不到仓库的 agent 用），
+仓库里还有 `docs/preshell.1` 供 `man preshell`。三份说的是同一件事，改线格式要一起改。
+
 开发者模式（`--scan`、`--shadow`、`--bench`、`--evidence`）不满足上面这条契约，
 它们是给我自己调试用的。集成里只用默认模式、`--shell` 与 `--stream`。
 
@@ -110,7 +114,10 @@ install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell
 ```bash
 moon build --release --target native
 install -Dm755 _build/native/release/build/cmd/preshell/preshell.exe ~/.local/bin/preshell
+install -Dm644 docs/preshell.1 ~/.local/share/man/man1/preshell.1
 preshell --version
+preshell --spec | jq .     # 契约的机读形式
+man preshell                # 同上，给人看的
 ```
 
 （`moon install` 也能装，但要等发布到 Mooncakes。）

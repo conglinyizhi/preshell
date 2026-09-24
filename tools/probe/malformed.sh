@@ -36,6 +36,24 @@ if ! printf %s\\n "echo hi" | "$BIN" --scan 2>/dev/null | grep -q '^status='; th
   bad=$((bad + 1))
 fi
 
+# 契约的自证形式：--spec 必须仍是合法 JSON，且关键字段齐全。
+# 它与 --help、man 页是三份说同一件事的副本，缺字段意味着有人只改了其中一份。
+total=$((total + 1))
+spec_json=$("$BIN" --spec 2>/dev/null)
+if ! printf '%s' "$spec_json" | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
+  const need = ["tool","version","schema","doc","modes","exit_codes","refusal","client_obligations","how_to_read"];
+  const missing = need.filter(k => !(k in d));
+  if (missing.length) { console.log("缺字段: " + missing.join(",")); process.exit(1) }
+  const modes = (d.modes || []).map(m => m.name).join(",");
+  if (!modes.includes("single") || !modes.includes("stream")) { console.log("modes 不含 single/stream"); process.exit(1) }
+  if ((d.client_obligations || []).length !== 4) { console.log("调用方义务不是 4 条"); process.exit(1) }
+})'; then
+  echo "  --spec 输出不合格: $spec_json" | head -2
+  bad=$((bad + 1))
+fi
+
 echo "--- 共 $total 条，异常 $bad 条"
 [ "$bad" = "0" ]
 #
