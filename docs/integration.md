@@ -78,7 +78,7 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 `--version` 给出版本与 schema 号，调用方据此锁住自己解析的形状：
 
 ```json
-{"tool":"preshell","version":"0.1.0","schema":1}
+{"tool":"preshell","version":"0.2.0","schema":1}
 ```
 
 ## 为什么用 stdin 而不是参数
@@ -96,7 +96,7 @@ stdin 没有这些问题：命令原样进去，原样分析。
 ### 直接用发布版（不想装工具链）
 
 ```bash
-TAG=v0.1
+TAG=v0.2
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell && sha256sum -c SHA256SUMS
 install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell

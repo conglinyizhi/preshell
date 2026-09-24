@@ -288,7 +288,7 @@ fn dialect_for(src : String, named : String?) -> @lib.Dialect {
 
 ///|
 fn tool_version() -> String {
-  "0.1.0"
+  "0.2.0"
 }
 
 ///|
