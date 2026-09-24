@@ -383,7 +383,10 @@ JSON 是本工具已经会说的那门话，所以用它。）
 规则一句话：**应答回显请求的形态**。没 id 的请求拿裸报告，带 id 的请求拿信封，
 报告原封不动放在 `report` 里。
 
-- id 是任意 JSON 值，**原样回显**，不解析不改格式（数字回数字，字符串回字符串）
+- id 是任意 JSON 值，**原样回显**，不解析不改格式（数字回数字，字符串回字符串）。
+  **用不可猜的随机值，不要自增**：管道如果被别的进程共享（见下「客户端这边要守住四条」），
+  可猜的 id 意味着伪造的应答能顶掉真应答；随机 id 让这种情况只能表现为「无主的应答」
+- 工具**不查重**：同一个 id 发两次就回两条。唯一性与重试去重都是调用方的事
 - **拒绝也带 id**，只要那一行读得出来：`{"id":"w2","error":"…","line":3}`。
   这对 worker 池是关键——某个 worker 的请求被拒时，它得知道是它自己
 - **不认识的键会被拒绝**而不是忽略：写了 `{"command":"ls","timeout":5}` 的人
@@ -404,11 +407,12 @@ id 带来的开销在噪声里（实测 ±1%）。
 
 ```js
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 export function openAnalyzer(bin = "preshell", args = []) {
   const child = spawn(bin, ["--stream", ...args], { stdio: ["pipe", "pipe", "inherit"] });
   const pending = new Map();
-  let next = 1, buf = "";
+  let buf = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
     buf += chunk;
@@ -430,7 +434,8 @@ export function openAnalyzer(bin = "preshell", args = []) {
   });
   return {
     analyze(command, timeoutMs = 5000) {
-      const id = next++;
+      // 随机而不是自增：见「客户端这边要守住四条」第 3 条
+      const id = randomUUID();
       return new Promise((resolve) => {
         const timer = setTimeout(() => {
           if (pending.delete(id)) resolve({ error: "timeout" });
@@ -447,6 +452,30 @@ export function openAnalyzer(bin = "preshell", args = []) {
 
 要更高吞吐就**再起几个子进程**（单个约 7700 条/秒），而不是加 socket 或做守护进程：
 谁起的子进程谁喂，版本不会漂移，也没有「守护进程没在跑」这条新策略。
+
+### 客户端这边要守住四条
+
+工具是单线程的，一次答一条，内部没有共享状态——同一条命令在流式与单条模式下逐字节一致
+（458 条实测），所以它这边不会出现并发问题。**并发是调用方的事**：要更快就多起几个进程，
+别指望一个子进程扛多核。单进程吞吐大致 4 万条/秒（小微命令）到 7 千条/秒（真实脚本那种大小）。
+
+调用方要守住这四条，缺哪条都可能拿到错的应答：
+
+1. **对 stdin 的写必须串行。** 多个线程或协程直接写同一个 fd，行可能被夹断：POSIX 只保证
+   ≤ `PIPE_BUF`（Linux 4096 字节）的写是原子的，更大的写规范上允许交错。Node 的
+   `child.stdin.write` 是单一 stream、内部排队，天然安全；直接 `os.write(fd, …)` 不安全，
+   要自己加锁。（我们实测没能复现夹断——CPython 的 GIL 会把 syscall 串行化，所以这属于
+   「按规范可能」，不是「常见」。夹断的后果是响亮的：JSON 不合法，得到带行号的拒绝）
+2. **读必须按 `\n` 缓冲。** 一次 `read` 未必正好一行（实测按 37 字节读会拿到半行），
+   管道不会替你切分。上面示例里的 `buf` 累积就是这个用途
+3. **id 必须不可猜**（随机，不要自增），理由见上一节
+4. **别让别的子进程继承那根 fd。** 谁拿到写端谁就能投递请求，还能拖住 EOF 让调用方
+   永远等不到收工。Python 的 `close_fds=True` 与 Node 的 libuv 默认都设 CLOEXEC
+   （实测：两者的旁系子进程都拿不到 preshell 的那两个管道 inode），自己漏 fd 才会中招
+
+夹带能做到什么：最多让工具去分析一段别人选的文本，调用方得到一份没要的报告。工具不执行、
+不读盘、不联网、不改状态，这一层是它的安全垫；带 id 时调用方还能把「无主的应答」认出来
+（示例里那句 `if (!settle) continue` 就是干这个的，别把它当成成功）。
 
 代价（本机实测）：
 
