@@ -28,7 +28,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           # 读 tag 注解、比对历史都要完整历史，浅克隆拿不到。
