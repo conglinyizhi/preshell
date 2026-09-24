@@ -1375,7 +1375,7 @@ fn is_stray_keyword(kw : String, dialect : Dialect) -> Bool {
 /// needs one: it may skip separators before a body, but a csh-style loop such
 /// as `foreach x (a b); body; end` has no body of its own, and eating the `;`
 /// then leaves the caller without the separator it needs.
-struct Mark {
+priv struct Mark {
   pos : Int
   cur : Tok
   cur_start : Int
@@ -1474,7 +1474,7 @@ fn redir_op_of(op : String) -> RedirOp {
     | "&>!"
     | "&>>|"
     | "&>>!" => RClobber
-    ">>" | "&>>" | ">>&" => RAppend
+    "&>>" | ">>&" => RAppend
     "&>" => ROut
     _ => ROut
   }
@@ -1620,7 +1620,7 @@ fn Parser::next_is_adjacent(self : Parser, op : String) -> Bool {
 /// before a redirect: `{fd}<file`, `exec {fd}>out`. The descriptor number is
 /// assigned at run time, so for an audit only the redirect's target matters.
 fn is_named_fd(text : String) -> Bool {
-  if text.length() < 3 || !text.has_prefix("{") || !text.ends_with("}") {
+  if text.length() < 3 || !text.has_prefix("{") || !text.has_suffix("}") {
     return false
   }
   let name = text.unsafe_substring(start=1, end=text.length() - 1)

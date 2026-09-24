@@ -13,7 +13,7 @@
 /// mostly analysable; the replacement is reported as an issue so nobody has to
 /// guess why a path looks odd.
 pub fn decode_command(bytes : Bytes) -> (String, Array[String]) {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let notes : Array[String] = []
   let n = bytes.length()
   let mut i = 0

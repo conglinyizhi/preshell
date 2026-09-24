@@ -1,10 +1,4 @@
 ///|
-fn parse_ok(src : String) -> (@lib.Seq, Array[String]) {
-  let (seq, errs) = @lib.parse(src)
-  (seq, errs)
-}
-
-///|
 fn first_cmd(src : String) -> @lib.Cmd {
   let (seq, _) = @lib.parse(src)
   seq.items[0].pipeline.cmds[0]
@@ -14,18 +8,6 @@ fn first_cmd(src : String) -> @lib.Cmd {
 fn cmd_count(src : String) -> Int {
   let (seq, _) = @lib.parse(src)
   seq.items[0].pipeline.cmds.length()
-}
-
-///|
-fn command_of(src : String) -> String {
-  match first_cmd(src) {
-    @lib.Cmd::Simple(s) =>
-      match s.words {
-        [w, ..] => w.literal_text()
-        _ => ""
-      }
-    _ => ""
-  }
 }
 
 ///|

@@ -113,8 +113,8 @@ fn Collector::sqlite_effects(
     // `sqlite3` with no file is an in-memory database.
     return
   }
-  let dyn = db.has_hole() || db.has_glob()
-  self.push(Read, path, dyn, line)
+  let dynamic_path = db.has_hole() || db.has_glob()
+  self.push(Read, path, dynamic_path, line)
   // Measured: `sqlite3 new.db 'select 1'` creates new.db. Whether a statement
   // writes cannot be settled from the text alone, so the write is reported
   // with the target dynamic: the path is known, the fact that it is written is
@@ -281,20 +281,6 @@ fn Collector::container_effects(
 
 ///|
 /// The first word that is not an option, from `start` on.
-fn first_non_flag(words : Array[Word], start : Int) -> String? {
-  let mut i = start
-  for ;; {
-    if i >= words.length() {
-      break
-    }
-    let t = words[i].literal_text()
-    if t != "" && !t.has_prefix("-") {
-      return Some(t)
-    }
-    i += 1
-  }
-  None
-}
 
 ///|
 /// One mount specification: `HOST:CONTAINER[:ro]`, or the `--mount` spelling
@@ -309,7 +295,7 @@ fn Collector::mount_effects(
   let mut read_only = false
   if keyed {
     for part in spec.split(",").to_array() {
-      let p = part.trim().to_string()
+      let p = part.trim().to_owned()
       if p.has_prefix("source=") {
         host = p.unsafe_substring(start=7, end=p.length())
       } else if p.has_prefix("src=") {
@@ -321,7 +307,7 @@ fn Collector::mount_effects(
   } else {
     let parts = spec.split(":").to_array()
     if parts.length() > 0 {
-      host = parts[0].trim().to_string()
+      host = parts[0].trim().to_owned()
     }
     if parts.length() > 2 && parts[2].trim() == "ro" {
       read_only = true

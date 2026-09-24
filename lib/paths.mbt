@@ -23,7 +23,7 @@ pub fn normalize_path(p : String) -> String {
       }
       continue
     }
-    out.push(seg.to_string())
+    out.push(seg.to_owned())
   }
   let body = out.join("/")
   if p.has_prefix("/") {

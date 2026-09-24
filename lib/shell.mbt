@@ -26,7 +26,7 @@ pub fn declared_shell(src : String) -> String? {
   let parts : Array[String] = []
   for w in words {
     if w.length() > 0 {
-      parts.push(w.to_string())
+      parts.push(w.to_owned())
     }
   }
   if parts.length() == 0 {

@@ -68,26 +68,6 @@ fn is_interpreter(n : String) -> Bool {
 }
 
 ///|
-fn is_downloader(n : String) -> Bool {
-  match n {
-    "curl" | "wget" | "fetch" | "http" | "httpie" | "aria2c" => true
-    _ => false
-  }
-}
-
-///|
-fn has_flag(args : Array[String], flag : String) -> Bool {
-  args.any(fn(a) {
-    a == flag ||
-    (
-      a.has_prefix("-") &&
-      !a.has_prefix("--") &&
-      a.contains(flag.unsafe_substring(start=1, end=flag.length()))
-    )
-  })
-}
-
-///|
 /// `eval "..."` and `sh -c "..."` with a static string: the string is a real
 /// command line whose effects belong to the same answer. A dynamic string
 /// yields None, which the caller reports as an unknown rather than guessing.

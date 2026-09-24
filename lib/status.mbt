@@ -118,7 +118,7 @@ fn add_notes(
   }
   let total = issues.length() + r.issues_dropped
   let kept = if issues.length() > max_issues() {
-    issues[:max_issues()].to_array()
+    issues[:max_issues()].to_owned()
   } else {
     issues
   }
@@ -351,7 +351,7 @@ fn strip_nuls(src : String) -> (String, Array[String]) {
   if !src.contains_char('\u{0}') {
     return (src, [])
   }
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for c in src {
     if c != '\u{0}' {
       sb.write_char(c)

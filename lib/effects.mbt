@@ -508,7 +508,7 @@ fn is_fd_word(t : String) -> Bool {
   if t == "-" {
     return true
   }
-  let trimmed = if t.ends_with("-") {
+  let trimmed = if t.has_suffix("-") {
     t.unsafe_substring(start=0, end=t.length() - 1)
   } else {
     t
@@ -562,7 +562,6 @@ fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
           }
         None => ()
       }
-    _ => ()
   }
   self.walk_word(r.target)
 }
@@ -727,7 +726,7 @@ fn Collector::classify(
   let script_operands = if scan.from_option {
     operands
   } else if operands.length() > 1 {
-    operands[1:].to_array()
+    operands[1:].to_owned()
   } else {
     []
   }
@@ -850,7 +849,7 @@ fn Collector::classify(
       let files = if scan.opts.contains("--reference") {
         operands
       } else if operands.length() > 1 {
-        operands[1:].to_array()
+        operands[1:].to_owned()
       } else {
         []
       }
@@ -1104,7 +1103,7 @@ fn tar_take_cluster_values(
       _ => ()
     }
   }
-  (archive, dir, args[i:].to_array())
+  (archive, dir, args[i:].to_owned())
 }
 
 ///|
@@ -1209,7 +1208,7 @@ fn Collector::tar_effects(
       }
       cluster = w
       if operands.length() > 0 {
-        args = operands[1:].to_array()
+        args = operands[1:].to_owned()
       }
       // A bare `-` is the archive on stdout (`tar czf - dir`). The option
       // scanner reads it as a flag, so it is missing from `operands`, and the
@@ -1460,7 +1459,7 @@ fn Collector::recurse_static(
 
 ///|
 /// What a wrapper does with the words after it.
-enum Wrapped {
+priv enum Wrapped {
   /// It runs no program: a bare `env`, or `command -v` which only asks where
   /// a name is.
   Nothing
@@ -1702,7 +1701,7 @@ fn Collector::wrapper_effects(
         self.push(Unknown, n + ": wrapper depth limit", true, line)
         return
       }
-      let inner = s.words[i:].to_array()
+      let inner = s.words[i:].to_owned()
       let name = inner[0].literal_text()
       if n == "xargs" {
         // -a/--arg-file: the list is read from a file instead of stdin, and

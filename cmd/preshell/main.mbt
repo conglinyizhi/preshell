@@ -483,7 +483,7 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
     if n == 0 {
       break
     }
-    for framed in framer.push(@bytes.from_fixedarray(chunk, len=n)) {
+    for framed in framer.push(Bytes::from_array(chunk.exact_view(end=n))) {
       match framed {
         @lib.FramedLine::Line(line) => {
           number += 1

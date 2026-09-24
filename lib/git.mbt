@@ -22,7 +22,7 @@
 
 ///|
 /// One git argument: its text, and whether that text is not a closed set.
-struct GitArg {
+priv struct GitArg {
   text : String
   dynamic : Bool
 }
