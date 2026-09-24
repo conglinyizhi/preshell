@@ -185,6 +185,18 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 已知还没修的一类：二元算符后面又跟一个算符（`cmd &&& x`、`2>>&1`），两个 shell 都拒，
 我们接受。修法是在算符序列上做检查，属于下一个工作日。
 
+## 编译警告保持为 0
+
+`moon check --target native` 现在没有任何警告，别让它再攒起来。修的时候有个坑：
+**报告的条数会少于实际处数**（实测 245 报了、实际 247；`implicit_impl_as_method`
+先用 77 条报了 Eq，修完 Eq 才冒出 Debug 与 ToJson 的另外 49 与 21 条）。所以按
+「修到 0」而不是「修到数字对上」来判。
+
+- `derive` 带来的 `Eq` / `Debug` / `ToJson` 方法要显式写出，集中放在
+  `lib/extends.mbt`（和上游 `core/*/extends.mbt` 一个写法）。漏一个就回来一条警告
+- CI 不 gate 警告：它装最新工具链，上游加一条新警告就会把构建弄红，等于用别人的
+  节奏卡自己。靠提交前跑 `tools/ci_local.py`，以及这里的「保持 0」
+
 ## 本地先跑一遍 CI
 
 推送之前用 `tools/ci_local.py`。它直接读 `.github/workflows/check.yml` 执行那里面
