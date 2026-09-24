@@ -2,6 +2,8 @@ import {
   "conglinyizhi/preshell/lib",
   "moonbitlang/core/json",
   "moonbitlang/core/env",
+  "moonbitlang/core/bytes",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/async",
   "moonbitlang/async/stdio",
 }

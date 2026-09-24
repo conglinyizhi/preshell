@@ -34,8 +34,14 @@ let usage_exit_code : Int = 2
 ///   preshell < script.sh              analyse stdin (what callers should do)
 ///   preshell -- ls -la                after --, everything is the command
 ///   preshell --shell=probe < cmd      try each grammar, keep the first hit
+///   preshell --stream < cmds.jsonl    many commands, one JSON string per line,
+///                                     one report per line, in the same order
 ///   preshell --version                tool and schema version, as JSON
 ///   preshell --help                   this text, on stderr
+///
+/// In --stream, a line that is not a JSON string is refused with its own line
+/// number and the run continues: a batch of 40000 commands should not be lost to
+/// one bad line, and the count of reports still matches the count of requests.
 ///
 /// Developer modes, not part of the caller contract:
 ///
@@ -51,6 +57,7 @@ async fn main {
   let mut bench = 0
   let mut shell : String? = None
   let mut evidence = false
+  let mut stream = false
   let mut operands_started = false
   let rest : Array[String] = []
   let mut i = 0
@@ -90,6 +97,10 @@ async fn main {
       evidence = true
       continue
     }
+    if a == "--stream" {
+      stream = true
+      continue
+    }
     if a == "--" && !operands_started {
       // Everything after this is the command, even if it looks like an option.
       operands_started = true
@@ -126,6 +137,24 @@ async fn main {
     operands_started = true
     rest.push(a)
   }
+  // --stream is a different shape of answer: one line in, one line out. The
+  // developer modes all print something else, and --pretty alone would break the
+  // framing, so they are refused together instead of producing output a caller
+  // cannot parse line by line.
+  if stream {
+    if pretty || scan || shadow || evidence || bench > 0 {
+      usage_error(
+        "--stream cannot be combined with --pretty, --scan, --shadow, --evidence or --bench",
+      )
+      return
+    }
+    if rest.length() > 0 {
+      usage_error(
+        "--stream reads its commands from stdin; it takes no command argument",
+      )
+      return
+    }
+  }
   if bench > 0 {
     bench_corpus(bench)
     return
@@ -141,6 +170,10 @@ async fn main {
   let probe = match shell {
     Some("probe") => true
     _ => false
+  }
+  if stream {
+    stream_reports(shell, probe)
+    return
   }
   let from_argv = rest.length() > 0
   // Read stdin once, as bytes. Both the report path and the developer modes use
@@ -286,6 +319,10 @@ async fn usage() -> Unit {
     #|              probe tries the declared dialect first, then the others,
     #|              and names the one it used in the report
     #|  --pretty    indent the JSON
+    #|  --stream    read many commands: one JSON string per line on stdin, one
+    #|              report per line on stdout, in the same order. Every line is
+    #|              answered, so input and output line up one for one; a line that
+    #|              is not a JSON string gets {"error":...,"line":N} instead.
     #|  --version   tool and schema version, as JSON
     #|  --help      this text
     #|
@@ -298,6 +335,9 @@ async fn usage() -> Unit {
     #|    Invalid      there is evidence the shell would refuse it too
     #|  then read "impact.uncertain": true means the effect list is not a closed
     #|  set, and an empty list must not be read as "touches nothing".
+    #|
+    #|  with --stream, stdout stays one JSON object per line: diagnostics and a
+    #|  final count go to stderr.
     #|
     #|developer modes (not part of the caller contract):
     #|  --scan      one line of status, then any issues
@@ -345,4 +385,122 @@ fn bench_corpus(rounds : Int) -> Unit {
   println(
     "parsed \{n} commands in \{ms} ms  (\{ms * 1000 / n} us/cmd, \{effects} effects)",
   )
+}
+
+///|
+/// stdin could not be read. That says nothing about the commands; the tool
+/// itself did not run.
+let io_exit_code : Int = 1
+
+///|
+/// Counters for a stream run, in a struct because the per-line answer has to
+/// move them and a closure cannot mutate a captured `mut` local.
+struct Counts {
+  mut reports : Int
+  mut errors : Int
+}
+
+///|
+/// Answer one framed line: exactly one line of output, either a report or a
+/// refusal. Nothing is skipped, so a caller can line up its input and its output
+/// without counting anything.
+async fn answer_stream_line(
+  line : String,
+  number : Int,
+  shell : String?,
+  probe : Bool,
+  counts : Counts,
+) -> Unit {
+  match @lib.decode_stream_line(line) {
+    Ok(bytes) => {
+      let report = if probe {
+        @lib.analyze_bytes_probe(bytes)
+      } else {
+        // The same two steps as the single-shot path: the dialect is chosen
+        // from the text, so a shebang still decides under `auto`, and the
+        // analysis runs on the bytes, so a NUL byte and invalid UTF-8 are
+        // treated the way the shell treats them. Anything else would make the
+        // two modes disagree about the same command.
+        let (text, _) = @lib.decode_command(bytes)
+        @lib.analyze_bytes_dialect(bytes, dialect_for(text, shell))
+      }
+      write_report_line(@json.to_json(report).stringify())
+      counts.reports += 1
+    }
+    Err(message) => {
+      @stdio.stderr.write("preshell: line \{number}: \{message}\n")
+      write_report_line(@lib.stream_error(message, number).stringify())
+      counts.errors += 1
+    }
+  }
+}
+
+///|
+/// One line of stdout, written straight to the descriptor.
+///
+/// `println` goes through a buffer: a single report is a few hundred bytes, so
+/// nothing appears until the buffer fills or the process exits -- which would
+/// make this mode batch-only and lose the thing it exists for. The async stdout
+/// has no such buffer, and mixing the two in one process would also reorder the
+/// output, so the stream path uses only this.
+async fn write_report_line(text : String) -> Unit {
+  @stdio.stdout.write(@utf8.encode(text + "\n"))
+}
+
+///|
+/// Read one JSON string per line from stdin and answer one line per request.
+///
+/// Each report is written as soon as it is analysed, so a caller that keeps this
+/// process alive gets the answer to a command before sending the next one. That
+/// is the entire reason the mode exists: process startup costs about two hundred
+/// times what the analysis does.
+async fn stream_reports(shell : String?, probe : Bool) -> Unit {
+  let framer = @lib.LineFramer::new()
+  let counts : Counts = { reports: 0, errors: 0, }
+  let chunk : FixedArray[Byte] = FixedArray::make(65536, b'\x00')
+  let mut number = 0
+  let mut read_failed = false
+  for ;; {
+    let n = @stdio.stdin.read(chunk, max_len=chunk.length()) catch { _ => -1 }
+    if n < 0 {
+      read_failed = true
+      break
+    }
+    if n == 0 {
+      break
+    }
+    for framed in framer.push(@bytes.from_fixedarray(chunk, len=n)) {
+      match framed {
+        @lib.FramedLine::Line(line) => {
+          number += 1
+          answer_stream_line(line, number, shell, probe, counts)
+        }
+        @lib.FramedLine::TooLong => {
+          // The line was dropped before it could be parsed, but it still
+          // occupied a line: refusing it out loud keeps the caller's numbering
+          // matching their input.
+          number += 1
+          let message = "line longer than \{@lib.max_stream_line()} bytes"
+          @stdio.stderr.write("preshell: line \{number}: \{message}\n")
+          write_report_line(@lib.stream_error(message, number).stringify())
+          counts.errors += 1
+        }
+      }
+    }
+  }
+  // A last line that ended at EOF rather than at a newline is still a request.
+  match framer.finish() {
+    Some(@lib.FramedLine::Line(line)) => {
+      number += 1
+      answer_stream_line(line, number, shell, probe, counts)
+    }
+    _ => ()
+  }
+  @stdio.stderr.write(
+    "preshell: \{counts.reports} reports, \{counts.errors} lines refused\n",
+  )
+  if read_failed {
+    @stdio.stderr.write("preshell: reading stdin failed\n")
+    exit(io_exit_code)
+  }
 }

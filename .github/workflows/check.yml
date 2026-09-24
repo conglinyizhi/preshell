@@ -64,5 +64,10 @@ jobs:
       - name: Malformed input probe
         run: bash tools/probe/malformed.sh
 
+      - name: Streaming mode
+        # 两件事都要真做到：不等 EOF 就能读到第一条（否则只是批量），
+        # 以及同一条命令在流式与单条两种模式下报告逐字节相同。
+        run: bash tools/probe/stream.sh
+
       - name: Short fuzz
         run: node tools/fuzz/mutate.js --n 400 --seed 1

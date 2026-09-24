@@ -72,6 +72,10 @@ jobs:
             exit 1
           fi
 
+      - name: Streaming mode
+        # 发布门也过一遍：流式模式坏掉的版本不该挂出去。
+        run: bash tools/probe/stream.sh
+
       - name: Package
         run: |
           TAG="${{ steps.tag.outputs.name }}"
