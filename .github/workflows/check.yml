@@ -50,6 +50,10 @@ jobs:
           }
           moon check --target native
 
+      - name: Manual generation
+        run: |
+          node tools/embed_manual.mjs --check
+
       - name: Differential against bash -n
         run: bash tools/corpus/run.sh | tee /tmp/corpus.txt
 

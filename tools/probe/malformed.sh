@@ -40,6 +40,16 @@ fi
 # 它与 --help、man 页是三份说同一件事的副本，缺字段意味着有人只改了其中一份。
 total=$((total + 1))
 spec_json=$("$BIN" --spec 2>/dev/null)
+total=$((total + 2))
+if ! "$BIN" --man 2>/dev/null | grep -q '^preshell$'; then
+  echo "  --man 没有输出纯文本手册"
+  bad=$((bad + 1))
+fi
+if ! "$BIN" --man-markdown 2>/dev/null | grep -q '^# preshell$'; then
+  echo "  --man-markdown 没有输出 Markdown 手册"
+  bad=$((bad + 1))
+fi
+
 if ! printf '%s' "$spec_json" | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }

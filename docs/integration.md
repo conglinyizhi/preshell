@@ -74,7 +74,9 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 
 上面这些不止在这份文档里：`preshell --help` 是同一份契约的速查（带地址），
 `preshell --spec` 是它的机读形式（JSON，给拿得到二进制、拿不到仓库的 agent 用），
-仓库里还有 `docs/preshell.1` 供 `man preshell`。三份说的是同一件事，改线格式要一起改。
+完整手册的唯一事实来源是 `docs/preshell.md`：二进制用 `preshell --man` 输出纯文本，
+用 `preshell --man-markdown` 输出 Markdown，`docs/preshell.1` 则供 `man preshell`。
+生成链由 `tools/embed_manual.mjs` 维护，不要直接编辑生成文件。
 
 GitHub Release 页面是变更记录，不重复 README 的项目介绍。发布 workflow 从 tag 之间的
 提交标题自动生成说明：`feat`、`fix`、`perf`、`refactor` 排在前面，所有详细记录折叠，

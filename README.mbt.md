@@ -51,10 +51,12 @@ around the report (`{"id":17,"report":{...}}`) so a parent with several workers
 can give each answer to the worker that asked, without trusting line order.
 The report inside stays byte-for-byte the report the single-shot mode prints.
 
-`preshell --help` carries the contract (modes, framing, exit codes, what a
+`preshell --help` carries the short contract (modes, framing, exit codes, what a
 refusal means, and the four things a caller must do); `preshell --spec` is the
-same contract as JSON, for a caller that has the binary and nothing else; the
-repository ships it as `docs/preshell.1` for `man preshell`.
+same contract as JSON, for a caller that has the binary and nothing else.
+The full manual is available from the binary as `preshell --man` (plain text) or
+`preshell --man-markdown` (for agents and document tools); `docs/preshell.md` is
+the single source, also generated as `docs/preshell.1` for `man preshell`.
 
 Every [release](https://github.com/conglinyizhi/preshell/releases) is a compact changelog generated from the commits between tags: user-visible changes come first, while detailed commit lists are folded and engineering maintenance is kept below. It carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by

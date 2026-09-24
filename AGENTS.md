@@ -208,14 +208,17 @@ tools/ci_local.py            # 全部
 tools/ci_local.py 语料 模糊   # 只跑名字匹配的步骤
 ```
 
-## 契约有三份副本，改一处要想三处
+## 契约与手册的事实来源
 
-`--help` 的文字、`--spec` 的 JSON、`man 1 preshell`（`docs/preshell.1`）说的是同一件事：
-模式、帧、退出码、拒绝对象的形状、调用方四条义务。**改线格式时必须一起改**，
-否则拿着二进制的人与拿着文档的人会看到两套说法。
+`--help` 是短契约，`--spec` 是机读契约，完整手册的唯一事实来源是 `docs/preshell.md`。
+`tools/embed_manual.mjs` 从这份 Markdown 生成：
 
-这三份是刻意重复的：二进制要能自证契约，不然只有二进制的人和 agent 只能靠行为反推。
-`tools/probe/malformed.sh` 会检查 `--spec` 仍是合法 JSON 且字段齐全。
+- `cmd/preshell/manual_generated.mbt`：二进制内置的 `--man` 纯文本和 `--man-markdown`
+- `docs/preshell.1`：系统 `man preshell` 使用的 roff 页面
+
+**不要直接编辑两个生成文件**。改手册先改 `docs/preshell.md`，再运行
+`node tools/embed_manual.mjs`，并确认生成文件无 diff。这样二进制、Markdown 和 man 页不会漂移。
+`tools/probe/malformed.sh` 会检查 `--spec`；发布前还要检查手册生成物是最新的。
 
 ## 发布前的四项准备
 

@@ -71,6 +71,14 @@ async fn main {
       usage()
       return
     }
+    if a == "--man" {
+      println(manual_plain)
+      return
+    }
+    if a == "--man-markdown" {
+      println(manual_markdown)
+      return
+    }
     if a == "--spec" {
       // 契约的机读形式。拿得到二进制、拿不到仓库的人和 agent，靠这个把接口问清楚。
       println(contract_json().stringify())
@@ -331,6 +339,9 @@ async fn usage() -> Unit {
     #|              {"id":...,"report":{...}}. Every line is answered, so input
     #|              and output line up one for one.
     #|  --spec      this contract in machine-readable form, as JSON
+    #|  --man       the full human manual, as plain text
+    #|  --man-markdown
+    #|              the full manual as Markdown, for agents and document tools
     #|  --version   tool and schema version, as JSON
     #|  --help      this text, on stderr
     #|
@@ -358,9 +369,13 @@ async fn usage() -> Unit {
     #|  3. ids must be unguessable, not sequential
     #|  4. do not let other child processes inherit the pipe fd (CLOEXEC)
     #|
+    #|the full manual:
+    #|  preshell --man            plain text, for reading
+    #|  preshell --man-markdown   Markdown, for agents and document tools
+    #|  man preshell              the same page, when preshell.1 is installed
+    #|
     #|docs: https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md
     #|      licence boundary, batch recipe, a runnable parent-process example
-    #|      (also installed as man 1 preshell)
     #|
     #|developer modes (not part of the caller contract):
     #|  --scan      one line of status, then any issues
