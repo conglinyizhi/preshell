@@ -11,7 +11,7 @@
 /// Codes as in commands_test.mbt: R read, W write, D delete, N network,
 /// S spawn, U unknown.
 fn ztouched(src : String) -> String {
-  let r = analyze_dialect(src, Zsh)
+  let r = @lib.analyze_dialect(src, Zsh)
   let parts : Array[String] = []
   for e in r.impact.effects {
     let tag = match e.kind {
@@ -31,18 +31,18 @@ fn ztouched(src : String) -> String {
 }
 
 ///|
-fn zstatus(src : String) -> ParseStatus {
-  analyze_dialect(src, Zsh).status
+fn zstatus(src : String) -> @lib.ParseStatus {
+  @lib.analyze_dialect(src, Zsh).status
 }
 
 ///|
 test "a shell name maps to a dialect, or to nothing we can read" {
-  debug_inspect(Dialect::from_shell_name("zsh"), content="Some(Zsh)")
-  debug_inspect(Dialect::from_shell_name("bash"), content="Some(Bash)")
-  debug_inspect(Dialect::from_shell_name("dash"), content="Some(Bash)")
+  debug_inspect(@lib.Dialect::from_shell_name("zsh"), content="Some(Zsh)")
+  debug_inspect(@lib.Dialect::from_shell_name("bash"), content="Some(Bash)")
+  debug_inspect(@lib.Dialect::from_shell_name("dash"), content="Some(Bash)")
   // Not "bash by default": an unmodelled shell is its own answer.
-  debug_inspect(Dialect::from_shell_name("fish"), content="None")
-  debug_inspect(Dialect::from_shell_name("python3"), content="None")
+  debug_inspect(@lib.Dialect::from_shell_name("fish"), content="None")
+  debug_inspect(@lib.Dialect::from_shell_name("python3"), content="None")
 }
 
 ///|
@@ -56,7 +56,7 @@ test "a parenthesis in word position is a glob in zsh and an error in bash" {
   for c in cases {
     debug_inspect(zstatus(c), content="Complete")
     // bash refuses all of them, so reading them as bash must say so.
-    debug_inspect(analyze(c).status, content="Unsupported")
+    debug_inspect(@lib.analyze(c).status, content="Unsupported")
   }
 }
 
@@ -80,7 +80,7 @@ test "a paren group is reported as a pattern, not as a literal path" {
   // `rm (a|b)` deletes the files matching a or b. Reporting the text as a
   // literal path would be a wrong answer rather than a missing one.
   inspect(ztouched("rm (a|b)"), content="D:(a|b) U:(a|b)")
-  let r = analyze_dialect("rm (a|b)", Zsh)
+  let r = @lib.analyze_dialect("rm (a|b)", Zsh)
   inspect(r.impact.uncertain, content="true")
 }
 
@@ -97,7 +97,7 @@ test "zsh closes a group without a separator before the brace" {
   // Measured: `{ echo a }` runs in zsh and is a syntax error in bash, because
   // zsh reads `}` as a reserved word even in argument position.
   debug_inspect(zstatus("{ echo a }"), content="Complete")
-  debug_inspect(analyze("{ echo a }").status, content="Unsupported")
+  debug_inspect(@lib.analyze("{ echo a }").status, content="Unsupported")
   debug_inspect(zstatus("{ echo a; }"), content="Complete")
   debug_inspect(
     zstatus("if x && { y || z }; then\n  e\nfi"),
@@ -127,7 +127,7 @@ test "always runs both blocks" {
 test "function definitions keep working, and only where zsh allows them" {
   debug_inspect(zstatus("foo() { echo x; }"), content="Complete")
   debug_inspect(
-    analyze_dialect("foo() { echo x; }", Zsh).status,
+    @lib.analyze_dialect("foo() { echo x; }", Zsh).status,
     content="Complete",
   )
   // `echo foo()` is a parse error in zsh as well, so it is a gap for us, not a
@@ -138,15 +138,15 @@ test "function definitions keep working, and only where zsh allows them" {
 ///|
 test "naming the dialect we are already reading is not a caveat" {
   // The shebang says zsh and we are reading zsh: nothing to warn about.
-  let same = analyze_dialect("#!/bin/zsh\necho hi", Zsh)
+  let same = @lib.analyze_dialect("#!/bin/zsh\necho hi", Zsh)
   inspect(same.issues.length(), content="0")
   // Reading the same file as bash still warns: that is the claim the note is
   // there to bound.
-  let other = analyze_dialect("#!/bin/zsh\necho hi", Bash)
+  let other = @lib.analyze_dialect("#!/bin/zsh\necho hi", Bash)
   debug_inspect(other.status, content="Unsupported")
   inspect(other.issues.length(), content="1")
   // A shell nobody models stays a caveat in either dialect.
-  let fish = analyze_dialect("#!/usr/bin/fish\necho hi", Zsh)
+  let fish = @lib.analyze_dialect("#!/usr/bin/fish\necho hi", Zsh)
   debug_inspect(fish.status, content="Unsupported")
 }
 
@@ -155,8 +155,8 @@ test "syntax evidence is per dialect" {
   // The one corroborated message was measured against bash. zsh accepts two of
   // the files that produced it, so under zsh the table is empty and nothing may
   // be upgraded to Invalid.
-  inspect(syntax_evidence(Bash).length(), content="1")
-  inspect(syntax_evidence(Zsh).length(), content="0")
+  inspect(@lib.syntax_evidence(Bash).length(), content="1")
+  inspect(@lib.syntax_evidence(Zsh).length(), content="0")
 }
 
 ///|
@@ -167,7 +167,7 @@ test "zsh's =() writes a temporary file, and its command still runs" {
   debug_inspect(zstatus("cat =(echo hi)"), content="Complete")
   inspect(ztouched("cat =(echo hi)"), content="W:/tmp/zshXXXXXX R:=() U:=()")
   inspect(
-    analyze_dialect("cat =(echo hi)", Zsh).impact.write_roots.join(" "),
+    @lib.analyze_dialect("cat =(echo hi)", Zsh).impact.write_roots.join(" "),
     content="/tmp",
   )
   // An assignment takes the same path: the file is created either way.
@@ -180,7 +180,7 @@ test "zsh's =() writes a temporary file, and its command still runs" {
   // A pipe is not a file, so `<( )` reports the shape and no write.
   inspect(ztouched("cat <(echo hi)"), content="R:<() U:<()")
   // bash has no construct here at all.
-  debug_inspect(analyze("cat =(echo hi)").status, content="Unsupported")
+  debug_inspect(@lib.analyze("cat =(echo hi)").status, content="Unsupported")
 }
 
 ///|
@@ -203,7 +203,7 @@ test "zsh's numeric glob is a pattern, not a redirection" {
   )
   // bash reads the same text as a redirection and refuses it.
   debug_inspect(
-    analyze("case 1 in <1-10>) echo y;; esac").status,
+    @lib.analyze("case 1 in <1-10>) echo y;; esac").status,
     content="Unsupported",
   )
 }
@@ -219,7 +219,7 @@ test "a brace inside an expansion nests only when zsh is not quoting" {
   debug_inspect(zstatus("echo \"${a//b/X{Y}/Z}\""), content="Complete")
   debug_inspect(zstatus("echo ${a//b/X{Y}/Z}"), content="Complete")
   debug_inspect(zstatus("echo ${a:-{}}"), content="Complete")
-  debug_inspect(analyze("echo ${a//b/X{Y}/Z}").status, content="Complete")
+  debug_inspect(@lib.analyze("echo ${a//b/X{Y}/Z}").status, content="Complete")
   // Both branches are pinned by a line from the corpus: this one comes from
   // Completion/Base/Completer/_expand, is unquoted, and has an escaped brace
   // inside a pattern group. Without the brace counting it ends early and the
@@ -254,8 +254,8 @@ test "a lone quote inside an expansion does not eat the closing brace" {
   debug_inspect(zstatus("x=\"${a\"b\\\"c\"}\""), content="Complete")
   // bash has no such rule for `'`: there it opens a quote and the file ends
   // inside it, so the same text read as bash must keep saying so.
-  debug_inspect(analyze("x=\"${a:-'}\"").status, content="Invalid")
-  debug_inspect(analyze("x=${a\"b\\\"c\"}").status, content="Complete")
+  debug_inspect(@lib.analyze("x=\"${a:-'}\"").status, content="Invalid")
+  debug_inspect(@lib.analyze("x=${a\"b\\\"c\"}").status, content="Complete")
   // Both shells refuse these, and the scanner must not round them off.
   debug_inspect(zstatus("x=${a:-'}"), content="Unsupported")
   debug_inspect(zstatus("x=${a\"b\\\"}"), content="Unsupported")
@@ -306,11 +306,11 @@ test "zsh spells case fallthrough ;| and refuses bash's ;;&" {
   )
   // bash takes `;;&` and has no `;|`.
   debug_inspect(
-    analyze("case gnu in\ngnu) echo A ;;& linux) echo B ;;\nesac").status,
+    @lib.analyze("case gnu in\ngnu) echo A ;;& linux) echo B ;;\nesac").status,
     content="Complete",
   )
   debug_inspect(
-    analyze("case gnu in\ngnu) echo A ;| linux) echo B ;;\nesac").status,
+    @lib.analyze("case gnu in\ngnu) echo A ;| linux) echo B ;;\nesac").status,
     content="Unsupported",
   )
 }
@@ -325,7 +325,7 @@ test "a separator may stand between the case subject and its in" {
   let classic = "case $x in\n  a) rm -rf /tmp/tA ;;\n  b|c) echo hi ;;\nesac"
   debug_inspect(zstatus(sep), content="Complete")
   debug_inspect(zstatus(classic), content="Complete")
-  debug_inspect(analyze(classic).status, content="Complete")
+  debug_inspect(@lib.analyze(classic).status, content="Complete")
   // Accepting the spelling is not enough: the facts have to be the same ones
   // the classic form gives, including the delete buried in a branch.
   inspect(ztouched(sep), content="U:$x D:/tmp/tA")
@@ -334,12 +334,12 @@ test "a separator may stand between the case subject and its in" {
   debug_inspect(zstatus("case x; in esac"), content="Complete")
   // bash has no `;` form: measured, `bash -n` refuses it, so reading it as bash
   // and saying Complete would be a claim the shell does not back up.
-  debug_inspect(analyze(sep).status, content="Unsupported")
-  debug_inspect(analyze("case x; in esac").status, content="Unsupported")
+  debug_inspect(@lib.analyze(sep).status, content="Unsupported")
+  debug_inspect(@lib.analyze("case x; in esac").status, content="Unsupported")
   // `;;` is one token and no separator: zsh refuses this, and so do we.
   debug_inspect(zstatus("case x;;in a) : ;; esac"), content="Unsupported")
   debug_inspect(
-    analyze("case x;;in a) : ;; esac").status,
+    @lib.analyze("case x;;in a) : ;; esac").status,
     content="Unsupported",
   )
 }
@@ -375,12 +375,12 @@ test "zsh takes more than one loop name" {
   ]
   for c in cases {
     debug_inspect(zstatus(c), content="Complete")
-    debug_inspect(analyze(c).status, content="Unsupported")
+    debug_inspect(@lib.analyze(c).status, content="Unsupported")
   }
   // One name stays common ground.
   debug_inspect(zstatus("for a in x y; do echo $a; done"), content="Complete")
   debug_inspect(
-    analyze("for a in x y; do echo $a; done").status,
+    @lib.analyze("for a in x y; do echo $a; done").status,
     content="Complete",
   )
 }
@@ -398,17 +398,17 @@ test "zsh's csh forms for and repeat run their body for real" {
   inspect(ztouched("for x ( a b ); do rm -rf $x; done"), content="D:$x U:$x")
   // bash has neither form.
   debug_inspect(
-    analyze("for x ( a b ); do :; done").status,
+    @lib.analyze("for x ( a b ); do :; done").status,
     content="Unsupported",
   )
   // bash has no `repeat`, so this is only a command named repeat followed by a
   // group -- which it accepts (bash -n rc=0), so Complete is the honest answer.
-  debug_inspect(analyze("repeat 3 { echo hi }").status, content="Complete")
+  debug_inspect(@lib.analyze("repeat 3 { echo hi }").status, content="Complete")
   // The classic shapes stay common ground.
   debug_inspect(zstatus("for x in a b; do echo $x; done"), content="Complete")
   debug_inspect(zstatus("for ((i=0;i<3;i++)); do :; done"), content="Complete")
   debug_inspect(
-    analyze("for x in a b; do echo $x; done").status,
+    @lib.analyze("for x in a b; do echo $x; done").status,
     content="Complete",
   )
 }
@@ -428,7 +428,7 @@ test "a brace body belongs to an if, a while or an until" {
     debug_inspect(zstatus(c), content="Complete")
     // bash refuses every one of these: there `{ : }` needs a separator before
     // the closing brace (`{ :; }`), so reading them as bash must say so.
-    debug_inspect(analyze(c).status, content="Unsupported")
+    debug_inspect(@lib.analyze(c).status, content="Unsupported")
   }
   // The body is audited, not merely accepted.
   inspect(ztouched("if [[ x ]] { rm -rf /tmp/ifx }"), content="D:/tmp/ifx")
@@ -509,7 +509,7 @@ test "zsh's anonymous function runs its body with its arguments" {
   debug_inspect(zstatus("()"), content="Unsupported")
   // bash has no anonymous function: every form above is a syntax error there.
   for c in ["() { echo hi }", "(){ echo hi }", "() (echo sub)"] {
-    debug_inspect(analyze(c).status, content="Unsupported")
+    debug_inspect(@lib.analyze(c).status, content="Unsupported")
   }
   // An empty subshell with a body word is still fine where the shells agree.
   debug_inspect(zstatus("( : )"), content="Complete")
@@ -554,7 +554,7 @@ test "the conditional keyword is a word, not a bracket expression" {
   // Measured: bash and zsh agree on all of these.
   debug_inspect(zstatus("if [[ \"$x\" == a ]] then :; fi"), content="Complete")
   debug_inspect(
-    analyze("if [[ \"$x\" == a ]] then :; fi").status,
+    @lib.analyze("if [[ \"$x\" == a ]] then :; fi").status,
     content="Complete",
   )
   debug_inspect(zstatus("if [[ -f x ]] then :; fi"), content="Complete")
@@ -579,33 +579,33 @@ test "the conditional keyword is a word, not a bracket expression" {
 /// bare command the two grammars read the same way is not one either; a
 /// fallback, or a reading the other grammar disagrees with, is.
 test "probe reads a declared zsh script as zsh, quietly" {
-  let r = analyze_probe("#!/bin/zsh\necho hi")
+  let r = @lib.analyze_probe("#!/bin/zsh\necho hi")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="0")
   inspect(r.impact.uncertain, content="false")
-  debug_inspect(probe_dialect("#!/bin/zsh\necho hi"), content="Zsh")
+  debug_inspect(@lib.probe_dialect("#!/bin/zsh\necho hi"), content="Zsh")
 }
 
 ///|
 test "probe falls back to zsh only when bash cannot read the input" {
   // `{ echo a }` is a zsh group and a bash syntax error, so this is the
   // fallback path. The note names the grammar that answered.
-  let r = analyze_probe("{ echo a }")
+  let r = @lib.analyze_probe("{ echo a }")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].kind, content="Note")
   inspect(r.issues[0].message.contains("zsh"), content="true")
   inspect(r.impact.uncertain, content="true")
-  debug_inspect(probe_dialect("{ echo a }"), content="Zsh")
+  debug_inspect(@lib.probe_dialect("{ echo a }"), content="Zsh")
 }
 
 ///|
 test "probe is quiet when bash is already the grammar" {
-  let r = analyze_probe("echo hi")
+  let r = @lib.analyze_probe("echo hi")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="0")
   inspect(r.impact.uncertain, content="false")
-  debug_inspect(probe_dialect("echo hi"), content="Bash")
+  debug_inspect(@lib.probe_dialect("echo hi"), content="Bash")
 }
 
 ///|
@@ -613,7 +613,7 @@ test "probe names the dialect when both grammars parse but disagree" {
   // `>!` is the measured ambiguity: bash redirects to a file called `!`, zsh
   // redirects to the file that follows. Both readings are Complete, so only the
   // note says which one this report is. The first grammar still wins.
-  let r = analyze_probe("echo hi >! /tmp/out")
+  let r = @lib.analyze_probe("echo hi >! /tmp/out")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].kind, content="Note")
@@ -628,7 +628,7 @@ test "probe overrides a declaration only when that grammar fails" {
   // The file says sh, so bash is the declared grammar; it cannot parse the
   // group and zsh can. The note has to say the answer is not the grammar the
   // file asks for.
-  let r = analyze_probe("#!/bin/sh\n{ echo a }")
+  let r = @lib.analyze_probe("#!/bin/sh\n{ echo a }")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].kind, content="Note")
@@ -640,18 +640,18 @@ test "probe returns the first result when nothing parses" {
   // Neither grammar accepts a dangling `then`, and the answer must stay the
   // failure bash produced rather than being dressed up as a success.
   let src = "if true; then"
-  let first = analyze(src)
-  let r = analyze_probe(src)
+  let first = @lib.analyze(src)
+  let r = @lib.analyze_probe(src)
   debug_inspect(first.status, content="Unsupported")
   debug_inspect(r.status, content="Unsupported")
   inspect(r.issues.length(), content=first.issues.length().to_string())
   inspect(r.impact.uncertain, content="true")
-  debug_inspect(probe_dialect(src), content="Bash")
+  debug_inspect(@lib.probe_dialect(src), content="Bash")
 }
 
 ///|
 test "probe from bytes takes the same path as probe from text" {
-  let r = analyze_bytes_probe(b"echo hi >! /tmp/out\n")
+  let r = @lib.analyze_bytes_probe(b"echo hi >! /tmp/out\n")
   debug_inspect(r.status, content="Complete")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].kind, content="Note")
@@ -673,7 +673,7 @@ test "repeat takes a separator before its body" {
   inspect(ztouched("repeat 2\ndo rm -rf /tmp/rp; done"), content="D:/tmp/rp")
   // bash has no repeat at all.
   debug_inspect(
-    analyze("repeat 2; do rm -rf /tmp/rp; done").status,
+    @lib.analyze("repeat 2; do rm -rf /tmp/rp; done").status,
     content="Unsupported",
   )
 }
@@ -689,12 +689,12 @@ test "a backquote is read by the shell that opened it" {
   // A zsh-only loop is legal inside a backquote, and only for zsh.
   debug_inspect(zstatus("x=`for i j in a b; do :; done`"), content="Complete")
   debug_inspect(
-    analyze("x=`for i j in a b; do :; done`").status,
+    @lib.analyze("x=`for i j in a b; do :; done`").status,
     content="Unsupported",
   )
   // Word-position `(` is zsh's glob qualifier and a bash syntax error.
   debug_inspect(zstatus("x=`echo *(.)`"), content="Complete")
-  debug_inspect(analyze("x=`echo *(.)`").status, content="Unsupported")
+  debug_inspect(@lib.analyze("x=`echo *(.)`").status, content="Unsupported")
   // The dialect has to travel through nesting as well.
   inspect(ztouched("x=`cat \\`echo >! g\\``"), content="W:g R:$() U:$()")
 }
@@ -743,7 +743,7 @@ test "arithmetic keeps counting every paren, not just the leading ones" {
       "(( a + (b | c) ))", "(( a + (b) > (c) ))", "for (( i = (a > b) ? 1 : 2; i < 3; i++ )); do :; done",
     ] {
     debug_inspect(zstatus(c), content="Complete")
-    debug_inspect(analyze(c).status, content="Complete")
+    debug_inspect(@lib.analyze(c).status, content="Complete")
   }
   // The failure used to swallow the whole conditional: no Delete at all.
   inspect(
@@ -768,8 +768,8 @@ test "an unmatched right brace is pushed back the way zsh does" {
   debug_inspect(zstatus("echo a}"), content="Unsupported")
   debug_inspect(zstatus("echo }"), content="Unsupported")
   // bash has no such rule: there all of these are ordinary text.
-  debug_inspect(analyze("echo a}").status, content="Complete")
-  debug_inspect(analyze("echo {a,b}").status, content="Complete")
+  debug_inspect(@lib.analyze("echo a}").status, content="Complete")
+  debug_inspect(@lib.analyze("echo {a,b}").status, content="Complete")
   // Guards: brace expansion, the zsh brace parameters and quoting stay intact.
   debug_inspect(zstatus("for i in {1..3}; do :; done"), content="Complete")
   debug_inspect(zstatus("a=({1..3})"), content="Complete")

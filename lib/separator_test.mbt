@@ -7,8 +7,8 @@
 /// an Allow and a fabricated effect list for a line bash rejects. Tightening it
 /// then over-corrected and rejected valid input (gaps went 12 -> 81), so both
 /// directions are locked down here.
-fn status_of(src : String) -> ParseStatus {
-  analyze(src).status
+fn status_of(src : String) -> @lib.ParseStatus {
+  @lib.analyze(src).status
 }
 
 ///|
@@ -73,9 +73,9 @@ test "a runner hands control over, and we say so instead of guessing" {
   // A runner with nothing named (`cargo run` compiles the package's own
   // binary): the delegate is a hole, not a word.
   inspect(touched("cargo run --release"), content="S:what cargo runs")
-  inspect(analyze("go run main.go").impact.uncertain, content="true")
+  inspect(@lib.analyze("go run main.go").impact.uncertain, content="true")
   // A delegation is a fact, so the command is still Complete.
-  debug_inspect(analyze("go run main.go").status, content="Complete")
+  debug_inspect(@lib.analyze("go run main.go").status, content="Complete")
   // Same tools, not delegating: the measured tables still apply.
   inspect(
     touched("npm install"),
@@ -88,7 +88,7 @@ test "a runner hands control over, and we say so instead of guessing" {
   // And when it is neither a delegation nor modelled (`go test`), the answer
   // stays the honest empty one.
   inspect(touched("go test ./..."), content="")
-  inspect(analyze("go test ./...").impact.uncertain, content="true")
+  inspect(@lib.analyze("go test ./...").impact.uncertain, content="true")
 }
 
 ///|
@@ -99,13 +99,13 @@ test "a connector is followed by a command, not by another connector" {
     c in [
       "true &&& x", "true ||| x", "true && || x", "true | | x", "true & & x", "echo a >>&2",
     ] {
-    debug_inspect(analyze(c).status, content="Unsupported")
+    debug_inspect(@lib.analyze(c).status, content="Unsupported")
   }
   // zsh is the lenient one about empty commands between separators, and about
   // its own `>>&` spelling; bash is strict on both.
   debug_inspect(zstatus("true && ; x"), content="Complete")
   debug_inspect(zstatus("true ; ; x"), content="Complete")
-  debug_inspect(analyze("true && ; x").status, content="Unsupported")
+  debug_inspect(@lib.analyze("true && ; x").status, content="Unsupported")
   debug_inspect(zstatus("echo a >>&2"), content="Complete")
   // A redirection after a connector starts a redirect-only command, which is
   // legal in both shells, and the ordinary connectors keep working.
@@ -113,6 +113,6 @@ test "a connector is followed by a command, not by another connector" {
     c in [
       "true && > f", "true && (x)", "true && { x; }", "echo a &>> f", "echo a >> f",
     ] {
-    debug_inspect(analyze(c).status, content="Complete")
+    debug_inspect(@lib.analyze(c).status, content="Complete")
   }
 }

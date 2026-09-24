@@ -17,7 +17,7 @@ test "read-only subcommands report no writes" {
       "git blame a.txt", "git clean -n", "git clean --dry-run",
     ] {
     inspect(touched(c), content="R:.")
-    debug_inspect(analyze(c).status, content="Complete")
+    debug_inspect(@lib.analyze(c).status, content="Complete")
   }
 }
 
@@ -29,7 +29,7 @@ test "clean deletes only when it was asked to" {
   inspect(touched("git clean -fdx"), content="R:. D:.")
   inspect(touched("git clean -fd"), content="R:. D:.")
   inspect(touched("git clean"), content="R:.")
-  inspect(analyze("git clean -fdx").impact.uncertain, content="true")
+  inspect(@lib.analyze("git clean -fdx").impact.uncertain, content="true")
 }
 
 ///|
@@ -40,7 +40,7 @@ test "working-tree writers say the set is not closed" {
   inspect(touched("git reset --hard"), content="W:. W:.git")
   inspect(touched("git stash"), content="W:. W:.git W:.git/refs/stash")
   inspect(touched("git pull"), content="W:. W:.git")
-  inspect(analyze("git reset --hard").impact.uncertain, content="true")
+  inspect(@lib.analyze("git reset --hard").impact.uncertain, content="true")
 }
 
 ///|
@@ -75,7 +75,7 @@ test "clone reads its source and writes its destination" {
     content="N:example.com W:dst",
   )
   // The destination derives from the source name, so it is a hole.
-  inspect(analyze("git clone /src").impact.uncertain, content="true")
+  inspect(@lib.analyze("git clone /src").impact.uncertain, content="true")
 }
 
 ///|
@@ -87,7 +87,7 @@ test "a remote name is a hole, and an unknown subcommand is unmodelled" {
     content="W:.git N:example.com",
   )
   // A subcommand with no entry stays unmodelled rather than half-modelled.
-  let unknown = analyze("git filter-branch --all")
+  let unknown = @lib.analyze("git filter-branch --all")
   inspect(unknown.impact.uncertain, content="true")
-  debug_inspect(analyze("git status").impact.uncertain, content="false")
+  debug_inspect(@lib.analyze("git status").impact.uncertain, content="false")
 }

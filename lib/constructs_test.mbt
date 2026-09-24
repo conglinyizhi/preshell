@@ -2,8 +2,8 @@
 /// Constructs that were gaps until the parser learned them. Each one is here
 /// because a corpus run showed it failing on valid bash, and the shape of the
 /// parse matters as much as the accept/reject answer.
-fn status_of_construct(src : String) -> ParseStatus {
-  analyze(src).status
+fn status_of_construct(src : String) -> @lib.ParseStatus {
+  @lib.analyze(src).status
 }
 
 ///|
@@ -24,26 +24,26 @@ test "array subscripts with quotes and brackets inside" {
 ///|
 test "a subscript is a subscript, and a bracket without `=` stays a glob" {
   match first_cmd("arr[0]=x") {
-    Cmd::Simple(s) => {
+    @lib.Cmd::Simple(s) => {
       inspect(s.assigns[0].name, content="arr")
       debug_inspect(s.assigns[0].index, content="[Lit(\"0\")]")
     }
     _ => fail("expected an assignment")
   }
   match first_cmd("echo a[0]") {
-    Cmd::Simple(s) => inspect(s.words[1].has_glob(), content="true")
+    @lib.Cmd::Simple(s) => inspect(s.words[1].has_glob(), content="true")
     _ => fail("expected a simple command")
   }
 }
 
 ///|
 test "a hole inside a subscript is not a clean result" {
-  let r = analyze("arr[$i]=1")
+  let r = @lib.analyze("arr[$i]=1")
   // The hole is in the target, so the effect itself is uncertain.
   debug_inspect(r.impact.uncertain, content="true")
   debug_inspect(r.impact.effects[0].kind, content="Unknown")
   // A literal subscript stays clean.
-  debug_inspect(analyze("arr[0]=1").impact.uncertain, content="false")
+  debug_inspect(@lib.analyze("arr[0]=1").impact.uncertain, content="false")
 }
 
 ///|
@@ -58,7 +58,7 @@ test "compound commands carry their own redirections" {
     }
   }
   // And the redirect has to show up in the summary, not just parse.
-  let im = impact(parse("(echo a) > /tmp/o").0)
+  let im = @lib.impact(@lib.parse("(echo a) > /tmp/o").0)
   inspect(
     im.effects.any(fn(e) { e.kind is Write && e.target == "/tmp/o" }),
     content="true",
@@ -93,7 +93,7 @@ test "an unclosed bracket stays on its own line" {
   debug_inspect(status_of_construct(src), content="Complete")
   inspect(seq_of(src).items.length(), content="2")
   match first_cmd(src) {
-    Cmd::Simple(s) => inspect(s.words[1].has_glob(), content="true")
+    @lib.Cmd::Simple(s) => inspect(s.words[1].has_glob(), content="true")
     _ => fail("expected a simple command")
   }
 }
@@ -101,7 +101,7 @@ test "an unclosed bracket stays on its own line" {
 ///|
 test "issues carry the line they happened on" {
   // 没有结尾换行：EOF 落在第 2 行，也就是命令替换开始的那一行。
-  let r = analyze("echo a\necho $(date")
+  let r = @lib.analyze("echo a\necho $(date")
   inspect(r.issues.length(), content="1")
   debug_inspect(r.issues[0].line, content="2")
 }

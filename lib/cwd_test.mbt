@@ -3,12 +3,12 @@
 /// caller cannot resolve that itself because the move happens inside the
 /// command line. Mis-scoping this is the difference between "touches /tmp/x"
 /// and "touches some x somewhere".
-fn impact_of_cwd(src : String) -> Impact {
-  analyze(src).impact
+fn impact_of_cwd(src : String) -> @lib.Impact {
+  @lib.analyze(src).impact
 }
 
 ///|
-fn path_effects(im : Impact) -> Array[String] {
+fn path_effects(im : @lib.Impact) -> Array[String] {
   let out : Array[String] = []
   for e in im.effects {
     match e.kind {

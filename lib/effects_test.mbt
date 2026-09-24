@@ -1,11 +1,11 @@
 ///|
-fn impact_of(src : String) -> Impact {
-  let (seq, _) = parse(src)
-  impact(seq)
+fn impact_of(src : String) -> @lib.Impact {
+  let (seq, _) = @lib.parse(src)
+  @lib.impact(seq)
 }
 
 ///|
-fn targets_of(im : Impact, kind : EffectKind) -> Array[String] {
+fn targets_of(im : @lib.Impact, kind : @lib.EffectKind) -> Array[String] {
   let out : Array[String] = []
   for e in im.effects {
     if e.kind == kind {
@@ -82,11 +82,11 @@ test "extraction targets are read from the option table" {
 
 ///|
 test "parent_dir normalizes" {
-  inspect(parent_dir("build/out.o"), content="build")
-  inspect(parent_dir("a/b/"), content="a/b")
-  inspect(parent_dir("x"), content=".")
-  inspect(parent_dir("/etc/passwd"), content="/etc")
-  inspect(parent_dir("./a/../b/c"), content="b")
+  inspect(@lib.parent_dir("build/out.o"), content="build")
+  inspect(@lib.parent_dir("a/b/"), content="a/b")
+  inspect(@lib.parent_dir("x"), content=".")
+  inspect(@lib.parent_dir("/etc/passwd"), content="/etc")
+  inspect(@lib.parent_dir("./a/../b/c"), content="b")
 }
 
 ///|
@@ -140,9 +140,9 @@ test "a hash inside arithmetic is an operand, not a comment" {
   // Measured: both bash and zsh parse `(( 1 + 2 # c ))` and `(( #x == 97 ))`
   // (zsh reads `#x` as the character code of the first character). Reading the
   // `#` as a comment left the arithmetic open, so both dialects reported a gap.
-  debug_inspect(analyze("(( 1 + 2 # c ))").status, content="Complete")
+  debug_inspect(@lib.analyze("(( 1 + 2 # c ))").status, content="Complete")
   inspect(ztouched("x=abc; (( #x == 97 ))"), content="")
-  debug_inspect(analyze("(( ##$chr ))").status, content="Complete")
+  debug_inspect(@lib.analyze("(( ##$chr ))").status, content="Complete")
   // Outside arithmetic the comment still hides what follows, which is what
   // keeps the flag from leaking past the closing parens.
   inspect(touched("echo a # > /tmp/x"), content="")
@@ -155,12 +155,15 @@ test "a quoted double bracket is a string, not a condition" {
   // The `[[` keyword rule is positional and quote-sensitive: inside quotes it
   // is ordinary text. Missing the quote guard made `x="[[y]"` a parse failure
   // in both dialects, which zsh accepts.
-  debug_inspect(analyze("x=\"[[y]\"").status, content="Complete")
-  debug_inspect(analyze_dialect("x=\"[[y]\"", Zsh).status, content="Complete")
-  debug_inspect(analyze("echo \"[[y]\"").status, content="Complete")
+  debug_inspect(@lib.analyze("x=\"[[y]\"").status, content="Complete")
+  debug_inspect(
+    @lib.analyze_dialect("x=\"[[y]\"", Zsh).status,
+    content="Complete",
+  )
+  debug_inspect(@lib.analyze("echo \"[[y]\"").status, content="Complete")
   // The keyword itself still works, and a bracket expression still globs.
   debug_inspect(
-    analyze("if [[ \"$x\" == a ]] then :; fi").status,
+    @lib.analyze("if [[ \"$x\" == a ]] then :; fi").status,
     content="Complete",
   )
   inspect(touched("rm [[:alpha:]]"), content="D:[[:alpha:]] U:[[:alpha:]]")
@@ -177,7 +180,7 @@ test "a command substitution inside [[ ]] still runs" {
   inspect(touched("[[ -n $(cat a) && $(cat b) ]]"), content="R:a R:b")
   // A condition with no substitution stays quiet.
   inspect(touched("[[ -f x ]]"), content="")
-  debug_inspect(analyze("[[ -f x ]]").status, content="Complete")
+  debug_inspect(@lib.analyze("[[ -f x ]]").status, content="Complete")
 }
 
 ///|
@@ -188,7 +191,7 @@ test "quotes make process substitution and globs literal" {
   inspect(touched("echo \"<(a)\""), content="")
   inspect(touched("rm \"*\""), content="D:*")
   debug_inspect(
-    analyze_dialect("local a=\"<({[\" b=\">)}]\"", Zsh).status,
+    @lib.analyze_dialect("local a=\"<({[\" b=\">)}]\"", Zsh).status,
     content="Complete",
   )
   // Unquoted, both are what they look like.

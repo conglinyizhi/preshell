@@ -10,7 +10,7 @@
 ///
 /// Codes: R read, W write, D delete, N network, S spawn, U unknown.
 fn touched(src : String) -> String {
-  let r = analyze(src)
+  let r = @lib.analyze(src)
   let parts : Array[String] = []
   for e in r.impact.effects {
     let tag = match e.kind {
@@ -31,7 +31,7 @@ fn touched(src : String) -> String {
 
 ///|
 fn roots_of(src : String) -> String {
-  analyze(src).impact.write_roots.join(" ")
+  @lib.analyze(src).impact.write_roots.join(" ")
 }
 
 ///|
@@ -189,7 +189,7 @@ test "programs outside the modelled set are marked, not guessed" {
       "git filter-branch --all", "node build.js", "rustc -O x.rs", "python3 -m pytest",
       "cmake ..",
     ] {
-    let r = analyze(src)
+    let r = @lib.analyze(src)
     if touched(src) != "" {
       fail("\{src}: expected no path effects, got \{touched(src)}")
     }
@@ -208,17 +208,17 @@ test "a for loop may put its in on the next line" {
   // Measured: bash and zsh both accept `for x` / `in x` / `do ... done` split
   // across lines, and the body still runs.
   debug_inspect(
-    analyze("for x\nin a\ndo\nrm -f b\ndone").status,
+    @lib.analyze("for x\nin a\ndo\nrm -f b\ndone").status,
     content="Complete",
   )
   inspect(touched("for x\nin a\ndo\nrm -f b\ndone"), content="D:b")
   debug_inspect(
-    analyze_dialect("for x\nin a\ndo\nrm -f b\ndone", Zsh).status,
+    @lib.analyze_dialect("for x\nin a\ndo\nrm -f b\ndone", Zsh).status,
     content="Complete",
   )
   // The body-less form is still fine.
   debug_inspect(
-    analyze("for x\nin a b\ndo\n:\ndone").status,
+    @lib.analyze("for x\nin a b\ndo\n:\ndone").status,
     content="Complete",
   )
 }
@@ -232,15 +232,15 @@ test "a named descriptor prefix before a redirect" {
   inspect(touched("exec {fd}>out"), content="W:out")
   inspect(touched("{fd}<file"), content="R:file")
   debug_inspect(
-    analyze("while :; do :; done {fd}<file").status,
+    @lib.analyze("while :; do :; done {fd}<file").status,
     content="Complete",
   )
   debug_inspect(
-    analyze_dialect("while :; do :; done {fd}<file", Zsh).status,
+    @lib.analyze_dialect("while :; do :; done {fd}<file", Zsh).status,
     content="Unsupported",
   )
   // A brace word that is not a valid name stays an ordinary word.
-  debug_inspect(analyze("echo {not a fd}").status, content="Complete")
+  debug_inspect(@lib.analyze("echo {not a fd}").status, content="Complete")
 }
 
 ///|
@@ -284,7 +284,7 @@ test "an option value is never an operand" {
     if got != want {
       fail("\{src}: want \{want}, got \{got}")
     }
-    if analyze(src).impact.uncertain {
+    if @lib.analyze(src).impact.uncertain {
       fail("\{src}: a static option value must not make the report uncertain")
     }
   }
@@ -457,7 +457,7 @@ test "tar names its archive and reads its members" {
   )
   // An archive name that is a hole keeps the write uncertain.
   inspect(touched("tar -czf $A dir"), content="W:$A R:dir")
-  if !analyze("tar -czf $A dir").impact.uncertain {
+  if !@lib.analyze("tar -czf $A dir").impact.uncertain {
     fail("a hole in the archive name must make the report uncertain")
   }
 }
@@ -480,7 +480,7 @@ test "tar reports a cluster it cannot place instead of guessing" {
     touched("tar dir"),
     content="U:tar: old-style option cluster not modelled",
   )
-  if !analyze("tar dir").impact.uncertain {
+  if !@lib.analyze("tar dir").impact.uncertain {
     fail("an unmodelled cluster must make the report uncertain")
   }
 }
@@ -547,7 +547,7 @@ test "a compressor derives its product and removes the source" {
     touched("gzip -r sub"),
     content="R:sub U:gzip -r: the products are the entries inside each directory",
   )
-  if !analyze("gzip -r sub").impact.uncertain {
+  if !@lib.analyze("gzip -r sub").impact.uncertain {
     fail("products derived per directory entry must be uncertain")
   }
 }
@@ -581,7 +581,7 @@ test "a wrapper passes its command through" {
   // A wrapper that runs nothing touches nothing, and says so cleanly.
   for src in ["env", "command -v rm", "nohup", "timeout"] {
     inspect(touched(src), content="")
-    if analyze(src).impact.uncertain {
+    if @lib.analyze(src).impact.uncertain {
       fail("\{src}: nothing runs, so nothing is uncertain")
     }
   }
@@ -594,7 +594,7 @@ test "a wrapper passes its command through" {
   // working directory of the report must not move.
   inspect(touched("env cd /tmp"), content="")
   inspect(touched("env cd /tmp && rm f.txt"), content="D:f.txt")
-  if !analyze("env cd /tmp").impact.uncertain {
+  if !@lib.analyze("env cd /tmp").impact.uncertain {
     fail("a command env cannot run must stay uncertain")
   }
 }
@@ -615,7 +615,7 @@ test "xargs passes what it was given and marks what it appends" {
     touched("xargs -a list rm"),
     content="R:list U:xargs: the argument list comes from its input",
   )
-  if !analyze("xargs rm").impact.uncertain {
+  if !@lib.analyze("xargs rm").impact.uncertain {
     fail("the words xargs appends are unknown, so the report is uncertain")
   }
   // -I substitutes the input into a placeholder, which is not a path: without

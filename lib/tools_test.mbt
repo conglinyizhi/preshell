@@ -21,7 +21,7 @@ test "find reads what it walks and deletes a set decided by its expression" {
   // the hole standing for each match.
   inspect(touched("find sub -exec rm -rf {} ;"), content="R:sub D:{} U:{}")
   inspect(
-    analyze("find . -name '*.tmp' -delete").impact.uncertain,
+    @lib.analyze("find . -name '*.tmp' -delete").impact.uncertain,
     content="true",
   )
 }
@@ -36,7 +36,10 @@ test "sqlite3 opens the database file, and may well create it" {
     touched("sqlite3 t.db 'insert into x values (1)'"),
     content="R:t.db W:t.db",
   )
-  inspect(analyze("sqlite3 t.db 'select 1'").impact.uncertain, content="true")
+  inspect(
+    @lib.analyze("sqlite3 t.db 'select 1'").impact.uncertain,
+    content="true",
+  )
   // No file argument means an in-memory database: nothing to report.
   inspect(touched("sqlite3"), content="")
 }
@@ -47,7 +50,7 @@ test "make reports the directory it builds in" {
   inspect(touched("make -C sub"), content="R:sub W:sub")
   inspect(touched("make -f other.mk"), content="R:. R:other.mk W:.")
   // The build output is decided by rules the tool does not read.
-  inspect(analyze("make -C sub").impact.uncertain, content="true")
+  inspect(@lib.analyze("make -C sub").impact.uncertain, content="true")
 }
 
 ///|
@@ -69,7 +72,7 @@ test "a container mount hands over the host path" {
   inspect(touched("docker build -t x ."), content="R:. N:container registry")
   // An unmodelled subcommand stays unmodelled.
   debug_inspect(
-    analyze("docker compose up").impact.effects[0].modeled,
+    @lib.analyze("docker compose up").impact.effects[0].modeled,
     content="false",
   )
 }

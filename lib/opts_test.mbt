@@ -16,7 +16,7 @@ fn scan_items(xs : Array[String]) -> Array[(String, Bool)] {
 }
 
 ///|
-fn kind_name(v : OptVal) -> String {
+fn kind_name(v : @lib.OptVal) -> String {
   match v {
     NoVal => "NoVal"
     NotPath => "NotPath"
@@ -30,11 +30,11 @@ fn kind_name(v : OptVal) -> String {
 
 ///|
 fn scan_render(n : String, args : Array[String]) -> String {
-  let po = opts_of(n)
-  let scan = if has_table(po) {
-    scan_args(po, scan_items(args))
+  let po = @lib.opts_of(n)
+  let scan = if @lib.has_table(po) {
+    @lib.scan_args(po, scan_items(args))
   } else {
-    scan_legacy(scan_items(args))
+    @lib.scan_legacy(scan_items(args))
   }
   let vals : Array[String] = []
   for v in scan.values {
@@ -160,14 +160,14 @@ test "programs without a table keep the pre-table split" {
 test "the -t destination joins the operand basename" {
   // Measured: `cp -t destdir sub/a.txt` writes destdir/a.txt, and
   // `cp -t destdir/ a.txt` writes destdir/a.txt without a doubled slash.
-  inspect(join_dir("destdir", "sub/a.txt"), content="destdir/a.txt")
-  inspect(join_dir("destdir/", "a.txt"), content="destdir/a.txt")
-  inspect(join_dir("d", "./a.txt"), content="d/a.txt")
-  inspect(join_dir("d", "/x/y.txt"), content="d/y.txt")
-  inspect(join_dir("d", "a.txt/"), content="d/a.txt")
+  inspect(@lib.join_dir("destdir", "sub/a.txt"), content="destdir/a.txt")
+  inspect(@lib.join_dir("destdir/", "a.txt"), content="destdir/a.txt")
+  inspect(@lib.join_dir("d", "./a.txt"), content="d/a.txt")
+  inspect(@lib.join_dir("d", "/x/y.txt"), content="d/y.txt")
+  inspect(@lib.join_dir("d", "a.txt/"), content="d/a.txt")
   // A directory that is a hole is kept dynamic, so `cp -t $D a.txt` writes a
   // target nobody can name yet.
-  let scan = scan_args(opts_of("cp"), [
+  let scan = @lib.scan_args(@lib.opts_of("cp"), [
     ("-t", false),
     ("$D", true),
     ("a.txt", false),
@@ -182,13 +182,19 @@ test "the -t destination joins the operand basename" {
 
 ///|
 test "value_of finds the appended value for the derived write" {
-  let scan = scan_args(
-    opts_of("sed"),
+  let scan = @lib.scan_args(
+    @lib.opts_of("sed"),
     scan_items(["-i.bak", "s/a/b/", "data.txt"]),
   )
-  debug_inspect(value_of(scan, ["-i", "--in-place"]), content="Some(\".bak\")")
-  let bare = scan_args(opts_of("sed"), scan_items(["-i", "s/a/b/", "data.txt"]))
-  debug_inspect(value_of(bare, ["-i", "--in-place"]), content="None")
+  debug_inspect(
+    @lib.value_of(scan, ["-i", "--in-place"]),
+    content="Some(\".bak\")",
+  )
+  let bare = @lib.scan_args(
+    @lib.opts_of("sed"),
+    scan_items(["-i", "s/a/b/", "data.txt"]),
+  )
+  debug_inspect(@lib.value_of(bare, ["-i", "--in-place"]), content="None")
 }
 
 ///|
@@ -212,13 +218,13 @@ test "tar's archive and directory values leave the operand side" {
   )
   // A value that is a hole stays a hole: the archive of `tar -czf $A dir` is
   // a name nobody can write down yet.
-  let scan = scan_args(opts_of("tar"), [
+  let scan = @lib.scan_args(@lib.opts_of("tar"), [
     ("-czf", false),
     ("$A", true),
     ("dir", false),
   ])
   debug_inspect(
-    value_entry_of(scan, ["-f", "--file"]),
+    @lib.value_entry_of(scan, ["-f", "--file"]),
     content="Some({ opt: \"-f\", val: Path, text: \"$A\", dynamic: true })",
   )
 }

@@ -3,8 +3,8 @@
 /// than a wrong answer: a missing terminator that silently turns the rest of
 /// the input into body, which would make the audit report a clean result for a
 /// region it never looked at.
-fn seq_of(src : String) -> Seq {
-  parse(src).0
+fn seq_of(src : String) -> @lib.Seq {
+  @lib.parse(src).0
 }
 
 ///|
@@ -16,7 +16,7 @@ test "`<<-` strips tabs from the delimiter as well as the body" {
   let seq = seq_of(src)
   inspect(seq.items.length(), content="2")
   match first_cmd(src) {
-    Cmd::Simple(s) =>
+    @lib.Cmd::Simple(s) =>
       debug_inspect(s.redirects[0].body, content="Some(\"hello\\n\")")
     _ => fail("expected a simple command")
   }
@@ -49,7 +49,7 @@ test "unclosed constructs are not silently accepted" {
     "case x in a) echo y", "f() { echo x;", "echo $(date",
   ]
   for src in cases {
-    let r = analyze(src)
+    let r = @lib.analyze(src)
     if r.status is Complete {
       fail("accepted an unclosed construct: \{src}")
     }
