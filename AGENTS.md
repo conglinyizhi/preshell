@@ -185,6 +185,17 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 已知还没修的一类：二元算符后面又跟一个算符（`cmd &&& x`、`2>>&1`），两个 shell 都拒，
 我们接受。修法是在算符序列上做检查，属于下一个工作日。
 
+## 本地先跑一遍 CI
+
+推送之前用 `tools/ci_local.py`。它直接读 `.github/workflows/check.yml` 执行那里面
+的步骤，不在这里另抄一份：抄一份就有两处定义，改了一边忘另一边。只有 runner 上
+才需要的两步（安装 MoonBit、moon update）按名字跳过。
+
+```bash
+tools/ci_local.py            # 全部
+tools/ci_local.py 语料 模糊   # 只跑名字匹配的步骤
+```
+
 ## 加固的四件套（每次改动都要过）
 
 1. `moon test --target native` — 库内行为：逐命令语义、畸形输入、递归边界、输入规范化
