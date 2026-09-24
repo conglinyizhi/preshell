@@ -322,7 +322,11 @@ async fn usage() -> Unit {
     #|  --stream    read many commands: one JSON string per line on stdin, one
     #|              report per line on stdout, in the same order. Every line is
     #|              answered, so input and output line up one for one; a line that
-    #|              is not a JSON string gets {"error":...,"line":N} instead.
+    #|              is not a request gets {"error":...,"line":N} instead.
+    #|              A request may instead be {"id":...,"command":"..."}, and the
+    #|              answer then comes back as {"id":...,"report":{...}} so a
+    #|              parent with several workers can match answers to requests
+    #|              without relying on line order.
     #|  --version   tool and schema version, as JSON
     #|  --help      this text
     #|
@@ -412,7 +416,8 @@ async fn answer_stream_line(
   counts : Counts,
 ) -> Unit {
   match @lib.decode_stream_line(line) {
-    Ok(bytes) => {
+    Ok(request) => {
+      let bytes = request.command
       let report = if probe {
         @lib.analyze_bytes_probe(bytes)
       } else {
@@ -424,12 +429,21 @@ async fn answer_stream_line(
         let (text, _) = @lib.decode_command(bytes)
         @lib.analyze_bytes_dialect(bytes, dialect_for(text, shell))
       }
-      write_report_line(@json.to_json(report).stringify())
+      // The report goes out untouched: an id, when the caller used one, arrives
+      // in an envelope around it, so the report itself stays the same object the
+      // single-shot mode prints.
+      write_report_line(
+        @json.to_json(
+          @lib.stream_report_json(@json.to_json(report), request.id),
+        ).stringify(),
+      )
       counts.reports += 1
     }
-    Err(message) => {
-      @stdio.stderr.write("preshell: line \{number}: \{message}\n")
-      write_report_line(@lib.stream_error(message, number).stringify())
+    Err(refused) => {
+      @stdio.stderr.write("preshell: line \{number}: \{refused.message}\n")
+      write_report_line(
+        @lib.stream_error(refused.message, number, refused.id).stringify(),
+      )
       counts.errors += 1
     }
   }
@@ -482,7 +496,9 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
           number += 1
           let message = "line longer than \{@lib.max_stream_line()} bytes"
           @stdio.stderr.write("preshell: line \{number}: \{message}\n")
-          write_report_line(@lib.stream_error(message, number).stringify())
+          write_report_line(
+            @lib.stream_error(message, number, None).stringify(),
+          )
           counts.errors += 1
         }
       }

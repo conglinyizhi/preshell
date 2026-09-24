@@ -360,6 +360,85 @@ JSON 是本工具已经会说的那门话，所以用它。）
 - 方言仍只用进程级 `--shell`；`--pretty`、`--scan`、`--shadow`、`--evidence`、
   `--bench` 与 `--stream` 互斥（它们会破坏「stdout 一行一个对象」这条）
 
+### 带 id 的请求：多个 worker 共用一个子进程
+
+默认形态一行请求一行应答，靠顺序对齐。父进程里如果有多个 worker 抢一个子进程，
+或者只是不想让「应答配得上请求」这件事依赖顺序，就给请求带一个 id：
+
+```
+"rm -rf build"                          → 裸报告（与单条模式逐字节相同）
+{"id": 17, "command": "rm -rf build"}   → {"id":17,"report":{…}}
+{"id": "w3-91", "command": "echo hi"}   → {"id":"w3-91","report":{…}}
+```
+
+规则一句话：**应答回显请求的形态**。没 id 的请求拿裸报告，带 id 的请求拿信封，
+报告原封不动放在 `report` 里。
+
+- id 是任意 JSON 值，**原样回显**，不解析不改格式（数字回数字，字符串回字符串）
+- **拒绝也带 id**，只要那一行读得出来：`{"id":"w2","error":"…","line":3}`。
+  这对 worker 池是关键——某个 worker 的请求被拒时，它得知道是它自己
+- **不认识的键会被拒绝**而不是忽略：写了 `{"command":"ls","timeout":5}` 的人
+  以为超时生效了，静默丢掉等于骗他
+- id 不查重，唯一性是父进程的事
+
+为什么不把 id 直接塞进报告里：报告是两种模式共用的同一个对象，塞进去会让
+「同一条命令、两种模式、同一份报告」这条性质失效。信封是为了让报告本身一字不变。
+id 带来的开销在噪声里（实测 ±1%）。
+
+父进程必须处理两件事：
+
+1. **应答不来**：子进程崩了/被杀 → 读到 EOF 就把所有未决请求判失败，再加超时兜底。
+   绝不能挂着等某个 id 等到天荒地老
+2. **拿不到应答 ≠ 什么都没碰**——这条立场在父进程侧同样成立
+
+一个最小父进程（Node）：
+
+```js
+import { spawn } from "node:child_process";
+
+export function openAnalyzer(bin = "preshell", args = []) {
+  const child = spawn(bin, ["--stream", ...args], { stdio: ["pipe", "pipe", "inherit"] });
+  const pending = new Map();
+  let next = 1, buf = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buf += chunk;
+    for (;;) {
+      const nl = buf.indexOf("\n");
+      if (nl < 0) break;
+      const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+      const msg = JSON.parse(line);
+      const settle = pending.get(msg.id);
+      if (!settle) continue;                // 无主的应答：记下来，别当成功
+      pending.delete(msg.id);
+      settle(msg.error ? { error: msg.error, line: msg.line } : { report: msg.report });
+    }
+  });
+  // 子进程没了：未决请求一起失败，绝不留在那儿等
+  child.on("exit", (code) => {
+    for (const settle of pending.values()) settle({ error: `analyzer exited (${code})` });
+    pending.clear();
+  });
+  return {
+    analyze(command, timeoutMs = 5000) {
+      const id = next++;
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) resolve({ error: "timeout" });
+        }, timeoutMs);
+        pending.set(id, (r) => { clearTimeout(timer); resolve(r); });
+        child.stdin.write(JSON.stringify({ id, command }) + "\n");
+      });
+    },
+    close() { child.stdin.end(); },     // 优雅收工：让它答完未决请求
+    kill() { child.kill("SIGKILL"); },  // 硬杀：未决请求立刻全部失败
+  };
+}
+```
+
+要更高吞吐就**再起几个子进程**（单个约 7700 条/秒），而不是加 socket 或做守护进程：
+谁起的子进程谁喂，版本不会漂移，也没有「守护进程没在跑」这条新策略。
+
 代价（本机实测）：
 
 | | 每条 |

@@ -36,41 +36,126 @@ fn json_kind(j : Json) -> String {
 }
 
 ///|
+/// One request: the command to analyse, plus the caller's correlation id when it
+/// gave one.
+///
+/// The id exists for two reasons, neither of which is throughput: a parent with
+/// several workers sharing one child needs a way to give each answer back to the
+/// worker that asked, and any transport that loses or doubles a line would
+/// otherwise leave an ordered protocol silently off by one. An answer that
+/// carries its own identity cannot be matched to the wrong request.
+pub struct StreamRequest {
+  id : Json?
+  command : Bytes
+}
+
+///|
+/// A line that could not be turned into a request.
+///
+/// `id` is filled in whenever it could be read off the line, even when the rest
+/// of the line was junk: a worker pool that cannot tell which of its requests
+/// was refused has to give up on that worker instead of retrying it.
+pub struct StreamRefusal {
+  id : Json?
+  message : String
+}
+
+///|
 /// Turn one input line into the command it carries.
+///
+/// Two shapes are accepted:
+///
+///   "rm -rf build"                         a bare string, as before
+///   {"id": 17, "command": "rm -rf build"}  the same, tagged with an id
 ///
 /// The string is converted back to bytes and analysed through the same entry
 /// point as a single-shot call, so a command means the same thing either way --
 /// including how a NUL inside it is dropped and joined, which is what the shell
 /// does with it.
 ///
-/// Every line is either a command or a refusal, and an empty line is a refusal
-/// like any other line that is not a JSON string. Skipping it quietly would be
+/// Every line is either a request or a refusal, and an empty line is a refusal
+/// like any other line that is not a request. Skipping it quietly would be
 /// friendlier until a caller zipped their input lines against the output lines
 /// and got a silent off-by-one, which is the kind of wrong answer this tool
 /// exists not to give.
-pub fn decode_stream_line(line : StringView) -> Result[Bytes, String] {
+pub fn decode_stream_line(
+  line : StringView,
+) -> Result[StreamRequest, StreamRefusal] {
   if line.is_empty() {
-    return Err("empty line: expected a JSON string")
+    return Err({
+      id: None,
+      message: "empty line: expected a JSON string, or an object with a \"command\"",
+    })
   }
   let json = @json.parse(line) catch {
-    err => return Err("not valid JSON: \{err.to_string()}")
+    err =>
+      return Err({ id: None, message: "not valid JSON: \{err.to_string()}", })
   }
   match json {
-    Json::String(s) => Ok(@utf8.encode(s))
-    other => Err("expected a JSON string, got \{json_kind(other)}")
+    Json::String(s) => Ok({ id: None, command: @utf8.encode(s), })
+    Json::Object(fields) => {
+      // The id is read before anything can fail, so a refusal still names the
+      // request it belongs to.
+      let id = fields.get("id")
+      let command = match fields.get("command") {
+        None => return Err({ id, message: "object has no \"command\"", })
+        Some(Json::String(s)) => s
+        Some(other) =>
+          return Err({
+            id,
+            message: "expected a string for \"command\", got \{json_kind(other)}",
+          })
+      }
+      // An unknown key is refused rather than ignored: a caller that wrote
+      // `"timeout": 5` believes it asked for a timeout, and quietly dropping it
+      // would leave them thinking one was applied.
+      for key in fields.keys() {
+        if key != "command" && key != "id" {
+          return Err({
+            id,
+            message: "unknown key \"\{key}\": this mode takes \"command\" and \"id\"",
+          })
+        }
+      }
+      Ok({ id, command: @utf8.encode(command), })
+    }
+    other =>
+      Err({
+        id: None,
+        message: "expected a JSON string, got \{json_kind(other)}",
+      })
   }
 }
 
 ///|
 /// The object a refused line answers with. It is deliberately not a report:
-/// no `version`, no `status`. "Your input line was not a JSON string" and "the
-/// shell would refuse this command" are different findings, and a caller that
-/// cannot tell them apart will read one as the other.
-pub fn stream_error(message : String, line : Int) -> Json {
-  Json::object({
-    "error": Json::string(message),
-    "line": Json::number(line.to_double()),
-  })
+/// no `version`, no `status`. "Your input line was not a request" and "the shell
+/// would refuse this command" are different findings, and a caller that cannot
+/// tell them apart will read one as the other.
+///
+/// The id, when there was one, comes back with it.
+pub fn stream_error(message : String, line : Int, id : Json?) -> Json {
+  let msg = Json::string(message)
+  let ln = Json::number(line.to_double())
+  match id {
+    None => Json::object({ "error": msg, "line": ln })
+    Some(value) => Json::object({ "id": value, "error": msg, "line": ln })
+  }
+}
+
+///|
+/// Wrap a report for the wire. With an id the answer is an envelope, with the
+/// report untouched inside it; without one it is the report itself, exactly as
+/// a single-shot call prints it.
+///
+/// The envelope is the reason the report inside it can stay byte-for-byte the
+/// report the other mode produces. Putting the id *into* the report would make
+/// the two modes disagree about the same command.
+pub fn stream_report_json(report : Json, id : Json?) -> Json {
+  match id {
+    None => report
+    Some(value) => Json::object({ "id": value, "report": report })
+  }
 }
 
 ///|

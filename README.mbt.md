@@ -46,6 +46,11 @@ one report per line, in the same order.
 jq -Rc . commands.txt | preshell --stream > reports.jsonl
 ```
 
+A request can carry an id, in which case the answer comes back in an envelope
+around the report (`{"id":17,"report":{...}}`) so a parent with several workers
+can give each answer to the worker that asked, without trusting line order.
+The report inside stays byte-for-byte the report the single-shot mode prints.
+
 Every [release](https://github.com/conglinyizhi/preshell/releases) carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
 `.github/workflows/release.yml`. Building it yourself is one `moon build`; see

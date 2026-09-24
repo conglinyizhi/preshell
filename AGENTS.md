@@ -300,7 +300,12 @@ docs/zsh-plan.md；这里只放记分牌和口径。**缺口已经到零。**
   「流式」变成「批量」——写完第一条要等缓冲满或进程退出才看得见。流式路径走
   `@stdio.stdout.write`（async 的 Output 直写 fd），且不与 `println` 混用（混用
   还会乱序）
-- 验收：`tools/probe/stream.sh`（真流式 + 与单条模式逐字节等价），lib 侧的帧逻辑
+- 请求两种形态：裸 JSON 字符串，或 `{"id":…,"command":…}`。带 id 时**应答是信封**
+  （`{"id":…,"report":…}`），报告本身一字不变——把 id 塞进报告会让「两种模式对同一
+  条命令给出同一份报告」这条性质失效。拒绝也回显可读到的 id（worker 池需要知道
+  是哪个请求被拒）；不认识的键拒绝而不是忽略
+- 验收：`tools/probe/stream.sh`（真流式 + 裸形态逐字节等价 + 信封里的报告与单条
+  模式一致 + 形态约定），lib 侧的帧逻辑
   在 `lib/stream_test.mbt`；两个工作流都跑这道
 - 收益的量级要看调用方：只跑 preshell 的批处理快约 10 倍；差分 harness 里 oracle
   （`zsh -n` 3.19 ms/份、`bash -n` 1.35 ms）才是大头，流式只拿掉其中一份

@@ -61,15 +61,66 @@ if (out.length !== cases.length) {
   console.log(`  失败: 输入 ${cases.length} 条，输出 ${out.length} 行（必须一行一答）`);
   bad++;
 }
+let mismatched = 0;
 for (let i = 0; i < cases.length; i++) {
   const one = execFileSync(bin, [], { input: cases[i], maxBuffer: 1 << 26 }).toString("utf8").trim();
   if (out[i] !== one) {
-    if (bad < 4) console.log(`  失败: 第 ${i + 1} 条两种模式不一致\n    单条: ${one.slice(0, 120)}\n    流式: ${(out[i] || "(缺行)").slice(0, 120)}`);
-    bad++;
+    if (mismatched < 4) console.log(`  失败: 第 ${i + 1} 条两种模式不一致\n    单条: ${one.slice(0, 120)}\n    流式: ${(out[i] || "(缺行)").slice(0, 120)}`);
+    mismatched++;
   }
 }
-console.log(`  ${cases.length} 条命令，不一致 ${bad} 条`);
-process.exit(bad === 0 ? 0 : 1);
+console.log(`  裸字符串：${cases.length} 条命令，逐字节不一致 ${mismatched} 条`);
+
+// 同一条命令带 id 再走一遍：信封里的报告必须与单条模式是同一个对象。
+// 信封是为了让报告本身一字不变——id 要是塞进报告里，两种模式对同一条命令
+// 就不再一致了。
+const taggedPayload = Buffer.from(cases.map((c, i) => JSON.stringify({ id: i, command: c.toString("utf8") }) + "\n").join(""), "utf8");
+const taggedOut = execFileSync(bin, ["--stream"], { input: taggedPayload, maxBuffer: 1 << 30 })
+  .toString("utf8").split("\n").filter(l => l !== "");
+let envBad = 0;
+if (taggedOut.length !== cases.length) {
+  console.log(`  失败: 带 id 时输入 ${cases.length} 条，输出 ${taggedOut.length} 行`);
+  envBad++;
+}
+for (let i = 0; i < cases.length; i++) {
+  const env = JSON.parse(taggedOut[i]);
+  const one = JSON.parse(execFileSync(bin, [], { input: cases[i], maxBuffer: 1 << 26 }).toString("utf8"));
+  if (env.id !== i) {
+    if (envBad < 4) console.log(`  失败: 第 ${i + 1} 条的 id 没回来（拿到 ${JSON.stringify(env.id)}）`);
+    envBad++;
+    continue;
+  }
+  if (JSON.stringify(env.report) !== JSON.stringify(one)) {
+    if (envBad < 4) console.log(`  失败: 第 ${i + 1} 条信封里的报告与单条模式不同`);
+    envBad++;
+  }
+}
+console.log(`  带 id 信封：${cases.length} 条命令，id 或报告不对 ${envBad} 条`);
+
+// id 形态本身的规矩：回显、拒绝要带回可读的 id、未知键要拒绝、裸字符串不受影响
+const shape = [
+  ['{"id":17,"command":"ls"}', r => r.id === 17 && r.report && r.report.status === "Complete"],
+  ['{"id":"w1","command":"ls"}', r => r.id === "w1" && r.report && r.report.status === "Complete"],
+  ['{"command":"ls"}', r => r.version === 1 && !("id" in r)],
+  ['"ls"', r => r.version === 1 && !("id" in r)],
+  ['{"id":"w2","command":5}', r => r.id === "w2" && typeof r.error === "string"],
+  ['{"id":"w3","command":"ls","timeout":5}', r => r.id === "w3" && /timeout/.test(r.error)],
+  ['{"id":0,"command":"ls"}', r => r.id === 0 && !!r.report],
+];
+let shapeBad = 0;
+for (const [line, ok] of shape) {
+  const got = JSON.parse(execFileSync(bin, ["--stream"], { input: Buffer.from(line + "\n"), maxBuffer: 1 << 26 })
+    .toString("utf8").trim());
+  // 信封与裸报告都要能被判定：先看规则是否满足
+  if (!ok(got)) {
+    console.log(`  失败: ${line} 的应答不符合约定：${JSON.stringify(got).slice(0, 100)}`);
+    shapeBad++;
+  }
+}
+console.log(`  形态约定：${shape.length} 条，不符 ${shapeBad} 条`);
+
+const total = mismatched + envBad + shapeBad;
+process.exit(total === 0 ? 0 : 1);
 JS
 [ $? -eq 0 ] || bad=$((bad + 1))
 
