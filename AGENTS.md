@@ -208,6 +208,24 @@ tools/ci_local.py            # 全部
 tools/ci_local.py 语料 模糊   # 只跑名字匹配的步骤
 ```
 
+## 发布前的四项准备
+
+打 tag 之前逐项过，任何一项不过就先修，不要带着问题发版。四项都过再打 `vX.Y`，
+推送 tag 由 `.github/workflows/release.yml` 自动发版，并挂上二进制与 sha256。
+
+1. **对接文档对齐当前版本**：`docs/integration.md` 的契约、`--version` 示例、release
+   安装片段里的 tag，与 `moon.mod` 的 `version`、`cmd/preshell/main.mbt` 的
+   `tool_version()` 一致。漏一处就会出现「文档说 0.1、二进制说 0.2」
+2. **本地模拟 CI 全过**：`tools/ci_local.py`，它直接读 `.github/workflows/check.yml`
+3. **格式验证后无变动**：`moon fmt` 连跑两次无差异，或提交后
+   `git diff --exit-code -- '*.mbt'` 干净
+4. **最新每夜构建无警告**：`moon upgrade --dev`（交互式，需要真终端）之后
+   `moon clean && moon check --target native` 不许出现任何 `Warning`。
+   判据是「没有警告」而不是「数字为 0」，因为条数会少报
+
+第 4 项换完工具链要连测试一起复跑：编译行为可能变，`moon test --target native` 与
+`tools/ci_local.py` 都得再过一遍。
+
 ## 加固的四件套（每次改动都要过）
 
 1. `moon test --target native` — 库内行为：逐命令语义、畸形输入、递归边界、输入规范化
