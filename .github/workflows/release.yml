@@ -40,8 +40,10 @@ jobs:
           TAG="${{ inputs.tag }}"
           if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
           git rev-parse --verify "refs/tags/$TAG" >/dev/null
+          PREVIOUS_TAG=$(git tag --sort=-version:refname --merged "$TAG" | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | awk -v tag="$TAG" '$0 != tag { print; exit }' || true)
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
-          echo "发布 $TAG ($(git rev-parse --short "$TAG^{commit}"))"
+          echo "previous=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+          echo "发布 $TAG ($(git rev-parse --short "$TAG^{commit}"))，上一版本 ${PREVIOUS_TAG:-无}"
 
       - name: Install MoonBit
         run: |
@@ -89,31 +91,12 @@ jobs:
       - name: Write notes
         run: |
           TAG="${{ steps.tag.outputs.name }}"
-          {
-            echo "preshell 是命令行的静态分析器：给它一条 shell 命令，它报出这条命令碰了什么路径、"
-            echo "跑了什么程序、往哪去网络，以及哪里看不懂。它不做裁决，没有策略、没有 allow/deny。"
-            echo
-            echo "它是**独立程序，不是库**：起子进程、stdin 进、stdout 出 JSON。"
-            echo "接入姿势与许可边界见仓库里的 \`docs/integration.md\`。"
-            echo
-            echo "## 本版本"
-            echo
-            BODY=$(git tag -l --format='%(contents:body)' "$TAG")
-            if [ -n "$BODY" ]; then echo "$BODY"; else echo "（这个 tag 没有注解）"; fi
-            echo
-            echo "## 这个二进制"
-            echo
-            echo "\`$(uname -m)\` Linux，构建自本仓库的 tag \`$TAG\`。"
-            echo "按 GPL-3.0-or-later 分发，对应源码就是这个仓库的这个 tag："
-            echo "\`git clone ${{ github.server_url }}/${{ github.repository }} && git checkout $TAG\`。"
-            echo "校验用 \`sha256sum -c SHA256SUMS\`；不想用二进制也可以自己 \`moon build --release --target native\`。"
-            echo
-            echo "## 它不保证什么"
-            echo
-            echo "报告是事实不是裁决，也不是安全证明。\`impact.uncertain: true\`、或者带"
-            echo "\`modeled: false\` 的 \`Exec\`/\`Spawn\`，都表示这份影响面不封闭："
-            echo "那是需要人看一眼的地方，而不是「没问题」。"
-          } > "$RUNNER_TEMP/notes.md"
+          tools/release_notes.sh \
+            --from "${{ steps.tag.outputs.previous }}" \
+            --to "$TAG" \
+            --assets dist \
+            --repo "${{ github.server_url }}/${{ github.repository }}" \
+            > "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
 
       - name: Publish

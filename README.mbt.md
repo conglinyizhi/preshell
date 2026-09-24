@@ -56,7 +56,7 @@ refusal means, and the four things a caller must do); `preshell --spec` is the
 same contract as JSON, for a caller that has the binary and nothing else; the
 repository ships it as `docs/preshell.1` for `man preshell`.
 
-Every [release](https://github.com/conglinyizhi/preshell/releases) carries a
+Every [release](https://github.com/conglinyizhi/preshell/releases) is a compact changelog generated from the commits between tags: user-visible changes come first, while detailed commit lists are folded and engineering maintenance is kept below. It carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
 `.github/workflows/release.yml`. Building it yourself is one `moon build`; see
 [`docs/integration.md`](docs/integration.md) for both paths and for the licence

@@ -221,6 +221,9 @@ tools/ci_local.py 语料 模糊   # 只跑名字匹配的步骤
 
 打 tag 之前逐项过，任何一项不过就先修，不要带着问题发版。四项都过再打 `vX.Y`，
 推送 tag 由 `.github/workflows/release.yml` 自动发版，并挂上二进制与 sha256。
+Release changelog 由 `tools/release_notes.sh` 从提交标题生成：详细记录全部折叠，
+`feat`、`fix`、`perf`、`refactor` 排在前面，`ci`、`test`、`chore`、`build` 放进工程维护。
+本地可用 `tools/release_notes.sh --from v旧 --to HEAD --assets dist` 预览。
 
 1. **对接文档对齐当前版本**：`docs/integration.md` 的契约、`--version` 示例、release
    安装片段里的 tag，与 `moon.mod` 的 `version`、`cmd/preshell/main.mbt` 的

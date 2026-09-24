@@ -76,6 +76,11 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 `preshell --spec` 是它的机读形式（JSON，给拿得到二进制、拿不到仓库的 agent 用），
 仓库里还有 `docs/preshell.1` 供 `man preshell`。三份说的是同一件事，改线格式要一起改。
 
+GitHub Release 页面是变更记录，不重复 README 的项目介绍。发布 workflow 从 tag 之间的
+提交标题自动生成说明：`feat`、`fix`、`perf`、`refactor` 排在前面，所有详细记录折叠，
+`ci`、`test`、`chore`、`build` 放在工程维护区。本地预览用
+`tools/release_notes.sh --from v旧 --to HEAD --assets dist`。
+
 开发者模式（`--scan`、`--shadow`、`--bench`、`--evidence`）不满足上面这条契约，
 它们是给我自己调试用的。集成里只用默认模式、`--shell` 与 `--stream`。
 
