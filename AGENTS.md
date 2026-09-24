@@ -289,6 +289,22 @@ docs/zsh-plan.md；这里只放记分牌和口径。**缺口已经到零。**
 - 差分给四象限和报错原文分布：`tools/corpus/run.sh`
 - 按行二分对多行构造（here-doc、多行引号）会误导：用完整构造的切片，或直接看行号
 
+## 流式模式（--stream）
+
+- 形态：stdin 每行一个 JSON 字符串（命令），stdout 每行一份报告，顺序一致。
+  命令可能含换行（heredoc），所以不能沿原始文本按行切，必须转义
+- **严格一行一答**：不是 JSON 字符串的行（含空行）给 `{"error":…,"line":N}`，
+  绝不静默跳过。静默跳过会让调用方的输入/输出 zip 出错位一位，那是本工具最不
+  该制造的错。拒绝对象不带 `version`/`status`，一眼与报告区分
+- **必须直写 stdout**：`println` 是块缓冲的，一条报告几百字节填不满缓冲，于是
+  「流式」变成「批量」——写完第一条要等缓冲满或进程退出才看得见。流式路径走
+  `@stdio.stdout.write`（async 的 Output 直写 fd），且不与 `println` 混用（混用
+  还会乱序）
+- 验收：`tools/probe/stream.sh`（真流式 + 与单条模式逐字节等价），lib 侧的帧逻辑
+  在 `lib/stream_test.mbt`；两个工作流都跑这道
+- 收益的量级要看调用方：只跑 preshell 的批处理快约 10 倍；差分 harness 里 oracle
+  （`zsh -n` 3.19 ms/份、`bash -n` 1.35 ms）才是大头，流式只拿掉其中一份
+
 ## MoonBit 坑
 
 项目里会撞到的语言级坑（`is` 右侧写变量会永远匹配、`unused_mut` 是 Error、

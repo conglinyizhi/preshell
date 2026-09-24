@@ -39,6 +39,13 @@ preshell --scan '<cmd>'           # one line: parse status, issue count, effects
 preshell --bench=2000             # timing loop
 ```
 
+Many commands, one process: `--stream` reads one JSON string per line and writes
+one report per line, in the same order.
+
+```bash
+jq -Rc . commands.txt | preshell --stream > reports.jsonl
+```
+
 Every [release](https://github.com/conglinyizhi/preshell/releases) carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
 `.github/workflows/release.yml`. Building it yourself is one `moon build`; see
@@ -167,6 +174,12 @@ a hole in the parser (see `Differential fuzzing` below and `AGENTS.md`).
 On the command side, 35 common invocations were measured against what they
 truly do (an LD_PRELOAD shim plus before/after directory snapshots): all 35 now
 produce path conclusions rather than a bare "ran something".
+
+Batching matters because process startup, not analysis, is what a call costs:
+1.12 ms per command one at a time against 0.116 ms through `--stream` (the
+analysis itself is 5 µs, so what the streaming mode removes is the process).
+Every line of input is answered by exactly one line of output, refusals
+included, so a caller can line its input up against its output without counting.
 
 A larger, less flattering corpus is the one the sessions on this machine already
 contain: 38250 distinct real bash commands and 423 sandbox-allow requests were
