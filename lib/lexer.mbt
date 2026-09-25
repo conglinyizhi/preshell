@@ -1140,19 +1140,67 @@ fn Lexer::read_extglob(self : Lexer) -> String? {
 ///|
 /// Length of a `[...]` glob bracket starting at the current position, if it
 /// really looks like one; otherwise None.
+
+///|
+/// Index just past a bracket expression starting at the cursor, or None when
+/// there is no bracket expression here.
+///
+/// A `]` inside a quoted region still closes it: measured in bash 5.3, `a[']'`
+/// matches a file named `a]`, so the quoted `]` is both the sole member and the
+/// terminator. What the scan must then do is swallow the rest of that quoted
+/// region before returning. Stopping at the `]` left the closing quote dangling,
+/// and the word reader took it for the start of a new quote, which turned
+/// `echo a[']'` (a command bash runs) into "unterminated single quote".
 fn Lexer::bracket_end(self : Lexer) -> Int? {
   let mut i = 1
+  // The quoted region the scan is inside, if any.
+  let mut quote = '\u{0}'
+  // Set once a `]` closed the bracket from inside a quoted region: the end of
+  // that region is where the bracket expression itself ends.
+  let mut closing = -1
   for ;; {
-    match self.peek_at(i) {
-      None => return None
-      Some(']') => return Some(i + 1)
-      Some(c) => {
-        if is_blank(c) || c == '\n' || is_meta(c) {
-          return None
-        }
-        i += 1
-      }
+    // The bracket closed inside a quoted region, and that region is now over:
+    // the whole thing is one glob, so the closing quote belongs to it too.
+    if closing > 0 && quote == '\u{0}' {
+      return Some(i)
     }
+    let c = match self.peek_at(i) {
+      None => return None
+      Some(c) => c
+    }
+    if closing > 0 {
+      if c == '\\' && quote == '"' {
+        i += 2
+        continue
+      }
+      if c == quote {
+        quote = '\u{0}'
+      }
+      i += 1
+      continue
+    }
+    if c == ']' {
+      if quote == '\u{0}' {
+        return Some(i + 1)
+      }
+      closing = i + 1
+      i += 1
+      continue
+    }
+    if c == '"' || c == '\'' {
+      if quote == c {
+        quote = '\u{0}'
+      } else if quote == '\u{0}' {
+        quote = c
+      }
+      i += 1
+      continue
+    }
+    // A blank or a metacharacter ends the word, but only outside quotes.
+    if quote == '\u{0}' && (is_blank(c) || c == '\n' || is_meta(c)) {
+      return None
+    }
+    i += 1
   }
 }
 

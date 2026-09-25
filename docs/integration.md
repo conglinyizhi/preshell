@@ -460,16 +460,18 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
 
 | 语料 | 条数 | 读通 | 给出路径结论 | 我们的缺口 | 目标不像路径 |
 |---|---|---|---|---|---|
-| bash 命令 | 38250（去重） | 99% | 83% | 0 | 0 |
-| sandbox-allow 请求 | 423 | 100% | 81% | 0 | 0 |
+| bash 命令 | 40109（去重） | 99% | 86% | 0 | 0 |
+| sandbox-allow 请求 | 530 | 100% | 83% | 0 | 0 |
 
-读不通的那几条，两条 shell （bash -n 与 zsh -n）也一并拒绝：命令本身就坏了，
-工具报 Unsupported 是保守方向而不是漏报。
+读不通的那 46 条，两条 shell（`bash -n` 与 `zsh -n`）也一并拒绝：命令本身就坏了，
+工具报 Unsupported 是保守方向而不是漏报。这张表也当过侦察兵——它报出过一条「我们拒、
+两个 shell 都接受」的输入（一段用 `'"'"'` 拼接引号的 `bash -c` 脚本，里面带括号表达式），
+修掉之后这一格才归零。
 
-怎么复现：
+怎么复现（`--n 0` 是全量；语料跟着会话记录长，条数会变）：
 
 ```bash
-tools/corpus/session_cases.py --n 800 --dump /tmp/real-cases
+tools/corpus/session_cases.py --n 0 --dump /tmp/real-cases
 ```
 
 剩下那不到两成「只报 Exec」的，绝大多数是把脚本交给未建模的程序跑，

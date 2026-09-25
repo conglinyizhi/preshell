@@ -179,3 +179,27 @@ test "an empty command line gets a report, not silence" {
     inspect(r.impact.uncertain, content="false")
   }
 }
+
+///|
+/// A `]` that came from a quoted region still closes a bracket expression
+/// (measured in bash 5.3: `a[']'` matches a file named `a]`), and the quote that
+/// ends that region belongs to the same glob. Stopping the scan at the `]` left
+/// the closing quote behind, and the word reader took it for the start of a new
+/// quote, so this valid command came back as "unterminated single quote".
+test "a quoted bracket terminator keeps the quotes it came with" {
+  let rep = @lib.analyze("echo a[']'")
+  debug_inspect(rep.status, content="Complete")
+  inspect(rep.impact.uncertain, content="true")
+}
+
+///|
+/// The shape that turned up in the session corpus: a script handed to `bash -c`
+/// through a single-quoted argument that ends and restarts the quote around every
+/// embedded quote, with a bracket expression inside one of them. Both shells
+/// accept it, and the tool used to answer Unsupported for it.
+test "a nested-quote script is not a parse error" {
+  let cmd = "bash -c '\nvarrx=\"a['\"'\"']\"\ncase \"$v\" in\n  http://*) echo \"ok\" ;;\n  *) echo \"no: $v\" ;;\nesac\n'"
+  let rep = @lib.analyze(cmd)
+  debug_inspect(rep.status, content="Complete")
+  debug_inspect(rep.impact.effects.length(), content="5")
+}
