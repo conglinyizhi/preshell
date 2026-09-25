@@ -408,9 +408,11 @@ async fn usage() -> Unit {
     #|                   closed set, and an empty list must not be read as
     #|                   "touches nothing"
     #|  impact.cwd       the base the paths in this report were resolved
-    #|                   against. Paths come back absolute; the only ones that
-    #|                   stay as written are those after a cd whose destination
-    #|                   could not be modelled, and then uncertain is true
+    #|                   against. Paths come back absolute except when an
+    #|                   absolute path does not exist yet: after a cd whose
+    #|                   destination could not be modelled, or when the first
+    #|                   segment is expanded at run time ($HOME/x, ~/x). Those
+    #|                   stay as written and uncertain is true
     #|  In --stream a refused line answers {"error":...,"line":N}. That is
     #|  deliberately not a report: it means the line was not a request, never
     #|  that the command is bad.
@@ -701,7 +703,7 @@ fn contract_json() -> Json {
         "--cwd is required by this contract. Without it the tool uses its own current directory as the base and attaches a Note saying so, which also marks the impact uncertain",
       ),
       "always_absolute": Json::string(
-        "paths are reported absolute, with no relative fallback",
+        "paths are reported absolute, with two exceptions that stay as written and set impact.uncertain: a path after a cd whose destination cannot be modelled, and a path whose first segment is expanded at run time ($HOME/x, ~/x), because a parameter's value is used as it stands and may itself be absolute",
       ),
       "cd_scope": Json::string(
         "cd affects the rest of the same command line; a subshell, a command substitution, a pipeline element and a script handed to another shell get their own copy, and consecutive cds accumulate",

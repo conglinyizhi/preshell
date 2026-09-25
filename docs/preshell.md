@@ -54,7 +54,10 @@ Paths are reported **absolute**. PreShell never reads the file system, so the ba
 - `--cwd` is required by the caller contract. Without it the tool uses its own current directory as the base — which is the caller's directory whenever the caller spawned it without changing directory — and attaches a `Note` to every report saying so. That note also marks `impact.uncertain`, so the answer is not presented as a closed one.
 - `--cwd` is a starting point, not a movement: it produces no effect, and a `cd` inside the command takes precedence.
 - `cd` affects the rest of the same command line only. A subshell, a command substitution, a pipeline element and a script handed to another shell each get their own copy, and consecutive `cd`s accumulate in order.
-- The one case that cannot be absolute is a path after a `cd` whose destination cannot be modelled, such as `cd $DIR`. Those paths stay as written and `impact.uncertain` is set, so the gap is visible rather than filled in with a guess.
+- Two kinds of path cannot be made absolute, and both stay as written with `impact.uncertain` set, so the gap is visible rather than filled in with a guess:
+  - a path after a `cd` whose destination cannot be modelled, such as `cd $DIR`;
+  - a path whose first segment is expanded at run time, such as `$HOME/x` or `~/x`. The value of a parameter is used as it stands, so whether the result is absolute is a run-time fact, and the base cannot be applied on top of it. The caller knows the value and finishes the job.
+- A `~` at the head of a word is one of those expansions: it is `HOME`, `~+` is `PWD`, `~-` is `OLDPWD`, and `~user` is that user's home directory. When the login name is invalid the prefix is left exactly as written, in which case it is a *relative* path. Quoted (`"~"`) it is literal text and is anchored like any other relative path.
 
 ## Stream mode
 

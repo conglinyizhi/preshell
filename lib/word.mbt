@@ -39,11 +39,94 @@ fn write_static(p : WordPart, sb : StringBuilder) -> Bool {
 /// Best-effort literal text: holes are rendered as `$` so that a caller can
 /// still tell "this word is not a path I can trust" from the text alone.
 pub fn Word::literal_text(self : Word) -> String {
+  parts_text(self.parts)
+}
+
+///|
+/// Render a run of parts, keeping a parameter's braces when dropping them would
+/// run it into the next name character: `$Xy` and `${X}y` are different
+/// expansions, and the report must not spell the second one as the first.
+fn parts_text(parts : Array[WordPart]) -> String {
   let sb = StringBuilder()
-  for p in self.parts {
-    sb.write_string(part_text(p))
+  for i, p in parts {
+    let needs_braces = match p {
+      Param(n) =>
+        is_bare_param_name(n) &&
+        i + 1 < parts.length() &&
+        starts_with_name_char(parts[i + 1])
+      _ => false
+    }
+    match p {
+      Param(n) =>
+        if needs_braces {
+          sb.write_string("${")
+          sb.write_string(n)
+          sb.write_char('}')
+        } else if is_bare_param_name(n) {
+          sb.write_char('$')
+          sb.write_string(n)
+        } else {
+          sb.write_string("${")
+          sb.write_string(n)
+          sb.write_char('}')
+        }
+      _ => sb.write_string(part_text(p))
+    }
   }
   sb.to_string()
+}
+
+///|
+/// Whether a part renders as something that would glue onto a preceding
+/// parameter name.
+fn starts_with_name_char(p : WordPart) -> Bool {
+  match part_text(p).get_char(0) {
+    Some(c) =>
+      (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c == '_'
+    None => false
+  }
+}
+
+///|
+/// Whether a parameter payload can be written without braces: a name, a digit,
+/// or one of the special parameters. Anything else (`X:-default`, `#X`, `X[1]`)
+/// keeps its `${...}` spelling so the boundary stays visible.
+fn is_bare_param_name(n : String) -> Bool {
+  let mut index = 0
+  for c in n {
+    index += 1
+    if index == 1 {
+      let name_start = (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        c == '_'
+      if !name_start {
+        // A one-character special parameter: `$1`, `$@`, `$?`, `$$`.
+        return index == n.length() &&
+          (
+            (c >= '0' && c <= '9') ||
+            c == '@' ||
+            c == '*' ||
+            c == '#' ||
+            c == '?' ||
+            c == '-' ||
+            c == '$' ||
+            c == '!'
+          )
+      }
+      continue
+    }
+    let name_body = (c >= 'a' && c <= 'z') ||
+      (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') ||
+      c == '_'
+    if !name_body {
+      return false
+    }
+  }
+  index > 0
 }
 
 ///|
@@ -52,10 +135,19 @@ fn part_text(p : WordPart) -> String {
   let sb = StringBuilder()
   match p {
     Lit(s) | SQuote(s) | Glob(s) | Tilde(s) => sb.write_string(s)
-    Param(n) => {
-      sb.write_char('$')
-      sb.write_string(n)
-    }
+    Param(n) =>
+      // `${X}y` and `$Xy` are different expansions, so the braces have to
+      // survive whenever the payload is anything other than a bare name. Doing
+      // the other thing printed `$Xy` for `${X}y`, which reads as a variable
+      // that does not exist.
+      if is_bare_param_name(n) {
+        sb.write_char('$')
+        sb.write_string(n)
+      } else {
+        sb.write_string("${")
+        sb.write_string(n)
+        sb.write_char('}')
+      }
     CmdSub(_) => sb.write_string("$()")
     ArithSub(_) => sb.write_string("$(())")
     // The shape, not a bare `()`: the word expands to a path this tool cannot
@@ -71,15 +163,10 @@ fn part_text(p : WordPart) -> String {
       }
     Subscript(inner) => {
       sb.write_char('[')
-      for q in inner {
-        sb.write_string(part_text(q))
-      }
+      sb.write_string(parts_text(inner))
       sb.write_char(']')
     }
-    DQuote(inner) =>
-      for q in inner {
-        sb.write_string(part_text(q))
-      }
+    DQuote(inner) => sb.write_string(parts_text(inner))
   }
   sb.to_string()
 }
@@ -99,6 +186,11 @@ pub fn Word::has_hole(self : Word) -> Bool {
 fn part_has_hole(p : WordPart) -> Bool {
   match p {
     Param(_) | CmdSub(_) | ArithSub(_) | ProcSub(_) => true
+    // An unquoted tilde-prefix is expanded too: `~` is `$HOME`, `~+` is `$PWD`
+    // and `~user` is another user's home directory (bash 5.3 manual, "Tilde
+    // Expansion"). The text says `~`; the shell says an absolute path, or, when
+    // the login name is invalid, leaves the prefix exactly as written.
+    Tilde(_) => true
     DQuote(inner) | Subscript(inner) => inner.any(part_has_hole)
     _ => false
   }

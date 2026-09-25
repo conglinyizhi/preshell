@@ -232,9 +232,14 @@ moon run --target native tools/ci/check.mbtx
 基准由调用方通过 `--cwd=PATH` 给；没给就用本进程当前目录推演，并在报告里留一条
 `Note`（同时置 `uncertain`），所以 `--cwd` 事实上必填。
 
-`--cwd` 只是解析起点，不是 `cd`：不产生效果，命令内的 `cd` 优先。`cd` 目的地不可建模时
-（`cd $DIR`）基准变未知，此后的路径保持原样并置 `uncertain`，这是唯一允许的相对路径，
-因为绝对路径在信息上确实不存在。回归用例在 `lib/cwd_position_test.mbt`
+`--cwd` 只是解析起点，不是 `cd`：不产生效果，命令内的 `cd` 优先。
+
+**两类相对路径是允许的**，都置 `uncertain`，因为绝对路径在信息上确实不存在：`cd` 目的地
+不可建模之后的路径；以及**词首为运行时展开**的路径（`$HOME/x`、`~/x`）。后者有标准依据：
+bash 5.3 手册 "Expansion" 规定参数的值按原样使用，所以是否绝对只有运行时知道；"Tilde
+Expansion" 规定 `~`=`$HOME`、`~user` 在登录名无效时**前缀原样保留**（那时它相对）。
+引号内的 `~`/`$` 是字面量，照常锚定。实现看 `Collector::push` 的 `starts_unresolved`
+加上词本身的洞标记，两条必须同时成立——只看文本会把 `'$X/y'` 误判成未解析。回归用例在 `lib/cwd_position_test.mbt`
 （单 cd 位置、多 cd 累积、越过根、作用域隔离）与 `tools/probe/malformed.sh`（基准回退与警告）。
 
 ## 发布前的四项准备

@@ -324,7 +324,17 @@ fn Collector::push(
   modeled? : Bool = true,
 ) -> Unit {
   let resolved = match kind {
-    Read | Write | Delete => self.resolve(target)
+    Read | Write | Delete =>
+      // A path whose first segment is expanded at run time may itself be
+      // absolute: `$HOME/x` is `/home/u/x`, not `<cwd>/$HOME/x` (bash 5.3
+      // manual, "Expansion": the value of a parameter is used as it stands).
+      // The base cannot be applied on top of it, so the text is reported as
+      // written and the caller, who knows the value, finishes the job.
+      if dynamic && starts_unresolved(target) {
+        target
+      } else {
+        self.resolve(target)
+      }
     _ => target
   }
   if self.items.length() >= max_effects() {
@@ -479,6 +489,16 @@ fn Collector::note_holes(self : Collector, w : Word) -> Unit {
   if w.has_hole() {
     self.push(Unknown, w.literal_text(), true, w.line)
   }
+}
+
+///|
+/// Whether a path's first segment is something the shell fills in at run time.
+///
+/// Only consulted together with the word's hole flag at the call site: a quoted
+/// `'$X/y'` is literal text that happens to start with `$`, and it is anchored
+/// like any other relative path.
+fn starts_unresolved(p : String) -> Bool {
+  p.has_prefix("$") || p.has_prefix("~")
 }
 
 ///|

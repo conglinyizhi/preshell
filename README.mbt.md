@@ -90,6 +90,13 @@ directory whenever the caller spawned it without changing directory — and
 attaches a `Note` saying so, which also marks `impact.uncertain`. Seeing that
 note means the base was inferred, not asserted.
 
+Two kinds of path stay as written, because an absolute path genuinely does not
+exist for them: a path after a `cd` whose destination cannot be modelled, and a
+path whose first segment is expanded at run time (`$HOME/x`, `~/x`). A
+parameter's value is used as it stands, so whether the result is absolute is a
+run-time fact, and the caller is the one who knows it. Both cases set
+`impact.uncertain`.
+
 `--cwd` is a starting point, not a `cd`: it adds no effect, and a `cd` inside the
 command overrides it. A `cd` only affects the rest of the same command line — a
 subshell, a command substitution, a pipeline element and a script handed to

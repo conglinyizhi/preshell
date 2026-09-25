@@ -75,6 +75,23 @@ fi
 printf '%s' 'rm -rf x' | "$BIN" --cwd=relative/base >/dev/null 2>&1
 [ "$?" = "2" ] || { echo "  相对 --cwd 的退出码不是 2"; bad=$((bad + 1)); }
 
+# 词首是运行时展开时不能拼基准：`$HOME/x` 的展开值本身可能是绝对路径。
+total=$((total + 2))
+for expr in '$HOME/x' '~/x'; do
+  if ! printf '%s' "rm -rf $expr" | "$BIN" --cwd=/base 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
+  const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
+  if (del.length !== 1) { console.log("没有一条 Delete"); process.exit(1) }
+  if (del[0].target.indexOf("/base") === 0) { console.log("头部未解析却拼了基准: " + del[0].target); process.exit(1) }
+  if (del[0].dynamic !== true) { console.log("没有标成非封闭集合"); process.exit(1) }
+  if (d.impact.uncertain !== true) { console.log("没有置 uncertain"); process.exit(1) }
+})'; then
+    echo "  词首未解析的路径处理不合格（$expr）"
+    bad=$((bad + 1))
+  fi
+done
+
 
 total=$((total + 2))
 if ! "$BIN" --man 2>/dev/null | grep -q '^PreShell$'; then
