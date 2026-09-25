@@ -126,6 +126,9 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist, impact.cwd: /s
   是不是绝对路径是运行时事实，把基准拼上去只会算错：`$HOME/x` 配 `HOME=/home/u` 是
   `/home/u/x`，不是 `/base/home/u/x`。这些值调用方知道，由它收尾——报告把要替换的名字
   一并交出来，见下一节
+- 赋值形参数里的 `~` 也算（`dd of=~/x`、`echo a=~/b:~/c`）：bash 在首个 `=` 之后与每个 `:`
+  之后都会展开它，即使词出现在参数位置。zsh 默认不展开，只有 `magicequalsubst` 打开才展开，
+  而工具不建模 `setopt` 状态——所以两边一律按展开报并置 `uncertain`，把判断留给你
 - 词首的 `~` 属于后一类：`~` 是 `$HOME`、`~+` 是 `$PWD`、`~-` 是 `$OLDPWD`、`~user` 是那个
   用户的家目录（`~N` 是 shell 的目录栈）。**登录名无效时 bash 原样保留前缀**，那时它反倒是
   相对路径；工具不知道那个用户在不在，所以一律算洞。加引号的 `"~"` 是字面量，照常锚定

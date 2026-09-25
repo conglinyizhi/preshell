@@ -252,6 +252,11 @@ Expansion" 规定 `~`=`$HOME`、`~user` 在登录名无效时**前缀原样保�
 `W_ASSIGNARG|W_TILDEEXP`）。`--file=~/x` 的左边不是名字，两个 shell 都原样交给程序，那里的
 `~` 是字面量。重定向目标也是一个词，走 `PathArg::of` 再 `push_path`，别自己拿文本拼。
 
+**这条规则不按方言拆开，是故意的。** bash 在赋值形参数里必展开；zsh 默认不展开，只有开了
+`magicequalsubst` 才展开（实测 zsh 5.9：`echo of=~/z` 原样，加了那个选项才展开成家目录）。
+预Shell 不建模 `setopt` 状态，所以两边都按「展开、置 `uncertain`」报：丢一个事实（默认 zsh）
+比编一条假的绝对路径（开了选项的 zsh）轻。
+
 **同一条路径在所有效果上说同样的话。** `Delete` 与它并列的 `Unknown`、动态命令名与它的 `Exec`，`vars` 必须一致：调用方按其中任何一条去找值都该得到答案。加效果时走 `push_path` 就不会漏。实现看 `Collector::push` 的 `starts_unresolved`
 加上词本身的洞标记，两条必须同时成立——只看文本会把 `'$X/y'` 误判成未解析。回归用例在 `lib/cwd_position_test.mbt`
 （单 cd 位置、多 cd 累积、越过根、作用域隔离）与 `tools/probe/malformed.sh`（基准回退与警告）。
