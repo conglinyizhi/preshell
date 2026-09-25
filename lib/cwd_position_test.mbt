@@ -163,7 +163,7 @@ test "normalize sums leading .. in a relative path" {
 
 ///|
 test "a caveat keeps the status and marks the impact uncertain" {
-  // 用来承载「基准是推演来的」这类说明：警告必须让调用方看见，
+  // 警告必须让调用方看见：带 kind、带稳定 code，并且强制 uncertain，
   // 而不是只留一条可以被忽略的文字。
   let plain = @lib.analyze_dialect(
     "rm -rf x",
@@ -172,10 +172,11 @@ test "a caveat keeps the status and marks the impact uncertain" {
   )
   inspect(plain.issues.length(), content="0")
   inspect(plain.impact.uncertain, content="false")
-  let warned = @lib.with_caveats(plain, ["no --cwd given"])
+  let warned = @lib.add_note(plain, @lib.WarnCode::W1)
   debug_inspect(warned.status, content="Complete")
   inspect(warned.issues.length(), content="1")
   debug_inspect(warned.issues[0].kind, content="Note")
+  debug_inspect(warned.issues[0].code, content="Some(W1)")
   inspect(warned.impact.uncertain, content="true")
   // 路径本身不受警告影响。
   debug_inspect(deleted_paths(warned.impact), content="[\"/a/x\"]")

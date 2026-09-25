@@ -82,6 +82,23 @@ async fn main {
       println(manual_markdown)
       return
     }
+    if a == "--help-id" {
+      print_warn_codes()
+      return
+    }
+    if a.has_prefix("--help-id=") {
+      let text = a.unsafe_substring(start=10, end=a.length())
+      match @lib.parse_warn_code(text) {
+        Some(code) => print_warn_code(code)
+        None => {
+          usage_error(
+            "unknown warning code: \{text} (run --help-id for the list)",
+          )
+          return
+        }
+      }
+      return
+    }
     if a == "--spec" {
       // 契约的机读形式。拿得到二进制、拿不到仓库的人和 agent，靠这个把接口问清楚。
       println(contract_json().stringify())
@@ -204,29 +221,19 @@ async fn main {
   // process's own directory is the best available stand-in — it is the caller's
   // directory whenever the caller spawned this process without changing
   // directory — and the report says which base was used and why.
-  let (base, base_note) : (String?, String?) = match base_cwd {
+  let (base, base_warn) : (String?, @lib.WarnCode?) = match base_cwd {
     Some(dir) => (Some(dir), None)
     None =>
       match @env.current_dir() {
-        Some(dir) =>
-          (
-            Some(dir),
-            Some(
-              "no --cwd given: relative paths were resolved against the current directory, " +
-              dir,
-            ),
-          )
-        None =>
-          (
-            None,
-            Some(
-              "no --cwd given and the current directory could not be read: relative paths were left as written",
-            ),
-          )
+        Some(dir) => (Some(dir), Some(@lib.WarnCode::W1))
+        // Not a caller mistake and not a parser gap: the tool could not read
+        // something about its own environment, so the base is unknown and the
+        // paths cannot be resolved at all.
+        None => (None, Some(@lib.WarnCode::W0))
       }
   }
   if stream {
-    stream_reports(shell, probe, base, base_note)
+    stream_reports(shell, probe, base, base_warn)
     return
   }
   let from_argv = rest.length() > 0
@@ -294,8 +301,8 @@ async fn main {
   // The caveat is attached to the report a caller receives, not to the
   // developer modes above: `--scan` prints diagnostics for the harnesses, and
   // an extra line there would look like a parser message.
-  let report = match base_note {
-    Some(note) => @lib.with_caveats(report, [note])
+  let report = match base_warn {
+    Some(code) => @lib.add_note(report, code)
     None => report
   }
   let indent = if pretty { 2 } else { 0 }
@@ -391,6 +398,9 @@ async fn usage() -> Unit {
     #|              or {"id":...,"command":"..."} whose answer comes back as
     #|              {"id":...,"report":{...}}. Every line is answered, so input
     #|              and output line up one for one.
+    #|  --help-id   list the warning codes, one per line
+    #|  --help-id=CODE
+    #|              what that warning means and how to clear it
     #|  --spec      this contract in machine-readable form, as JSON
     #|  --man       the full human manual, as plain text
     #|  --man-markdown
@@ -506,7 +516,7 @@ async fn answer_stream_line(
   probe : Bool,
   counts : Counts,
   base_cwd : String?,
-  base_note : String?,
+  base_warn : @lib.WarnCode?,
 ) -> Unit {
   match @lib.decode_stream_line(line) {
     Ok(request) => {
@@ -524,8 +534,8 @@ async fn answer_stream_line(
       }
       // Every line stands alone, so the caveat about the base is repeated here
       // rather than announced once at the start of the stream.
-      let report = match base_note {
-        Some(note) => @lib.with_caveats(raw, [note])
+      let report = match base_warn {
+        Some(code) => @lib.add_note(raw, code)
         None => raw
       }
       // The report goes out untouched except for that caveat: an id, when the
@@ -571,7 +581,7 @@ async fn stream_reports(
   shell : String?,
   probe : Bool,
   base_cwd : String?,
-  base_note : String?,
+  base_warn : @lib.WarnCode?,
 ) -> Unit {
   let framer = @lib.LineFramer::new()
   let counts : Counts = { reports: 0, errors: 0, }
@@ -592,7 +602,7 @@ async fn stream_reports(
         @lib.FramedLine::Line(line) => {
           number += 1
           answer_stream_line(
-            line, number, shell, probe, counts, base_cwd, base_note,
+            line, number, shell, probe, counts, base_cwd, base_warn,
           )
         }
         @lib.FramedLine::TooLong => {
@@ -615,7 +625,7 @@ async fn stream_reports(
     Some(@lib.FramedLine::Line(line)) => {
       number += 1
       answer_stream_line(
-        line, number, shell, probe, counts, base_cwd, base_note,
+        line, number, shell, probe, counts, base_cwd, base_warn,
       )
     }
     _ => ()
@@ -635,6 +645,36 @@ async fn stream_reports(
 /// This is prose the tool vouches for: when the wire format changes, this and
 /// the help text change with it. It exists because the alternative is an agent
 /// (or a person) reverse-engineering the protocol from behaviour.
+
+///|
+/// One line per code: `--help-id` on its own is a table of contents.
+fn print_warn_codes() -> Unit {
+  for code in @lib.all_warn_codes() {
+    println("\{code.code()}  \{code.slug()}  \{code.message()}")
+  }
+}
+
+///|
+/// Everything `--help-id=CODE` knows. Listing the codes without their meaning
+/// would only move the lookup somewhere else.
+fn print_warn_code(code : @lib.WarnCode) -> Unit {
+  println("\{code.code()}  \{code.slug()}")
+  println("")
+  println(code.message())
+  println("")
+  println("What it means:")
+  println("  \{code.meaning()}")
+  println("")
+  println("How to clear it:")
+  println("  \{code.remedy()}")
+  println("")
+  println("Effect on the report:")
+  println(
+    "  adds an issue with kind \"Note\" and this code, and forces impact.uncertain",
+  )
+}
+
+///|
 fn contract_json() -> Json {
   let doc = "https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md"
   Json::object({
@@ -713,6 +753,16 @@ fn contract_json() -> Json {
         "after a cd whose destination cannot be modelled (cd $DIR), the base is unknown: those paths stay as written and impact.uncertain is set, so a missing base never passes as no change",
       ),
     }),
+    "warnings": Json::array(
+      @lib.all_warn_codes().map(fn(code) {
+        Json::object({
+          "code": Json::string(code.code()),
+          "slug": Json::string(code.slug()),
+          "message": Json::string(code.message()),
+          "uncertain": Json::boolean(true),
+        })
+      }),
+    ),
     "how_to_read": Json::string(
       "read impact.uncertain first: true means the effect list is not a closed set, and an empty list does not mean \"touches nothing\"",
     ),

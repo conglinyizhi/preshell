@@ -223,6 +223,11 @@ moon run --target native tools/ci/check.mbtx
 `node tools/embed_manual.mjs`，并确认生成文件无 diff。这样二进制、Markdown 和 man 页不会漂移。
 `tools/probe/malformed.sh` 会检查 `--spec`；发布前还要检查手册生成物是最新的。
 
+**警告走码，不走文案。** 码表在 `lib/warnings.mbt`：`add_note` 只收 `WarnCode`，不收字符串，
+所以新警告必须先登记，`preshell --help-id` 才可能完整。下游按 `issues[].code` 分流，
+文案随时可以改。加变体时记得三处：`code()`/`slug()`/`meaning()`/`remedy()` 四个 match 是穷尽的
+（编译器管），`all_warn_codes()` 不穷尽（`warnings_test.mbt` 的长度绊线管）。
+
 **路径一律输出绝对路径，没有相对回退**，见 `docs/integration.md` 的「相对路径与 pwd」。
 基准由调用方通过 `--cwd=PATH` 给；没给就用本进程当前目录推演，并在报告里留一条
 `Note`（同时置 `uncertain`），所以 `--cwd` 事实上必填。

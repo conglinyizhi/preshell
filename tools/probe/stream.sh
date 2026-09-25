@@ -144,7 +144,7 @@ check "最后一行没有换行也算一条" "$(printf '"ls"' | "$BIN" --stream 
 total_note=$(printf '"rm -rf x"\n' | "$BIN" --stream 2>/dev/null | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   const d = JSON.parse(s.trim().split("\n")[0])
-  const notes = (d.issues || []).filter(i => i.kind === "Note" && (i.message || "").includes("--cwd"))
+  const notes = (d.issues || []).filter(i => i.code === "W1")
   console.log((notes.length === 1 && d.impact.uncertain === true) ? "ok" : "bad")
 })')
 check "无 --cwd 时每条报告都带基准警告" "$total_note" "ok"

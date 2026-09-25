@@ -318,3 +318,15 @@ pub extend Word with ToJson::{to_json}
 
 ///|
 pub extend WordPart with ToJson::{to_json}
+
+///|
+pub extend WarnCode with Eq::{equal}
+
+///|
+pub extend WarnCode with Eq::{not_equal}
+
+///|
+pub extend WarnCode with @debug.Debug::{to_repr}
+
+///|
+pub extend WarnCode with ToJson::{to_json}

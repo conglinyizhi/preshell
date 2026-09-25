@@ -108,6 +108,10 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist
 shell 的脚本各有一份副本，多个 `cd` 依次累积。唯一保持原样的是 `cd` 目的地不可建模时
 （`cd $DIR`）之后的路径，那里会置 `uncertain`，因为绝对路径在信息上确实不存在。
 
+报告里带 `code` 的条目是**已登记的警告**：按 `code` 分流，别匹配 `message` 文案。
+`preshell --help-id` 列出全部码，`preshell --help-id=W1` 说明它是什么意思、怎么消掉。
+码表在 `lib/warnings.mbt`，没登记的警告发不出来。
+
 完整契约见 [docs/integration.md](docs/integration.md)。
 
 ## Bash 和 zsh

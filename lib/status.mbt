@@ -42,6 +42,11 @@ pub(all) struct Issue {
   kind : IssueKind
   message : String
   line : Int
+  /// The registered warning this issue is, when it is one. `None` for parser
+  /// findings, which are many and are keyed by their own message: the point of
+  /// a code is that a caller can act on it, and the parser's complaints are not
+  /// individually actionable.
+  code : WarnCode?
 } derive(Debug, Eq, ToJson)
 
 ///|
@@ -113,9 +118,26 @@ fn add_notes(
   if notes.length() == 0 {
     return r
   }
-  let issues : Array[Issue] = []
+  let added : Array[Issue] = []
   for n in notes {
-    issues.push({ kind, message: n, line: 0, })
+    added.push({ kind, message: n, line: 0, code: None, })
+  }
+  attach(r, added, escalate=kind is Gap)
+}
+
+///|
+/// The one place issues are folded into a report.
+///
+/// Everything that adds a warning or a parser finding goes through here, so the
+/// cap and the count of what was left out cannot drift between the paths that
+/// produce them.
+fn attach(r : Report, added : Array[Issue], escalate? : Bool = false) -> Report {
+  if added.length() == 0 {
+    return r
+  }
+  let issues : Array[Issue] = []
+  for i in added {
+    issues.push(i)
   }
   for i in r.issues {
     issues.push(i)
@@ -126,10 +148,13 @@ fn add_notes(
   } else {
     issues
   }
-  let status = if kind is Gap { Unsupported } else { r.status }
   {
     version: r.version,
-    status,
+    status: if escalate {
+      Unsupported
+    } else {
+      r.status
+    },
     impact: r.impact.mark_uncertain(),
     issues: kept,
     issues_dropped: total - kept.length(),
@@ -142,8 +167,10 @@ fn add_notes(
 /// The status is kept: the analysis did run. The impact is marked uncertain,
 /// because an answer that needed a caveat is not a closed one — a caller that
 /// ignores this reads "no writes reported" as "writes nothing".
-pub fn with_caveats(r : Report, messages : Array[String]) -> Report {
-  add_notes(r, messages, kind=Note)
+pub fn add_note(r : Report, code : WarnCode) -> Report {
+  attach(r, [
+    { kind: Note, message: code.message(), line: 0, code: Some(code), },
+  ])
 }
 
 ///|
@@ -431,7 +458,7 @@ fn analyze_clean(
   // uncertainty say the answer is not what that shell would do.
   let notes = posix_mismatch_note(src, seq)
   for n in notes {
-    issues.push({ kind: Note, message: n, line: 0, })
+    issues.push({ kind: Note, message: n, line: 0, code: None, })
     has_note = true
   }
   let impact_ = if status is Complete && !has_note {
@@ -463,7 +490,7 @@ fn classify_error(
   } else {
     Gap
   }
-  { kind, message, line, }
+  { kind, message, line, code: None, }
 }
 
 ///|

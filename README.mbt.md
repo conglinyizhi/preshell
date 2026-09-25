@@ -98,6 +98,12 @@ case that stays as written is a path after a `cd` whose destination cannot be
 modelled (`cd $DIR`), and there `uncertain` is set rather than a gap being filled
 in with a guess.
 
+An issue that carries a `code` is a registered warning: match on the code, not
+on the message text. `preshell --help-id` lists the codes, and
+`preshell --help-id=W1` explains what one means and how to clear it. The table
+lives in `lib/warnings.mbt`, and a warning cannot be emitted without being
+registered there first.
+
 See [`docs/integration.md`](docs/integration.md) for the caller contract.
 
 ## Output
