@@ -86,7 +86,7 @@ let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
   if (del.length !== 3 || JSON.stringify(del[0].vars) !== JSON.stringify(["HOME"])) { console.log("路径效果没带自己的 vars"); process.exit(1) }
   const plain = (d.impact.effects || []).filter(e => e.kind === "Exec");
-  if (plain.some(e => (e.vars || []).length !== 0)) { console.log("非路径效果不该有 vars"); process.exit(1) }
+  if (plain.some(e => (e.vars || []).length !== 0)) { console.log("静态命令名不该有 vars"); process.exit(1) }
 })'; then
   echo "  路径变量提取不合格"
   bad=$((bad + 1))
@@ -97,6 +97,23 @@ let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   if (JSON.stringify(d.impact.vars) !== JSON.stringify(["PWD"])) { console.log("~+ 没有映射到 PWD: " + JSON.stringify(d.impact.vars)); process.exit(1) }
 })'; then
   echo "  波浪号到变量的映射不合格"
+  bad=$((bad + 1))
+fi
+
+# 同一条路径在不同效果里说同样的话：命令名是洞时 Exec 也报名字，操作数是洞时
+# 与它并列的 Unknown 报同一份名字。调用方按其中任何一条去找值都该得到答案。
+total=$((total + 1))
+if ! printf '%s' '$LAUNCHER --version && rm -rf $A/x' | "$BIN" --cwd=/base 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  const d = JSON.parse(s)
+  const pick = k => (d.impact.effects || []).filter(e => e.kind === k);
+  const exec = pick("Exec")[0];
+  if (JSON.stringify(exec.vars) !== JSON.stringify(["LAUNCHER"])) { console.log("命令名是洞时 Exec 没报名字"); process.exit(1) }
+  const del = pick("Delete")[0], unk = pick("Unknown")[0];
+  if (JSON.stringify(del.vars) !== JSON.stringify(["A"]) || JSON.stringify(unk.vars) !== JSON.stringify(["A"])) { console.log("同一条路径的 Delete 与 Unknown 报的变量不一致"); process.exit(1) }
+  if (JSON.stringify(d.impact.vars) !== JSON.stringify(["LAUNCHER", "A"])) { console.log("并集不对: " + JSON.stringify(d.impact.vars)); process.exit(1) }
+})'; then
+  echo "同一条路径的变量报得不一致"
   bad=$((bad + 1))
 fi
 

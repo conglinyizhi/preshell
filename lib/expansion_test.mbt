@@ -196,3 +196,39 @@ test "a positional parameter is a hole without a name" {
   // `$1`/`$@` 没有环境可查，列出来只会让调用方去找一个不存在的变量。
   debug_inspect(vars_of("rm -rf $1/x $@"), content="[]")
 }
+
+///|
+/// 一条路径在不同效果里要说同样的话：调用方按其中任何一条去找值都该得到答案。
+test "the same path reports the same variables everywhere" {
+  let im = expansion_impact("$LAUNCHER --version && rm -rf $A/x")
+  debug_inspect(im.vars, content="[\"LAUNCHER\", \"A\"]")
+  let seen : Array[String] = []
+  for e in im.effects {
+    let mut names = ""
+    for v in e.vars {
+      names = names + v
+    }
+    let kind = match e.kind {
+      @lib.EffectKind::Exec => "Exec"
+      @lib.EffectKind::Read => "Read"
+      @lib.EffectKind::Write => "Write"
+      @lib.EffectKind::Delete => "Delete"
+      @lib.EffectKind::Net => "Net"
+      @lib.EffectKind::Spawn => "Spawn"
+      @lib.EffectKind::Unknown => "Unknown"
+    }
+    seen.push(kind + ":" + e.target + ":" + names)
+  }
+  // 命令名本身是洞时 Exec 也报名字；操作数是洞时 Delete 与 Unknown 报同一份。
+  debug_inspect(
+    seen,
+    content=(
+      #|[
+      #|  "Exec:$LAUNCHER:LAUNCHER",
+      #|  "Exec:rm:",
+      #|  "Delete:$A/x:A",
+      #|  "Unknown:$A/x:A",
+      #|]
+    ),
+  )
+}

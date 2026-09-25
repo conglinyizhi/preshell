@@ -499,7 +499,9 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
 /// A hole in a position we cannot evaluate is reported instead of guessed.
 fn Collector::note_holes(self : Collector, w : Word) -> Unit {
   if w.has_hole() {
-    self.push(Unknown, w.literal_text(), true, w.line)
+    // Same word as the path effects below it, so it must carry the same
+    // variables: `$X/y` is one unresolved path, not two unrelated facts.
+    self.push_path(Unknown, PathArg::of(w), w.line)
   }
 }
 
@@ -641,7 +643,9 @@ fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
   match command_name(s) {
     None =>
       if s.words.length() > 0 {
-        self.push(Exec, s.words[0].literal_text(), true, line)
+        // The program name itself is a hole (`$CMD --help`): the caller can
+        // resolve it with the value it knows, so hand the name over.
+        self.push_path(Exec, PathArg::of(s.words[0]), line)
       }
     Some(n) => self.classify(n, s, line)
   }
@@ -1094,7 +1098,9 @@ fn Collector::classify(
   }
   for it in checked {
     if it.dynamic && !it.text.has_prefix("-") {
-      self.push(Unknown, it.text, true, line)
+      // The same operand the path effects already reported, so it carries the
+      // same variables: one unresolved path, one set of names.
+      self.push_path(Unknown, it, line)
     }
   }
 }
