@@ -14,7 +14,6 @@ def main():
     command = [
         "moon",
         "run",
-        "--quiet",
         "--target",
         "native",
         "tools/ci/check.mbtx",

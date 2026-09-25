@@ -31,4 +31,4 @@ jobs:
         run: moon update
 
       - name: MoonBit CI engine
-        run: moon run --quiet --target native tools/ci/check.mbtx
+        run: moon run --target native tools/ci/check.mbtx

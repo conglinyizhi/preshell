@@ -46,4 +46,4 @@ jobs:
       - name: MoonBit release engine
         env:
           GH_TOKEN: ${{ github.token }}
-        run: moon run --quiet --target native tools/ci/release.mbtx -- "${{ inputs.tag || github.ref_name }}" "${{ github.server_url }}/${{ github.repository }}"
+        run: moon run --target native tools/ci/release.mbtx -- "${{ inputs.tag || github.ref_name }}" "${{ github.server_url }}/${{ github.repository }}"
