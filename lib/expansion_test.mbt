@@ -232,3 +232,48 @@ test "the same path reports the same variables everywhere" {
     ),
   )
 }
+
+///|
+/// 重定向的目标也是一个词，它带的事实和别的词一样多。实测 bash：`echo hi >~/x`
+/// 会展开波浪号（写 `$HOME/x`），所以这里不能把 `~` 当字面量锚定到当前目录。
+test "a redirect target carries the expansion facts too" {
+  let im = expansion_impact("echo hi >~/x")
+  debug_inspect(im.vars, content="[\"HOME\"]")
+  inspect(im.uncertain, content="true")
+  let targets : Array[String] = []
+  for e in im.effects {
+    if e.kind == @lib.EffectKind::Write {
+      targets.push(e.target)
+    }
+  }
+  debug_inspect(targets, content="[\"~/x\"]")
+}
+
+///|
+/// 满足变量赋值形式的词，即使出现在参数位置，`=` 之后与每个 `:` 之后的波浪号
+/// 也照样展开（bash 5.3 手册 "Tilde Expansion"；subst.c 记录首个 `=` 的偏移并在
+/// 下一个字符是 `~` 时置 internal_tilde，`case ':'` 同理；execute_cmd.c 把这类参数
+/// 标成 W_ASSIGNARG|W_TILDEEXP）。实测 `echo of=~/z` 打印展开后的路径。
+test "an assignment-form argument expands its tilde" {
+  let im = expansion_impact("dd of=~/backup.img")
+  debug_inspect(im.vars, content="[\"HOME\"]")
+  let written : Array[String] = []
+  for e in im.effects {
+    if e.kind == @lib.EffectKind::Write {
+      written.push(e.target)
+    }
+  }
+  debug_inspect(written, content="[\"~/backup.img\"]")
+  debug_inspect(expansion_impact("echo a=~/b:~/c").vars, content="[\"HOME\"]")
+}
+
+///|
+/// `--file=` 不是赋值形式（左边不是名字），bash 与 zsh 都原样交给程序，
+/// 所以那里的 `~` 是字面量，路径照常锚定。
+test "a non-assignment option value keeps its tilde literal" {
+  let im = expansion_impact("echo --file=~/q")
+  debug_inspect(im.vars, content="[]")
+  inspect(im.uncertain, content="false")
+  // 赋值语句本身不是路径，它不产生效果。
+  debug_inspect(expansion_impact("x=~/w").effects.length(), content="0")
+}

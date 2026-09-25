@@ -245,6 +245,13 @@ Expansion" 规定 `~`=`$HOME`、`~user` 在登录名无效时**前缀原样保�
 `$Xy`、`"~"` 与 `~` 在文本上分不开，只看文本必然出错。`~`→`HOME`、`~+`→`PWD`、`~-`→`OLDPWD`
 是标准映射（bash 5.3 手册 "Tilde Expansion"），`~user`/`~N` 给不出名字。
 
+**波浪号不止在词首展开。** 满足变量赋值形式的词（`NAME=…`）里，首个 `=` 之后与每个 `:`
+之后也展开，出现在参数位置同样如此——这就是 `dd of=~/x`、`echo a=~/b:~/c` 的 `~` 会变成
+`$HOME` 的原因（bash 5.3 手册 "Tilde Expansion"；`subst.c` 记录首个 `=` 的偏移并在下一个
+字符是 `~` 时置 `internal_tilde`，`case ':'` 同理；`execute_cmd.c:4321` 把这类参数标成
+`W_ASSIGNARG|W_TILDEEXP`）。`--file=~/x` 的左边不是名字，两个 shell 都原样交给程序，那里的
+`~` 是字面量。重定向目标也是一个词，走 `PathArg::of` 再 `push_path`，别自己拿文本拼。
+
 **同一条路径在所有效果上说同样的话。** `Delete` 与它并列的 `Unknown`、动态命令名与它的 `Exec`，`vars` 必须一致：调用方按其中任何一条去找值都该得到答案。加效果时走 `push_path` 就不会漏。实现看 `Collector::push` 的 `starts_unresolved`
 加上词本身的洞标记，两条必须同时成立——只看文本会把 `'$X/y'` 误判成未解析。回归用例在 `lib/cwd_position_test.mbt`
 （单 cd 位置、多 cd 累积、越过根、作用域隔离）与 `tools/probe/malformed.sh`（基准回退与警告）。

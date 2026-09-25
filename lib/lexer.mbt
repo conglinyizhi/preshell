@@ -873,10 +873,15 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
           }
         }
       }
-      '~' if unquoted && parts.length() == 0 && lit.is_empty() => {
+      '~' if unquoted && tilde_at_value_start(parts, lit) => {
         let t = self.read_tilde()
         match t {
-          Some(text) => parts.push(Tilde(text))
+          Some(text) => {
+            // The prefix (`of=` in `of=~/z`) is literal text that comes before
+            // the expansion, so it has to be flushed first.
+            flush_lit(parts, lit)
+            parts.push(Tilde(text))
+          }
           None => {
             lit.write_char(c)
             self.advance(1)
@@ -1143,6 +1148,51 @@ fn Lexer::bracket_end(self : Lexer) -> Int? {
         i += 1
       }
     }
+  }
+}
+
+///|
+/// Whether a `~` at this position starts a tilde expansion.
+///
+/// Besides the head of a word, the shell expands a tilde inside a word that
+/// satisfies the conditions of a variable assignment: right after its first `=`
+/// and after each `:`. subst.c is where that happens (`W_ASSIGNMENT` records the
+/// offset of the first `=` and sets `internal_tilde` when the next character is
+/// `~`; `case ':'` does the same), and execute_cmd.c flags assignment-form
+/// arguments `W_ASSIGNARG|W_TILDEEXP`, which is why `echo of=~/z` prints an
+/// expanded path. `--file=~/x` is not an assignment form and bash leaves that
+/// tilde alone (measured in bash 5.3 and zsh 5.9).
+fn tilde_at_value_start(parts : Array[WordPart], lit : StringBuilder) -> Bool {
+  if parts.length() > 0 {
+    return false
+  }
+  let t = lit.to_string()
+  if t.is_empty() {
+    return true
+  }
+  if !(t.has_suffix("=") || t.has_suffix(":")) {
+    return false
+  }
+  // A backslash anywhere in the prefix means the `=` or `:` may have been
+  // escaped, and an escaped one does not make the word an assignment.
+  if t.contains("\\") {
+    return false
+  }
+  let mut eq = -1
+  for i, c in t {
+    if c == '=' {
+      eq = i
+      break
+    }
+  }
+  if eq <= 0 {
+    return false
+  }
+  let name = t.unsafe_substring(start=0, end=eq)
+  if name.has_suffix("+") {
+    is_valid_name(name.unsafe_substring(start=0, end=name.length() - 1))
+  } else {
+    is_valid_name(name)
   }
 }
 

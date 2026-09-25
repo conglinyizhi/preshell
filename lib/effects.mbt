@@ -576,37 +576,23 @@ fn is_fd_word(t : String) -> Bool {
 ///|
 fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
   let line = r.target.line
-  let dynamic_target = r.target.static_text() == None
-  let t = r.target.literal_text()
+  // The target is a word like any other, so it carries the same facts: `>~/x`
+  // is `$HOME/x` (measured: bash expands it), and a hole in it is a hole.
+  let arg = PathArg::of(r.target)
+  let named = if arg.text == "" {
+    // A redirect with no target word is a syntax error, but the answer still
+    // has to name something.
+    PathArg::lit("<unknown>", dynamic=arg.dynamic)
+  } else {
+    arg
+  }
   match r.op {
-    ROut | RAppend | RClobber | RInOut =>
-      self.push(
-        Write,
-        if t == "" {
-          "<unknown>"
-        } else {
-          t
-        },
-        dynamic_target,
-        line,
-      )
-    RIn => self.push(Read, t, dynamic_target, line)
+    ROut | RAppend | RClobber | RInOut => self.push_path(Write, named, line)
+    RIn => self.push_path(Read, named, line)
     // `>&word` duplicates a descriptor when word is one, and writes the file
     // otherwise. Measured: `bash -c 'echo hi >& out'` and the same in zsh both
     // write a file called out, and we used to report nothing at all.
-    RDupOut =>
-      if !is_fd_word(t) {
-        self.push(
-          Write,
-          if t == "" {
-            "<unknown>"
-          } else {
-            t
-          },
-          dynamic_target,
-          line,
-        )
-      }
+    RDupOut => if !is_fd_word(named.text) { self.push_path(Write, named, line) }
     // `<&word` with a word that is not a descriptor is an error at run time in
     // bash, so there is no path to report.
     RDupIn => ()

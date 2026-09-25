@@ -100,6 +100,24 @@ let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   bad=$((bad + 1))
 fi
 
+# 波浪号不只出现在词首：重定向目标与赋值形参数（`of=~/x`）里它也展开，
+# 那时把当前目录拼上去就是一条错的事实（实测 bash 会展开成 $HOME/x）。
+total=$((total + 2))
+for cmd in 'echo hi >~/x' 'dd of=~/b.img'; do
+  if ! printf '%s' "$cmd" | "$BIN" --cwd=/base 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  const d = JSON.parse(s)
+  const path = (d.impact.effects || []).find(e => e.kind === "Write");
+  if (!path) { console.log("没有写路径"); process.exit(1) }
+  if (path.target.indexOf("/base") === 0) { console.log("把基准拼到了展开的路径上: " + path.target); process.exit(1) }
+  if (JSON.stringify(path.vars) !== JSON.stringify(["HOME"])) { console.log("没有报出 HOME: " + JSON.stringify(path.vars)); process.exit(1) }
+  if (d.impact.uncertain !== true) { console.log("没有置 uncertain"); process.exit(1) }
+})'; then
+    echo "  $cmd 的波浪号处理不合格"
+    bad=$((bad + 1))
+  fi
+done
+
 # 同一条路径在不同效果里说同样的话：命令名是洞时 Exec 也报名字，操作数是洞时
 # 与它并列的 Unknown 报同一份名字。调用方按其中任何一条去找值都该得到答案。
 total=$((total + 1))
