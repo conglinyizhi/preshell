@@ -211,21 +211,13 @@ async fn main {
         Some(dir) =>
           (
             Some(dir),
-            Some(
-              "no --cwd given: relative paths were resolved against the current directory, " +
-              dir,
-            ),
+            Some("no --cwd given: base inferred from the current directory"),
           )
         // Not a caller mistake and not a parser gap: the tool could not read
         // something about its own environment, so the base is unknown and the
         // paths cannot be resolved at all.
         None =>
-          (
-            None,
-            Some(
-              "no --cwd given and the current directory could not be read: relative paths were left as written",
-            ),
-          )
+          (None, Some("no --cwd given: the current directory is unreadable"))
       }
   }
   if stream {

@@ -143,9 +143,11 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist, impact.cwd: /s
 `issues[]` 里的 `Note` 就是警告：解析成功，但这份报告不该被当成一份干净账单。
 
 - 每条警告都会强制 `impact.uncertain: true`，所以「有没有警告」和「要不要多看一眼」是同一件事
-- 目前只有基准相关的两条：没传 `--cwd`（文案以 `no --cwd given` 开头），以及连当前目录都读不到
-  （文案以 `no --cwd given and the current directory could not be read` 开头）
-- 要程序化判定，匹配这两个前缀就够。**别匹配整句**：文案是散文，会改
+- 目前只有基准相关的两条，都以 `no --cwd given` 开头：一条是没传 `--cwd`（基准从当前目录推演），
+  一条是连当前目录都读不到（此后的路径只能保持原样）
+- **基准值本身不写在警告里**，它在 `impact.cwd`：文案短、不随路径长度膨胀（批量模式下这条
+  警告每行都会出现）
+- 要程序化判定，匹配 `no --cwd given` 这个前缀就够。**别匹配整句**：文案是散文，会改
 - `Gap` / `Syntax` 不是警告，是解析器发现：它们描述「我们看懂了多少」，会让 `status` 变成
   `Unsupported` / `Invalid`
 
