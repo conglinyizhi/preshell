@@ -22,7 +22,7 @@ PreShell **不会执行输入的命令**，不会读取调用方磁盘，不会�
 ### 使用发布版
 
 ```bash
-TAG=v0.2.1
+TAG=v0.3.0
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell
 sha256sum -c SHA256SUMS

@@ -53,9 +53,9 @@ async fn main {
       ["-e", "-o", "pipefail", "-c", "moon fmt && git diff --exit-code -- '*.mbt' && moon check --target native"],
     ),
     (
-      "Manual generation",
+      "Generated sources",
       "node",
-      ["tools/embed_manual.mjs", "--check"],
+      ["tools/codegen.mjs", "--check"],
     ),
     (
       "Differential against bash -n",

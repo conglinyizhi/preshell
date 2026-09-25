@@ -76,7 +76,8 @@ PreShell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 `preshell --spec` 是它的机读形式（JSON，给拿得到二进制、拿不到仓库的 agent 用），
 完整手册的唯一事实来源是 `docs/preshell.md`：二进制用 `preshell --man` 输出纯文本，
 用 `preshell --man-markdown` 输出 Markdown，`docs/preshell.1` 则供 `man preshell`；第三方材料和许可见 `docs/third-party-licenses.md`。
-生成链由 `tools/embed_manual.mjs` 维护，不要直接编辑生成文件。
+生成链由 `tools/codegen.mjs` 维护，不要直接编辑生成文件。版本号只有 `moon.mod` 一个来源：
+二进制自报的版本、man 页头部都由它生成，CI 用 `--check` 比对，漂移会当场失败。
 
 PreShell 的 GitHub Release 页面是变更记录，不重复 README 的项目介绍。发布 workflow 从 tag 之间的
 提交标题自动生成说明：`feat`、`fix`、`perf`、`refactor` 排在前面，所有详细记录折叠，
@@ -89,8 +90,13 @@ PreShell 的 GitHub Release 页面是变更记录，不重复 README 的项目�
 `--version` 给出版本与 schema 号，调用方据此锁住自己解析的形状：
 
 ```json
-{"tool":"preshell","version":"0.2.1","schema":1}
+{"tool":"preshell","version":"0.3.0","schema":1}
 ```
+
+**版本号和 schema 号管的事不一样。** `version` 是工具的行为版本：0.3.0 起路径一律输出绝对路径，
+这类行为变化不动形状；`schema` 是报告的形状版本，只在既有字段的含义或结构变了才动。
+加新字段（比如每条效果的 `vars`）不动 `schema`——所以调用方按「未知字段忽略、未知 kind 当
+Unknown」解析，出新版本就不会被打挂
 
 ## 相对路径与 pwd
 
@@ -250,7 +256,7 @@ stdin 没有这些问题：命令原样进去，原样分析。
 ### 直接用发布版（不想装工具链）
 
 ```bash
-TAG=v0.2.1
+TAG=v0.3.0
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell && sha256sum -c SHA256SUMS
 install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell

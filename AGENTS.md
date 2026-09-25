@@ -213,14 +213,16 @@ moon run --target native tools/ci/check.mbtx
 ## PreShell 契约与手册的事实来源
 
 `--help` 是短契约，`--spec` 是机读契约，完整手册的唯一事实来源是 `docs/preshell.md`。
-`tools/embed_manual.mjs` 从这份 Markdown 生成：
+`tools/codegen.mjs` 从这份 Markdown 与 `moon.mod` 生成：
 第三方材料的来源与许可见 `docs/third-party-licenses.md`；改动分析语料或 oracle 前先更新那份说明。
 
 - `cmd/preshell/manual_generated.mbt`：二进制内置的 `--man` 纯文本和 `--man-markdown`
 - `docs/preshell.1`：系统 `man preshell` 使用的 roff 页面
 
 **不要直接编辑两个生成文件**。改手册先改 `docs/preshell.md`，再运行
-`node tools/embed_manual.mjs`，并确认生成文件无 diff。这样二进制、Markdown 和 man 页不会漂移。
+`node tools/codegen.mjs`，并确认生成文件无 diff。这样二进制、Markdown 和 man 页不会漂移。
+**版本号只有一个来源：`moon.mod` 里那一行。** 二进制自报的版本、man 页头部与模块注册表都从它派生，
+所以改版本只改一处——0.2.1 那次还要单独提交一次手抄的副本，那条路已经堵上。
 `tools/probe/malformed.sh` 会检查 `--spec`；发布前还要检查手册生成物是最新的。
 
 **警告就是 `issues[]` 里的 `Note`，没有单独的码表。** 曾经做过一套 `W0`/`W1` 码加
