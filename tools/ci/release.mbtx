@@ -107,7 +107,17 @@ async fn main {
   } else {
     "https://github.com/conglinyizhi/preshell"
   }
-  let dry_run = if args.length() >= 4 { args[3] } else { "" }
-  let local = if args.length() >= 5 { args[4] } else { "" }
+  // Flags are scanned rather than positional: `-- v0.3.0 repo --local` is what a
+  // person types, and binding `--local` to the dry-run slot would silently skip
+  // the tag check instead of failing.
+  let mut dry_run = ""
+  let mut local = ""
+  for i in 3..<args.length() {
+    match args[i] {
+      "--dry-run" => dry_run = "--dry-run"
+      "--local" => local = "--local"
+      unknown => abort("unknown option: \{unknown}")
+    }
+  }
   run_release(tag, repo, dry_run, local)
 }
