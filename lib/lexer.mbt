@@ -631,6 +631,10 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
   // only while nothing has been read after that brace, which is exactly when
   // zsh's pushback fires.
   let mut rbrace_end = -1
+  // True once an escape was consumed in this word. bash decides the assignment
+  // form from the raw token, where a backslash is not a legal variable
+  // character, so `a\=~/x` is not one and its tilde stays literal (measured).
+  let mut escaped = false
   // True when the word stopped at a newline while a pattern group was still
   // open. zsh keeps reading the group across the newline (`inbl && !pct` gates
   // the break), so the `}` before it is not the last character of the word
@@ -731,6 +735,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
             } else {
               self.advance(2)
               lit.write_char(d)
+              escaped = true
             }
         }
       '\'' if unquoted => {
@@ -873,7 +878,7 @@ fn Lexer::read_parts(self : Lexer, unquoted : Bool) -> Array[WordPart] {
           }
         }
       }
-      '~' if unquoted && tilde_at_value_start(parts, lit) => {
+      '~' if unquoted && !escaped && tilde_at_value_start(parts, lit) => {
         let t = self.read_tilde()
         match t {
           Some(text) => {
@@ -1158,42 +1163,107 @@ fn Lexer::bracket_end(self : Lexer) -> Int? {
 /// satisfies the conditions of a variable assignment: right after its first `=`
 /// and after each `:`. subst.c is where that happens (`W_ASSIGNMENT` records the
 /// offset of the first `=` and sets `internal_tilde` when the next character is
-/// `~`; `case ':'` does the same), and execute_cmd.c flags assignment-form
-/// arguments `W_ASSIGNARG|W_TILDEEXP`, which is why `echo of=~/z` prints an
-/// expanded path. `--file=~/x` is not an assignment form and bash leaves that
-/// tilde alone (measured in bash 5.3 and zsh 5.9).
+/// `~`; `case ':'` does the same), and parse.y sets `W_ASSIGNMENT` from the
+/// shape of the word alone, so `echo of=~/z` expands too. `--file=~/x` is not
+/// assignment-shaped and bash leaves that tilde alone (measured).
 fn tilde_at_value_start(parts : Array[WordPart], lit : StringBuilder) -> Bool {
-  if parts.length() > 0 {
-    return false
+  let t = match assign_prefix(parts, lit) {
+    None => return false
+    Some(t) => t
   }
-  let t = lit.to_string()
   if t.is_empty() {
     return true
   }
   if !(t.has_suffix("=") || t.has_suffix(":")) {
     return false
   }
-  // A backslash anywhere in the prefix means the `=` or `:` may have been
-  // escaped, and an escaped one does not make the word an assignment.
+  // A backslash left in the prefix means it came from a subscript, where the
+  // raw-token rule has already been applied by the caller.
   if t.contains("\\") {
     return false
   }
-  let mut eq = -1
-  for i, c in t {
-    if c == '=' {
-      eq = i
-      break
+  is_assign_form(t)
+}
+
+///|
+/// The text of the word so far, or None when any part of it was quoted or
+/// expanded. bash decides the assignment form from the raw token, so `"a"=~/z`
+/// is not one and its tilde stays literal (measured).
+fn assign_prefix(parts : Array[WordPart], lit : StringBuilder) -> String? {
+  let sb = StringBuilder()
+  for p in parts {
+    match p {
+      Lit(s) => sb.write_string(s)
+      // `a[0]=~/x`: bash's assignment() skips a subscript before the `=`, and
+      // bash's own test suite has `aa[~/Documents]=~/Library`.
+      Subscript(inner) => {
+        sb.write_char('[')
+        sb.write_string(parts_text(inner))
+        sb.write_char(']')
+      }
+      _ => return None
     }
   }
-  if eq <= 0 {
-    return false
+  sb.write_string(lit.to_string())
+  Some(sb.to_string())
+}
+
+///|
+/// A port of bash's `assignment()` (general.c:480), which is what decides
+/// whether a word is assignment-shaped: the first character must be a legal
+/// variable starter, the name may hold only letters, digits, `_` and `[...]`
+/// subscripts, and the name ends at `=` or `+=`.
+fn is_assign_form(t : String) -> Bool {
+  match t.get_char(0) {
+    Some(c) => if !is_name_start(c) { return false }
+    None => return false
   }
-  let name = t.unsafe_substring(start=0, end=eq)
-  if name.has_suffix("+") {
-    is_valid_name(name.unsafe_substring(start=0, end=name.length() - 1))
-  } else {
-    is_valid_name(name)
+  let mut i = 1
+  while i < t.length() {
+    match t.get_char(i) {
+      None => return false
+      Some(c) =>
+        if c == '=' {
+          return true
+        } else if c == '[' {
+          let mut depth = 0
+          let mut j = i
+          let mut closed = false
+          while j < t.length() {
+            match t.get_char(j) {
+              Some('[') => depth += 1
+              Some(']') => {
+                depth -= 1
+                if depth == 0 {
+                  closed = true
+                  j += 1
+                  break
+                }
+              }
+              Some(_) => ()
+              None => break
+            }
+            j += 1
+          }
+          if !closed {
+            return false
+          }
+          i = j
+          match t.get_char(i) {
+            Some('=') => return true
+            Some('+') => return t.get_char(i + 1) == Some('=')
+            _ => return false
+          }
+        } else if c == '+' && t.get_char(i + 1) == Some('=') {
+          return true
+        } else if is_name_char(c) {
+          i += 1
+        } else {
+          return false
+        }
+    }
   }
+  false
 }
 
 ///|

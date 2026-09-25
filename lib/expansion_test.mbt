@@ -277,3 +277,23 @@ test "a non-assignment option value keeps its tilde literal" {
   // 赋值语句本身不是路径，它不产生效果。
   debug_inspect(expansion_impact("x=~/w").effects.length(), content="0")
 }
+
+///|
+/// 赋值形不是「看起来像」就够：决定它的是 bash 的 assignment()（general.c:480），
+/// 它扫的是**原始 token**——名字里只允许字母、数字、`_` 与 `[...]` 下标，遇到第一个
+/// `=` 就成立。所以 `a[0]=~/x` 展开（bash 自己的测试语料里就有
+/// `aa[~/Documents]=~/Library`），而带引号或反斜杠的都不算。
+test "the assignment form is decided by shape, as bash decides it" {
+  debug_inspect(expansion_impact("rm a[0]=~/x").vars, content="[\"HOME\"]")
+  debug_inspect(expansion_impact("echo \"a\"=~/z").vars, content="[]")
+  debug_inspect(expansion_impact("echo a\\=~/z").vars, content="[]")
+  // 下标形的词当路径用时基准照常成立（词首是字面量），但文本里的 `~` 不在词首，
+  // 所以它保持原样，靠 dynamic 与 uncertain 提示调用方去补。
+  let del : Array[String] = []
+  for e in expansion_impact("rm a[0]=~/x").effects {
+    if e.kind == @lib.EffectKind::Delete {
+      del.push(e.target + "|" + e.dynamic.to_string())
+    }
+  }
+  debug_inspect(del, content="[\"/base/a[0]=~/x|true\"]")
+}

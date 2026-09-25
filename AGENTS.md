@@ -252,6 +252,18 @@ Expansion" 规定 `~`=`$HOME`、`~user` 在登录名无效时**前缀原样保�
 `W_ASSIGNARG|W_TILDEEXP`）。`--file=~/x` 的左边不是名字，两个 shell 都原样交给程序，那里的
 `~` 是字面量。重定向目标也是一个词，走 `PathArg::of` 再 `push_path`，别自己拿文本拼。
 
+**「赋值形」以 bash 的 `assignment()` 为准（general.c:480）。** 它扫的是**原始 token**：首字符必须是
+合法变量起始字符（字母、`_`），名字里只允许字母、数字、`_` 与 `[...]` 下标，遇到第一个 `=`（或
+`+=`）即成assignment。所以下标形也展开（bash 自己的测试语料里有 `aa[~/Documents]=~/Library`），
+而带引号（`"a"=~/z`）或转义（`a\=~/z`）的都不算——词法器为此记了一个「本词出现过转义」的标记。
+
+已知两处**有意的**偏离，方向都不是「编一条假路径」：
+
+- POSIX 模式（`bash --posix`，以及映射到 bash 的 `sh`/`dash`）下 bash 不展开赋值形参数里的波浪号
+  （subst.c 那两处都有 `posixly_correct == 0` 的前提）。我们不建模 `--posix`，照样按展开报，
+  代价是多一个洞而不是一条错的绝对路径
+- 下标形的词当作路径时，文本里那个 `~` 不在词首，保持原样，靠 `dynamic` 与 `uncertain` 让调用方去补
+
 **这条规则不按方言拆开，是故意的。** bash 在赋值形参数里必展开；zsh 默认不展开，只有开了
 `magicequalsubst` 才展开（实测 zsh 5.9：`echo of=~/z` 原样，加了那个选项才展开成家目录）。
 预Shell 不建模 `setopt` 状态，所以两边都按「展开、置 `uncertain`」报：丢一个事实（默认 zsh）
