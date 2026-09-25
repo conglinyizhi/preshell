@@ -1,5 +1,8 @@
 # PreShell
 
+- 中文版：[README.zh-CN.md](README.zh-CN.md)
+- English: this page
+
 A shell command *analyzer*, not an approver.
 
 Give it a command line and it tells you **what that command touches**: which
