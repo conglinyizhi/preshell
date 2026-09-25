@@ -6,14 +6,43 @@ import {
 }
 
 ///|
-async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
+/// TAG REPOSITORY [--dry-run] [--local]
+///
+/// `--local` is for rehearsing a release on a developer's machine: the tag does
+/// not have to exist yet, the commit range ends at HEAD, and nothing is sent
+/// anywhere. Everything else ([moon.mod] version against the tag, the artifact
+/// name, the checksums, the notes) is what the real run does.
+async fn run_release(
+  tag : String,
+  repo : String,
+  dry_run : String,
+  local : String,
+) -> Unit {
   let script = #|set -euo pipefail
     #|TAG="$1"
     #|REPO="$2"
     #|DRY_RUN="${3:-}"
-    #|git rev-parse --verify "refs/tags/$TAG" >/dev/null
-    #|PREVIOUS_TAG=$(git tag --sort=-version:refname --merged "$TAG" | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | awk -v tag="$TAG" '$0 != tag { print; exit }' || true)
+    #|LOCAL="${4:-}"
+    #|if [ "$LOCAL" = "--local" ]; then
+    #|  # Rehearsal: the tag may not exist yet, so nothing may depend on it.
+    #|  RANGE_TO=HEAD
+    #|  DRY_RUN="--dry-run"
+    #|  echo "本地模拟 $TAG：tag 不必存在，范围到 HEAD，不发任何远程请求"
+    #|else
+    #|  git rev-parse --verify "refs/tags/$TAG" >/dev/null
+    #|  RANGE_TO="$TAG"
+    #|fi
+    #|PREVIOUS_TAG=$(git tag --sort=-version:refname --merged "$RANGE_TO" | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | awk -v tag="$TAG" '$0 != tag { print; exit }' || true)
     #|echo "发布 $TAG，上一版本 ${PREVIOUS_TAG:-无}"
+    #|# The version lives in moon.mod alone (tools/codegen.mjs bakes it into the
+    #|# binary and the man page), so the tag and the manifest are compared here:
+    #|# publishing v0.3.0 with a binary that calls itself 0.2.1 is the one
+    #|# mismatch a user cannot work around.
+    #|MOD_VERSION=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' moon.mod)
+    #|if [ "v$MOD_VERSION" != "$TAG" ]; then
+    #|  echo "moon.mod 的版本是 $MOD_VERSION，与 tag $TAG 不一致" >&2
+    #|  exit 1
+    #|fi
     #|moon build --release --target native
     #|moon test --target native
     #|bash tools/corpus/run.sh | tee /tmp/corpus.txt
@@ -21,6 +50,11 @@ async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
     #|bash tools/probe/stream.sh
     #|BIN=_build/native/release/build/cmd/preshell/preshell.exe
     #|"$BIN" --version
+    #|if ! "$BIN" --version | grep -q "\"version\":\"$MOD_VERSION\""; then
+    #|  echo "二进制自报的版本不是 $MOD_VERSION" >&2
+    #|  exit 1
+    #|fi
+    #|node tools/codegen.mjs --check
     #|rm -rf dist
     #|mkdir -p dist
     #|install -Dm755 "$BIN" "dist/preshell-$TAG-$(uname -m)-linux"
@@ -29,7 +63,7 @@ async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
     #|install -Dm644 NOTICE dist/NOTICE
     #|( cd dist && sha256sum preshell-* preshell.1 preshell.md NOTICE > SHA256SUMS && cat SHA256SUMS )
     #|RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
-    #|tools/release_notes.sh --from "$PREVIOUS_TAG" --to "$TAG" --assets dist --repo "$REPO" > "$RUNNER_TEMP/notes.md"
+    #|tools/release_notes.sh --from "$PREVIOUS_TAG" --to "$RANGE_TO" --link-tag "$TAG" --assets dist --repo "$REPO" > "$RUNNER_TEMP/notes.md"
     #|cat "$RUNNER_TEMP/notes.md"
     #|if [ "$DRY_RUN" = "--dry-run" ]; then
     #|  echo "dry-run：跳过 GitHub Release 发布"
@@ -42,7 +76,18 @@ async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
     #|  gh release create "$TAG" --title "PreShell $TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
     #|fi
     #|gh release view "$TAG" --json url,assets --jq '"\\(.url)\\n" + ([.assets[].name] | join(", "))'
-  let code = @process.run("bash", ["-e", "-o", "pipefail", "-c", script, "release.mbtx", tag, repo, dry_run])
+  let code = @process.run("bash", [
+    "-e",
+    "-o",
+    "pipefail",
+    "-c",
+    script,
+    "release.mbtx",
+    tag,
+    repo,
+    dry_run,
+    local,
+  ])
   if code != 0 {
     abort("release failed with exit code \\{code}")
   }
@@ -52,10 +97,17 @@ async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
 async fn main {
   let args = @env.args()
   guard args.length() >= 2 else {
-    abort("usage: moon run --target native tools/ci/release.mbtx -- TAG REPOSITORY [--dry-run]")
+    abort(
+      "usage: moon run --target native tools/ci/release.mbtx -- TAG REPOSITORY [--dry-run] [--local]",
+    )
   }
   let tag = args[1]
-  let repo = if args.length() >= 3 { args[2] } else { "https://github.com/conglinyizhi/preshell" }
+  let repo = if args.length() >= 3 {
+    args[2]
+  } else {
+    "https://github.com/conglinyizhi/preshell"
+  }
   let dry_run = if args.length() >= 4 { args[3] } else { "" }
-  run_release(tag, repo, dry_run)
+  let local = if args.length() >= 5 { args[4] } else { "" }
+  run_release(tag, repo, dry_run, local)
 }

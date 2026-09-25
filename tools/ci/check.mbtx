@@ -73,6 +73,11 @@ async fn main {
       ["tools/probe/malformed.sh"],
     ),
     (
+      "Release notes",
+      "bash",
+      ["tools/test_release_notes.sh"],
+    ),
+    (
       "Streaming mode",
       "bash",
       ["tools/probe/stream.sh"],

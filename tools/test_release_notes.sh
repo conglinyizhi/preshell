@@ -90,6 +90,16 @@ commit 'ci: only maintenance'
 ) > "$empty"
 grep -Fq '本版本没有用户可见变更。' "$empty" || fail '空用户分类没有明确说明'
 
+# The release link can name a tag while the range ends somewhere else, which is
+# what a local rehearsal needs (range ends at HEAD, link names the planned tag).
+linked="$TMP/linked.md"
+(
+  cd "$repo"
+  "$GEN" --from v0.1 --to v0.2 --link-tag v0.9 --repo https://example.invalid/preshell
+) > "$linked"
+grep -Fq '[v0.9](https://example.invalid/preshell/releases/tag/v0.9)' "$linked" ||
+  fail '--link-tag 没有决定链接标签'
+
 # Unknown tags and malformed options fail without a misleading report.
 if (cd "$repo" && "$GEN" --from missing --to v0.2 >/dev/null 2>&1); then
   fail '不存在的 source tag 没有失败'

@@ -4,10 +4,11 @@ set -eu
 
 from=
 to=HEAD
+link_tag=
 assets=
 repo=
 usage() {
-  echo "usage: $0 [--from TAG] [--to TAG] [--assets DIR] [--repo URL]" >&2
+  echo "usage: $0 [--from TAG] [--to TAG] [--link-tag NAME] [--assets DIR] [--repo URL]" >&2
   exit 2
 }
 
@@ -21,6 +22,14 @@ while [ "$#" -gt 0 ]; do
     --to)
       [ "$#" -ge 2 ] || usage
       to=$2
+      shift 2
+      ;;
+    # The range endpoint and the release being described are not always the
+    # same thing: a rehearsal ends its range at HEAD while still presenting
+    # itself as the tag it is rehearsing.
+    --link-tag)
+      [ "$#" -ge 2 ] || usage
+      link_tag=$2
       shift 2
       ;;
     --assets)
@@ -181,7 +190,8 @@ echo 'sha256sum -c SHA256SUMS'
 echo '```'
 echo
 if [ -n "$repo" ]; then
-  echo "源码与本版本对应的 tag：[$to]($repo/releases/tag/$to)"
+  label=${link_tag:-$to}
+  echo "源码与本版本对应的 tag：[$label]($repo/releases/tag/$label)"
   echo
   echo "许可证：GPL-3.0-or-later。"
 fi
