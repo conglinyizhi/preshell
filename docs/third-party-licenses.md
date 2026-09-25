@@ -40,5 +40,6 @@ MoonBit 的 `moonbitlang/async` 通过 `moon.mod` 声明并由工具链 registry
 
 ## PreShell 本身
 
-PreShell 的许可证文本在仓库根目录 `LICENSE`，模块元数据在 `moon.mod` 中声明为
-`GPL-3.0-or-later`。发布二进制时，对应源码仍由同一个仓库和 tag 提供。
+PreShell 的许可证文本在仓库根目录 `LICENSE`，第三方归属摘要在根目录 `NOTICE`，
+模块元数据在 `moon.mod` 中声明为 `GPL-3.0-or-later`。发布二进制时，对应源码仍由
+同一个仓库和 tag 提供。

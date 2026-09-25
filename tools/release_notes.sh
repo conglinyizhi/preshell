@@ -164,6 +164,7 @@ if [ -n "$assets" ] && [ -d "$assets" ]; then
       SHA256SUMS) purpose="SHA-256 校验和" ;;
       *.1) purpose="man 手册" ;;
       *.md) purpose="Markdown 手册" ;;
+      NOTICE) purpose="第三方归属说明" ;;
       *) purpose="Linux 发布产物" ;;
     esac
     printf '| `%s` | %s |\n' "$name" "$purpose"

@@ -1,0 +1,38 @@
+PreShell
+
+Copyright (C) 2026 conglinyizhi
+
+PreShell is distributed under the GNU General Public License, version 3 or
+later. The complete license text is in LICENSE.
+
+This repository also contains the following third-party test material:
+
+1. GNU Bash 5.3 syntax tests
+
+   The files under tools/corpus/bash-tests/ were taken from the GNU Bash 5.3
+   tests/ directory. The directory also retains the upstream run-minimal helper.
+
+   Copyright: Free Software Foundation, Inc.
+   License: GNU General Public License, version 3 or later.
+   Source: https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+
+   The copied files retain their upstream notices where present. The complete
+   provenance and selection notes are in tools/corpus/bash-tests/README.md and
+   docs/third-party-licenses.md.
+
+2. Z shell validation corpus
+
+   PreShell does not distribute a copy of the zsh source tree. The optional
+   zsh corpus is collected from a caller-provided zsh source checkout and is
+   checked with the caller's zsh -n executable. The current baseline uses zsh
+   5.9.2. No zsh source files are included in this repository or its release
+   assets.
+
+   Zsh source licensing is file-sensitive: the upstream LICENCE applies unless
+   a file says otherwise, and some shell functions carry separate GPL, BSD, or
+   other notices. See https://www.zsh.org/ and
+   https://www.zsh.org/pub/ before redistributing zsh source.
+
+For the complete third-party material and license boundary, see:
+
+  docs/third-party-licenses.md

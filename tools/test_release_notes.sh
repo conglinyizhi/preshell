@@ -36,6 +36,7 @@ mkdir "$assets"
 printf checksum > "$assets/SHA256SUMS"
 printf man > "$assets/preshell.1"
 printf markdown > "$assets/preshell.md"
+printf notice > "$assets/NOTICE"
 printf binary > "$assets/preshell-v0.2-x86_64-linux"
 
 out="$TMP/notes.md"
@@ -58,6 +59,7 @@ contains '<details>'
 contains '重点：流式接口有变化'
 contains 'preshell.1'
 contains 'preshell.md'
+contains 'NOTICE'
 contains 'sha256sum -c SHA256SUMS'
 
 # Every detailed category is folded, and the visible categories stay ordered.
