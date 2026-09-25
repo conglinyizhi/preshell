@@ -47,9 +47,8 @@ no_cwd=$("$BIN" <<<"rm -rf x" 2>/dev/null)
 if ! printf '%s' "$no_cwd" | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
-  const notes = (d.issues || []).filter(i => i.code === "W1");
-  if (notes.length !== 1) { console.log("缺 --cwd 时没有恰好一条 W1，实际 " + notes.length); process.exit(1) }
-  if ((d.issues || []).some(i => i.kind === "Note" && i.code === undefined)) { console.log("警告没有带 code"); process.exit(1) }
+  const notes = (d.issues || []).filter(i => i.kind === "Note" && (i.message || "").indexOf("no --cwd given") === 0);
+  if (notes.length !== 1) { console.log("缺 --cwd 时没有恰好一条基准警告，实际 " + notes.length); process.exit(1) }
   if (d.impact.uncertain !== true) { console.log("推演基准时没有置 uncertain"); process.exit(1) }
   const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
   if (del.length !== 1 || !del[0].target.startsWith("/")) { console.log("推演的基准没有给出绝对路径: " + JSON.stringify(del)); process.exit(1) }
@@ -63,8 +62,8 @@ with_cwd=$(printf '%s' 'rm -rf x' | "$BIN" --cwd=/tmp/base 2>/dev/null)
 if ! printf '%s' "$with_cwd" | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
-  const notes = (d.issues || []).filter(i => i.code === "W1");
-  if (notes.length !== 0) { console.log("给了 --cwd 仍出现 W1"); process.exit(1) }
+  const notes = (d.issues || []).filter(i => (i.message || "").indexOf("no --cwd given") === 0);
+  if (notes.length !== 0) { console.log("给了 --cwd 仍出现基准警告"); process.exit(1) }
   if (d.impact.cwd !== "/tmp/base") { console.log("cwd 不是给定基准: " + String(d.impact.cwd)); process.exit(1) }
   const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
   if (del.length !== 1 || del[0].target !== "/tmp/base/x") { console.log("相对路径没有对着基准解析: " + JSON.stringify(del)); process.exit(1) }
@@ -76,28 +75,6 @@ fi
 printf '%s' 'rm -rf x' | "$BIN" --cwd=relative/base >/dev/null 2>&1
 [ "$?" = "2" ] || { echo "  相对 --cwd 的退出码不是 2"; bad=$((bad + 1)); }
 
-# 警告码的查询入口：表要能列全、单条要给出解法、未知码要拒。
-total=$((total + 4))
-if ! "$BIN" --help-id 2>/dev/null | grep -q '^W0  ' ||
-  ! "$BIN" --help-id 2>/dev/null | grep -q '^W1  '; then
-  echo "  --help-id 没有列出全部警告码"
-  bad=$((bad + 1))
-fi
-if ! "$BIN" --help-id=W1 2>/dev/null | grep -q -- '--cwd'; then
-  echo "  --help-id=W1 没有给出消除办法"
-  bad=$((bad + 1))
-fi
-"$BIN" --help-id=NOPE >/dev/null 2>&1
-[ "$?" = "2" ] || { echo "  未知警告码的退出码不是 2"; bad=$((bad + 1)); }
-if ! "$BIN" --spec 2>/dev/null | node -e '
-let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
-  const codes = (d.warnings || []).map(w => w.code);
-  if (!codes.includes("W0") || !codes.includes("W1")) { console.log("--spec 的 warnings 不全区码: " + codes); process.exit(1) }
-})'; then
-  echo "  --spec 的 warnings 不合格"
-  bad=$((bad + 1))
-fi
 
 total=$((total + 2))
 if ! "$BIN" --man 2>/dev/null | grep -q '^PreShell$'; then
@@ -112,7 +89,7 @@ fi
 if ! printf '%s' "$spec_json" | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
-  const need = ["tool","version","schema","doc","modes","exit_codes","refusal","client_obligations","how_to_read","paths","warnings"];
+  const need = ["tool","version","schema","doc","modes","exit_codes","refusal","client_obligations","how_to_read","paths"];
   const missing = need.filter(k => !(k in d));
   if (missing.length) { console.log("缺字段: " + missing.join(",")); process.exit(1) }
   const modes = (d.modes || []).map(m => m.name).join(",");

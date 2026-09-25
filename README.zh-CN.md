@@ -108,9 +108,9 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist
 shell 的脚本各有一份副本，多个 `cd` 依次累积。唯一保持原样的是 `cd` 目的地不可建模时
 （`cd $DIR`）之后的路径，那里会置 `uncertain`，因为绝对路径在信息上确实不存在。
 
-报告里带 `code` 的条目是**已登记的警告**：按 `code` 分流，别匹配 `message` 文案。
-`preshell --help-id` 列出全部码，`preshell --help-id=W1` 说明它是什么意思、怎么消掉。
-码表在 `lib/warnings.mbt`，没登记的警告发不出来。
+`issues[]` 里的 `Note` 是警告：解析成功了，但这份报告不该被当成干净账单。每条警告都会
+强制 `impact.uncertain`。目前只有一条，文案以 `no --cwd given` 开头。要程序化判定就匹配这个
+前缀，别匹配整句：文案是散文，会改。
 
 完整契约见 [docs/integration.md](docs/integration.md)。
 

@@ -36,10 +36,6 @@ preshell --man-markdown
 .IP "\(bu" 4
 \fB--stream\fR: read one JSON request per line and write one answer per line.
 .IP "\(bu" 4
-\fB--help-id\fR: list the registered warning codes, one per line.
-.IP "\(bu" 4
-\fB--help-id=CODE\fR: what that warning means, how to clear it, and what it does to the report.
-.IP "\(bu" 4
 \fB--spec\fR: print the machine-readable protocol contract as JSON.
 .IP "\(bu" 4
 \fB--help\fR: print the short contract quick reference to stderr.
@@ -60,28 +56,6 @@ preshell 'rm -rf build'
 .fi
 .PP
 Standard output contains exactly one JSON report. Diagnostics and help go to standard error. Exit status \fB0\fR means the answer was produced; status \fB2\fR means a usage error; another non-zero status means the tool itself failed. No exit status means dangerous: read the JSON.
-.PP
-.SH WARNING CODES
-.PP
-An issue that carries a \fBcode\fR is a registered warning; one without a code is a parser finding.
-.PP
-.nf
-{\"kind\":\"Note\",\"code\":\"W1\",\"message\":\"no --cwd given: ...\",\"line\":0}
-.fi
-.PP
-.IP "\(bu" 4
-Match on \fBcode\fR, never on \fBmessage\fR: the text is prose and will be edited, the code will not.
-.IP "\(bu" 4
-\fBpreshell --help-id\fR lists every code. \fBpreshell --help-id=W1\fR explains what it means, how to make it stop, and what it does to the report. \fB--spec\fR carries the same table as JSON.
-.IP "\(bu" 4
-Every warning forces \fBimpact.uncertain\fR.
-.IP "\(bu" 4
-The table lives in \fBlib/warnings.mbt\fR. A new warning has to be registered there before it can be emitted, because the only way to add one takes a \fBWarnCode\fR rather than a string.
-.PP
-| code | slug | when it appears | how to clear it |
-|---|---|---|---|
-| \fBW0\fR | \fBinternal-limit\fR | the tool hit a limit of its own or could not read its own environment: the effect or issue list was capped, a bounded recursion ran out of depth, or the current directory could not be read | nothing to change in the command; read the report as partial |
-| \fBW1\fR | \fBbase-inferred\fR | \fB--cwd\fR was absent, so the path base was inferred from this process's current directory | pass \fB--cwd=PATH\fR |
 .PP
 .SH PATHS AND PWD
 .PP

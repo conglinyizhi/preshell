@@ -29,8 +29,6 @@ preshell --man-markdown
 - `--cwd=PATH`: the base every relative path in the input is resolved against. It must be absolute. It is a starting point, not a `cd`, so it adds no effect and a `cd` in the command overrides it. It is required by the caller contract: without it the tool falls back to its own current directory and says so in a note.
 - `--pretty`: indent the JSON in single-command mode.
 - `--stream`: read one JSON request per line and write one answer per line.
-- `--help-id`: list the registered warning codes, one per line.
-- `--help-id=CODE`: what that warning means, how to clear it, and what it does to the report.
 - `--spec`: print the machine-readable protocol contract as JSON.
 - `--help`: print the short contract quick reference to stderr.
 - `--man`: print this manual as plain text.
@@ -47,24 +45,6 @@ preshell 'rm -rf build'
 ```
 
 Standard output contains exactly one JSON report. Diagnostics and help go to standard error. Exit status `0` means the answer was produced; status `2` means a usage error; another non-zero status means the tool itself failed. No exit status means dangerous: read the JSON.
-
-## Warning codes
-
-An issue that carries a `code` is a registered warning; one without a code is a parser finding.
-
-```json
-{"kind":"Note","code":"W1","message":"no --cwd given: ...","line":0}
-```
-
-- Match on `code`, never on `message`: the text is prose and will be edited, the code will not.
-- `preshell --help-id` lists every code. `preshell --help-id=W1` explains what it means, how to make it stop, and what it does to the report. `--spec` carries the same table as JSON.
-- Every warning forces `impact.uncertain`.
-- The table lives in `lib/warnings.mbt`. A new warning has to be registered there before it can be emitted, because the only way to add one takes a `WarnCode` rather than a string.
-
-| code | slug | when it appears | how to clear it |
-|---|---|---|---|
-| `W0` | `internal-limit` | the tool hit a limit of its own or could not read its own environment: the effect or issue list was capped, a bounded recursion ran out of depth, or the current directory could not be read | nothing to change in the command; read the report as partial |
-| `W1` | `base-inferred` | `--cwd` was absent, so the path base was inferred from this process's current directory | pass `--cwd=PATH` |
 
 ## Paths and pwd
 

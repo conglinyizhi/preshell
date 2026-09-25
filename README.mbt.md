@@ -98,11 +98,10 @@ case that stays as written is a path after a `cd` whose destination cannot be
 modelled (`cd $DIR`), and there `uncertain` is set rather than a gap being filled
 in with a guess.
 
-An issue that carries a `code` is a registered warning: match on the code, not
-on the message text. `preshell --help-id` lists the codes, and
-`preshell --help-id=W1` explains what one means and how to clear it. The table
-lives in `lib/warnings.mbt`, and a warning cannot be emitted without being
-registered there first.
+A `Note` in `issues` is a warning: the analysis ran, but the report should not
+be read as a clean bill. Every warning also forces `impact.uncertain`. Today
+there is one, and its message starts with `no --cwd given`. Match that prefix
+rather than the whole sentence: the prose will change.
 
 See [`docs/integration.md`](docs/integration.md) for the caller contract.
 

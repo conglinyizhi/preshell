@@ -138,26 +138,16 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist, impact.cwd: /s
 `uncertain: true`，等于告诉下游「这个基准是猜的」。把基准说清楚是调用方的事，
 工具不替这一步决定。
 
-## 警告码
+## 警告
 
-`issues[]` 里**带 `code` 的**是已登记的警告，**不带 `code` 的**是解析器发现（`Gap` / `Syntax`）：
+`issues[]` 里的 `Note` 就是警告：解析成功，但这份报告不该被当成一份干净账单。
 
-```json
-{"kind":"Note","code":"W1","message":"no --cwd given: ...","line":0}
-{"kind":"Gap","message":"unexpected end of input in command substitution","line":1}
-```
-
-- **按 `code` 分流，不要匹配 `message`。** 文案是散文，会改；`code` 是稳定键
-- `preshell --help-id` 列出全部码；`preshell --help-id=W1` 给出这条的含义、怎么让它消失、
-  以及对报告的影响。`--spec` 的 `warnings` 字段是同一张表的机读形式
-- 码表在 `lib/warnings.mbt`。加警告必须先在表里登记：`add_note` 只收 `WarnCode`，不收字符串，
-  所以「临场编一句警告」在编译期就过不去
-- 每条警告都会强制 `impact.uncertain: true`
-
-| 码 | slug | 什么时候出现 | 怎么消掉 |
-|---|---|---|---|
-| `W0` | `internal-limit` | 工具自身撞到上限或读不到自己的环境：效果表/问题表被截断、递归深度用尽、读不到当前目录 | 命令侧没有可改的，按不完整报告处理 |
-| `W1` | `base-inferred` | 没传 `--cwd`，路径基准是从本进程当前目录推演的 | 传 `--cwd=PATH` |
+- 每条警告都会强制 `impact.uncertain: true`，所以「有没有警告」和「要不要多看一眼」是同一件事
+- 目前只有基准相关的两条：没传 `--cwd`（文案以 `no --cwd given` 开头），以及连当前目录都读不到
+  （文案以 `no --cwd given and the current directory could not be read` 开头）
+- 要程序化判定，匹配这两个前缀就够。**别匹配整句**：文案是散文，会改
+- `Gap` / `Syntax` 不是警告，是解析器发现：它们描述「我们看懂了多少」，会让 `status` 变成
+  `Unsupported` / `Invalid`
 
 ## 为什么用 stdin 而不是参数
 
