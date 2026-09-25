@@ -103,6 +103,10 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist
 并在报告里附一条 `Note` 说明基准是推演来的，同时置 `impact.uncertain: true`。
 看到这条 Note 就该补 `--cwd`。
 
+读了变量的路径会说出来：每条路径效果带 `vars`，`impact.vars` 是去重后的并集。工具不读环境，
+所以它交出来的就是名字——拿 `HOME` 替换 `$HOME/x` 就得到真实路径。`~` 是 `HOME`、`~+` 是
+`PWD`、`~-` 是 `OLDPWD`；`~user` 和 `~N` 是没有名字的洞，因为环境查不到它们。
+
 有两类路径保持原样，因为对它们来说绝对路径确实不存在：`cd` 目的地不可建模之后的路径，
 以及**词首是运行时才展开的东西**（`$HOME/x`、`~/x`）。参数的值按原样使用，结果是不是绝对
 路径是运行时事实，而这个值调用方知道。两类都会置 `impact.uncertain`。

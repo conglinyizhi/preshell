@@ -74,6 +74,8 @@ Two kinds of path cannot be made absolute, and both stay as written with \fBimpa
   - a path after a \fBcd\fR whose destination cannot be modelled, such as \fBcd $DIR\fR;
   - a path whose first segment is expanded at run time, such as \fB$HOME/x\fR or \fB~/x\fR. The value of a parameter is used as it stands, so whether the result is absolute is a run-time fact, and the base cannot be applied on top of it. The caller knows the value and finishes the job.
 .IP "\(bu" 4
+Paths that read a variable say so: each path effect carries \fBvars\fR, and \fBimpact.vars\fR is the deduplicated union. PreShell never reads the environment, so the name is what it hands over: substitute \fBHOME\fR and \fB$HOME/x\fR becomes the real path. A \fB~\fR is \fBHOME\fR, \fB~+\fR is \fBPWD\fR and \fB~-\fR is \fBOLDPWD\fR; \fB~user\fR and \fB~N\fR are not variables a caller could look up, so they are holes with no name.
+.IP "\(bu" 4
 A \fB~\fR at the head of a word is one of those expansions: it is \fBHOME\fR, \fB~+\fR is \fBPWD\fR, \fB~-\fR is \fBOLDPWD\fR, and \fB~user\fR is that user's home directory. When the login name is invalid the prefix is left exactly as written, in which case it is a *relative* path. Quoted (\fB\"~\"\fR) it is literal text and is anchored like any other relative path.
 .PP
 .SH STREAM MODE
@@ -125,6 +127,10 @@ Read \fBstatus\fR first:
 \fBUnsupported\fR: the input is valid for the selected shell, but the analyzer does not model part of it. The answer is partial.
 .IP "\(bu" 4
 \fBInvalid\fR: there is evidence that the selected shell would reject the input too.
+.PP
+\fBimpact.vars\fR lists the variables those paths read, deduplicated; each path
+effect carries its own \fBvars\fR. PreShell never reads the environment, so the name
+is what it hands over.
 .PP
 Read \fBimpact.uncertain\fR before treating the effect list as complete. When it is \fBtrue\fR, an empty effect list does not mean that the command touches nothing.
 .PP

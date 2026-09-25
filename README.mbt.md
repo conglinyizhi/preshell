@@ -90,6 +90,12 @@ directory whenever the caller spawned it without changing directory — and
 attaches a `Note` saying so, which also marks `impact.uncertain`. Seeing that
 note means the base was inferred, not asserted.
 
+A path that reads a variable says so: each path effect carries `vars`, and
+`impact.vars` is the deduplicated union. PreShell never reads the environment, so
+the name is what it hands over — substitute `HOME` and `$HOME/x` resolves. A `~`
+is `HOME`, `~+` is `PWD`, `~-` is `OLDPWD`; `~user` and `~N` are holes without a
+name, because no environment can supply them.
+
 Two kinds of path stay as written, because an absolute path genuinely does not
 exist for them: a path after a `cd` whose destination cannot be modelled, and a
 path whose first segment is expanded at run time (`$HOME/x`, `~/x`). A

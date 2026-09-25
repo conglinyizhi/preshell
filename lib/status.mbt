@@ -530,6 +530,7 @@ pub fn Impact::mark_uncertain(self : Impact) -> Impact {
   {
     effects: self.effects,
     write_roots: self.write_roots,
+    vars: self.vars,
     uncertain: true,
     cwd: self.cwd,
     effects_dropped: self.effects_dropped,

@@ -57,6 +57,7 @@ Paths are reported **absolute**. PreShell never reads the file system, so the ba
 - Two kinds of path cannot be made absolute, and both stay as written with `impact.uncertain` set, so the gap is visible rather than filled in with a guess:
   - a path after a `cd` whose destination cannot be modelled, such as `cd $DIR`;
   - a path whose first segment is expanded at run time, such as `$HOME/x` or `~/x`. The value of a parameter is used as it stands, so whether the result is absolute is a run-time fact, and the base cannot be applied on top of it. The caller knows the value and finishes the job.
+- Paths that read a variable say so: each path effect carries `vars`, and `impact.vars` is the deduplicated union. PreShell never reads the environment, so the name is what it hands over: substitute `HOME` and `$HOME/x` becomes the real path. A `~` is `HOME`, `~+` is `PWD` and `~-` is `OLDPWD`; `~user` and `~N` are not variables a caller could look up, so they are holes with no name.
 - A `~` at the head of a word is one of those expansions: it is `HOME`, `~+` is `PWD`, `~-` is `OLDPWD`, and `~user` is that user's home directory. When the login name is invalid the prefix is left exactly as written, in which case it is a *relative* path. Quoted (`"~"`) it is literal text and is anchored like any other relative path.
 
 ## Stream mode
@@ -105,6 +106,10 @@ Read `status` first:
 - `Complete`: the parser understood the command end to end.
 - `Unsupported`: the input is valid for the selected shell, but the analyzer does not model part of it. The answer is partial.
 - `Invalid`: there is evidence that the selected shell would reject the input too.
+
+`impact.vars` lists the variables those paths read, deduplicated; each path
+effect carries its own `vars`. PreShell never reads the environment, so the name
+is what it hands over.
 
 Read `impact.uncertain` before treating the effect list as complete. When it is `true`, an empty effect list does not mean that the command touches nothing.
 

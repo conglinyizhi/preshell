@@ -108,3 +108,91 @@ test "a parameter with an operator keeps its spelling" {
     content="[\"${X:-/tmp}/y\"]",
   )
 }
+
+///|
+/// 变量提取：把名字交出去，值由知道它的调用方替换。
+///
+/// 依据 bash 5.3 手册 "Expansion"：参数的值按原样使用，所以工具能提供的不是
+/// 路径，而是「这条路径依赖哪些名字」。
+fn vars_of(src : String) -> Array[String] {
+  expansion_impact(src).vars
+}
+
+///|
+/// 每条路径效果各自带的变量，按效果顺序拼起来（Exec/Net 这些不是路径，跳过）。
+fn effect_vars_of(src : String) -> Array[String] {
+  let out : Array[String] = []
+  for e in expansion_impact(src).effects {
+    if e.kind == @lib.EffectKind::Read ||
+      e.kind == @lib.EffectKind::Write ||
+      e.kind == @lib.EffectKind::Delete {
+      for v in e.vars {
+        out.push(v)
+      }
+    }
+  }
+  out
+}
+
+///|
+test "a path reports the variable it reads" {
+  debug_inspect(vars_of("rm -rf \"$HOME/x\""), content="[\"HOME\"]")
+  debug_inspect(effect_vars_of("rm -rf \"$HOME/x\""), content="[\"HOME\"]")
+}
+
+///|
+test "the report lists each variable once" {
+  // 两个路径读同一个名字，汇总里只出现一次。
+  debug_inspect(vars_of("rm -rf $HOME/a $HOME/b"), content="[\"HOME\"]")
+  debug_inspect(vars_of("rm -rf $A/x $B/y"), content="[\"A\", \"B\"]")
+}
+
+///|
+test "a tilde names the variable it stands for" {
+  debug_inspect(vars_of("rm -rf ~/x"), content="[\"HOME\"]")
+  debug_inspect(vars_of("rm -rf ~+"), content="[\"PWD\"]")
+  debug_inspect(vars_of("rm -rf ~-"), content="[\"OLDPWD\"]")
+}
+
+///|
+test "a ~user prefix names nothing a caller could look up" {
+  // 它走的是口令库，不是环境；而且登录名无效时 bash 原样保留前缀。
+  debug_inspect(vars_of("rm -rf ~someone/x"), content="[]")
+}
+
+///|
+test "a derived name keeps the variables of the operand" {
+  // `gzip $F` 写的是 `$F.gz`：名字由操作数推导，变量还是 F。
+  debug_inspect(vars_of("gzip $F"), content="[\"F\"]")
+  // 三个路径效果各带一份 F：读 $F、写 $F.gz、删 $F。
+  debug_inspect(effect_vars_of("gzip $F"), content="[\"F\", \"F\", \"F\"]")
+}
+
+///|
+test "a directory target carries its own variable into the derived path" {
+  let im = expansion_impact("cp -t $D a.txt")
+  debug_inspect(im.vars, content="[\"D\"]")
+  // 目标目录是洞时，派生出来的写路径也不能锚定。
+  let written : Array[String] = []
+  for e in im.effects {
+    if e.kind == @lib.EffectKind::Write {
+      written.push(e.target)
+    }
+  }
+  debug_inspect(written, content="[\"$D/a.txt\"]")
+}
+
+///|
+test "no variables means no noise" {
+  debug_inspect(vars_of("rm -rf dist"), content="[]")
+  let im = expansion_impact("rm -rf dist")
+  for e in im.effects {
+    debug_inspect(e.vars, content="[]")
+  }
+}
+
+///|
+test "a positional parameter is a hole without a name" {
+  // `$1`/`$@` 没有环境可查，列出来只会让调用方去找一个不存在的变量。
+  debug_inspect(vars_of("rm -rf $1/x $@"), content="[]")
+}

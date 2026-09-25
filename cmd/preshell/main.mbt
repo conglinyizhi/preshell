@@ -699,6 +699,9 @@ fn contract_json() -> Json {
       "base": Json::string(
         "pass --cwd=PATH (absolute): every relative path in the input is resolved against it and reported as an absolute path",
       ),
+      "vars": Json::string(
+        "each path effect carries vars, and impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute HOME and $HOME/x resolves. A ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N are holes with no name",
+      ),
       "required": Json::string(
         "--cwd is required by this contract. Without it the tool uses its own current directory as the base and attaches a Note saying so, which also marks the impact uncertain",
       ),

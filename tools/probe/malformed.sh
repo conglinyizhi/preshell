@@ -76,6 +76,30 @@ printf '%s' 'rm -rf x' | "$BIN" --cwd=relative/base >/dev/null 2>&1
 [ "$?" = "2" ] || { echo "  相对 --cwd 的退出码不是 2"; bad=$((bad + 1)); }
 
 # 词首是运行时展开时不能拼基准：`$HOME/x` 的展开值本身可能是绝对路径。
+# 变量提取：调用方靠这个名字去查环境，抽错等于让它替换错东西。
+total=$((total + 2))
+if ! printf '%s' 'rm -rf "$HOME/a" "$HOME/b" $DIR/c' | "$BIN" --cwd=/base 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
+  const want = JSON.stringify(["HOME", "DIR"]);
+  if (JSON.stringify(d.impact.vars) !== want) { console.log("impact.vars 不对: " + JSON.stringify(d.impact.vars)); process.exit(1) }
+  const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
+  if (del.length !== 3 || JSON.stringify(del[0].vars) !== JSON.stringify(["HOME"])) { console.log("路径效果没带自己的 vars"); process.exit(1) }
+  const plain = (d.impact.effects || []).filter(e => e.kind === "Exec");
+  if (plain.some(e => (e.vars || []).length !== 0)) { console.log("非路径效果不该有 vars"); process.exit(1) }
+})'; then
+  echo "  路径变量提取不合格"
+  bad=$((bad + 1))
+fi
+if ! printf '%s' 'rm -rf ~+ /tmp/x' | "$BIN" --cwd=/base 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  const d = JSON.parse(s)
+  if (JSON.stringify(d.impact.vars) !== JSON.stringify(["PWD"])) { console.log("~+ 没有映射到 PWD: " + JSON.stringify(d.impact.vars)); process.exit(1) }
+})'; then
+  echo "  波浪号到变量的映射不合格"
+  bad=$((bad + 1))
+fi
+
 total=$((total + 2))
 for expr in '$HOME/x' '~/x'; do
   if ! printf '%s' "rm -rf $expr" | "$BIN" --cwd=/base 2>/dev/null | node -e '

@@ -113,6 +113,15 @@ pub extend ParseStatus with Eq::{equal}
 pub extend ParseStatus with Eq::{not_equal}
 
 ///|
+pub extend PathArg with Eq::{equal}
+
+///|
+pub extend PathArg with Eq::{not_equal}
+
+///|
+pub extend PathArg with @debug.Debug::{to_repr}
+
+///|
 pub extend Pipeline with Eq::{equal}
 
 ///|

@@ -16,6 +16,11 @@ pub(all) enum EffectKind {
 pub(all) struct Effect {
   kind : EffectKind
   target : String
+  /// The variables this target reads, in order, deduplicated. The tool never
+  /// reads the environment, so this is what it can hand over instead: a caller
+  /// that knows `HOME` can finish `$HOME/x` itself. Empty for anything that is
+  /// not a path, and for paths that are already closed.
+  vars : Array[String]
   /// True when the target is not a closed set: it has a hole or a glob.
   dynamic : Bool
   /// Only meaningful for `Exec`. False means: this program ran, and what it
@@ -39,6 +44,10 @@ pub(all) struct Impact {
   /// How many effects were found but not listed (see max_effects). Any drop
   /// forces `uncertain`.
   effects_dropped : Int
+  /// Every variable the paths in this report read, deduplicated. A caller about
+  /// to run the command in a sandbox can look at this list instead of reading
+  /// every effect: it is the set of values it has to supply or reject.
+  vars : Array[String]
   /// The directory that relative paths in this report are relative to, when
   /// the command line itself changed into one. None means "no cwd change was
   /// modelled": relative paths are then relative to whatever directory the
@@ -50,17 +59,10 @@ pub(all) struct Impact {
 /// Drop the operand that a known flag already consumed, so a value like the
 /// `-C dir` of tar is not reported twice: once as the write target and once as
 /// a path the command reads.
-fn drop_flag_value(
-  xs : Array[(String, Bool)],
-  value : String?,
-) -> Array[(String, Bool)] {
+fn drop_flag_value(xs : Array[PathArg], value : String?) -> Array[PathArg] {
   match value {
     None => xs
-    Some(v) =>
-      xs.filter(fn(it) {
-        let (t, _) = it
-        t != v
-      })
+    Some(v) => xs.filter(fn(it) { it.text != v })
   }
 }
 
@@ -68,14 +70,13 @@ fn drop_flag_value(
 /// The operands that come before the first flag. For commands like `find`,
 /// whose later arguments are predicates rather than paths (`-name '*.mbt'`),
 /// only the leading ones are files.
-fn leading_operands(items : Array[(String, Bool)]) -> Array[(String, Bool)] {
-  let out : Array[(String, Bool)] = []
+fn leading_operands(items : Array[PathArg]) -> Array[PathArg] {
+  let out : Array[PathArg] = []
   for it in items {
-    let (t, _) = it
-    if t.has_prefix("-") {
+    if it.text.has_prefix("-") {
       break
     }
-    if t != "" {
+    if it.text != "" {
       out.push(it)
     }
   }
@@ -276,6 +277,8 @@ struct Collector {
   /// Directory the command line itself moved into, or None when it has not
   /// moved or could not be modelled. See cwd.mbt.
   mut cwd : String?
+  /// Union of the variables the reported paths read, in first-seen order.
+  vars : Array[String]
 }
 
 ///|
@@ -291,6 +294,7 @@ pub fn impact(
     uncertain: false,
     depth: 0,
     dialect,
+    vars: [],
     // The base is where relative paths are resolved from. `--cwd` supplies it
     // for a command line that does not `cd` itself; it is a starting point, not
     // a move, so it never shows up as an effect.
@@ -304,6 +308,7 @@ pub fn impact(
     effects: c.items,
     write_roots: c.roots,
     uncertain: c.uncertain,
+    vars: c.vars,
     cwd: c.cwd,
     effects_dropped: c.dropped,
   }
@@ -322,6 +327,8 @@ fn Collector::push(
   dynamic : Bool,
   line : Int,
   modeled? : Bool = true,
+  unrooted? : Bool = false,
+  vars? : Array[String] = [],
 ) -> Unit {
   let resolved = match kind {
     Read | Write | Delete =>
@@ -330,12 +337,17 @@ fn Collector::push(
       // manual, "Expansion": the value of a parameter is used as it stands).
       // The base cannot be applied on top of it, so the text is reported as
       // written and the caller, who knows the value, finishes the job.
-      if dynamic && starts_unresolved(target) {
+      if unrooted {
         target
       } else {
         self.resolve(target)
       }
     _ => target
+  }
+  for v in vars {
+    if !self.vars.contains(v) {
+      self.vars.push(v)
+    }
   }
   if self.items.length() >= max_effects() {
     self.dropped = self.dropped + 1
@@ -343,7 +355,7 @@ fn Collector::push(
     // Roots still accumulate: they are cheap, deduplicated, and they are the
     // part a caller most often acts on.
   } else {
-    self.items.push({ kind, target: resolved, dynamic, modeled, line, })
+    self.items.push({ kind, target: resolved, vars, dynamic, modeled, line, })
   }
   if dynamic &&
     (
@@ -492,13 +504,26 @@ fn Collector::note_holes(self : Collector, w : Word) -> Unit {
 }
 
 ///|
-/// Whether a path's first segment is something the shell fills in at run time.
+/// Push a path that came from a word, carrying everything that was read off it.
 ///
-/// Only consulted together with the word's hole flag at the call site: a quoted
-/// `'$X/y'` is literal text that happens to start with `$`, and it is anchored
-/// like any other relative path.
-fn starts_unresolved(p : String) -> Bool {
-  p.has_prefix("$") || p.has_prefix("~")
+/// This is the only way a path effect should be added: the text, the closed-set
+/// flag, whether it may be anchored, and the variables it reads are four facts
+/// about one word, and splitting them apart is how `'$X/y'` gets mistaken for an
+/// expansion.
+fn Collector::push_path(
+  self : Collector,
+  kind : EffectKind,
+  arg : PathArg,
+  line : Int,
+) -> Unit {
+  self.push(
+    kind,
+    arg.text,
+    arg.dynamic,
+    line,
+    unrooted=arg.unrooted,
+    vars=arg.vars,
+  )
 }
 
 ///|
@@ -658,13 +683,13 @@ fn Collector::note_temp_file(
 /// Text plus "is this value a closed set" for every argument. Keeping the two
 /// together is what lets a hole in one argument stay localized instead of
 /// pessimizing the whole command line.
-fn arg_items(s : SimpleCmd) -> Array[(String, Bool)] {
-  let out : Array[(String, Bool)] = []
+fn arg_items(s : SimpleCmd) -> Array[PathArg] {
+  let out : Array[PathArg] = []
   for i, w in s.words {
     if i == 0 {
       continue
     }
-    out.push((w.literal_text(), w.has_hole() || w.has_glob()))
+    out.push(PathArg::of(w))
   }
   out
 }
@@ -798,23 +823,20 @@ fn Collector::classify(
       _ => ()
     }
   }
-  let writes = fn(xs : Array[(String, Bool)]) {
+  let writes = fn(xs : Array[PathArg]) {
     for it in xs {
-      let (t, d) = it
-      self.push(Write, t, d, line)
+      self.push_path(Write, it, line)
     }
   }
-  let reads = fn(xs : Array[(String, Bool)]) {
+  let reads = fn(xs : Array[PathArg]) {
     for it in xs {
-      let (t, d) = it
-      self.push(Read, t, d, line)
+      self.push_path(Read, it, line)
     }
   }
   match n {
     "rm" | "rmdir" | "unlink" | "shred" =>
       for it in operands {
-        let (t, d) = it
-        self.push(Delete, t, d, line)
+        self.push_path(Delete, it, line)
       }
     "cat"
     | "head"
@@ -861,8 +883,7 @@ fn Collector::classify(
         match value_of(scan, ["-i", "--in-place"]) {
           Some(suffix) =>
             for it in script_operands {
-              let (t, d) = it
-              self.push(Write, t + suffix, d, line)
+              self.push_path(Write, it.plus_suffix(suffix), line)
             }
           None => ()
         }
@@ -889,22 +910,20 @@ fn Collector::classify(
       match scan.target_dir {
         // `ln -t dir a`: the link is created inside dir, under the basename.
         // The directory's own hole (or its glob) makes the link dynamic.
-        Some((dir, dir_d)) =>
+        Some(dir) =>
           for it in operands {
-            let (t, d) = it
-            self.push(Read, t, d, line)
-            self.push(Write, join_dir(dir, t), dir_d || d, line)
+            self.push_path(Read, it, line)
+            self.push_path(Write, it.in_dir(dir), line)
           }
         // `ln target link`: the last operand is what gets created.
         None =>
           if operands.length() > 0 {
             let n_op = operands.length()
             for i, it in operands {
-              let (t, d) = it
               if i == n_op - 1 {
-                self.push(Write, t, d, line)
+                self.push_path(Write, it, line)
               } else {
-                self.push(Read, t, d, line)
+                self.push_path(Read, it, line)
               }
             }
           }
@@ -922,24 +941,22 @@ fn Collector::classify(
         // `cp -t dir a b` writes dir/a and dir/b. mv removes the sources
         // instead of reading them (measured: D:a.txt W:destdir/a.txt).
         // The directory's own hole (or its glob) makes the write dynamic.
-        Some((dir, dir_d)) =>
+        Some(dir) =>
           for it in operands {
-            let (t, d) = it
             if n == "mv" {
-              self.push(Delete, t, d, line)
+              self.push_path(Delete, it, line)
             } else {
-              self.push(Read, t, d, line)
+              self.push_path(Read, it, line)
             }
-            self.push(Write, join_dir(dir, t), dir_d || d, line)
+            self.push_path(Write, it.in_dir(dir), line)
           }
         None => {
           let n_op = operands.length()
           for i, it in operands {
-            let (t, d) = it
             if i == n_op - 1 {
-              self.push(Write, t, d, line)
+              self.push_path(Write, it, line)
             } else {
-              self.push(Read, t, d, line)
+              self.push_path(Read, it, line)
             }
           }
         }
@@ -947,11 +964,10 @@ fn Collector::classify(
     "zip" =>
       // `zip archive.zip members...`: the archive is written, the members read.
       match operands {
-        [(t, d), .. rest] => {
-          self.push(Write, t, d, line)
+        [head, .. rest] => {
+          self.push_path(Write, head, line)
           for it in rest {
-            let (m, md) = it
-            self.push(Read, m, md, line)
+            self.push_path(Read, it, line)
           }
         }
         [] => ()
@@ -966,21 +982,27 @@ fn Collector::classify(
     | "unzstd" => self.compressor_effects(n, scan, operands, line)
     "dd" =>
       for it in items {
-        let (t, _) = it
+        let t = it.text
         if t.has_prefix("of=") {
+          let value = t.unsafe_substring(start=3, end=t.length())
           self.push(
             Write,
-            t.unsafe_substring(start=3, end=t.length()),
-            false,
+            value,
+            it.dynamic,
             line,
+            unrooted=value_head_unresolved(value, it.dynamic),
+            vars=it.vars,
           )
         }
         if t.has_prefix("if=") {
+          let value = t.unsafe_substring(start=3, end=t.length())
           self.push(
             Read,
-            t.unsafe_substring(start=3, end=t.length()),
-            false,
+            value,
+            it.dynamic,
             line,
+            unrooted=value_head_unresolved(value, it.dynamic),
+            vars=it.vars,
           )
         }
       }
@@ -1010,7 +1032,7 @@ fn Collector::classify(
     | "ping"
     | "dig" => {
       for it in items {
-        let (t, _) = it
+        let t = it.text
         if t.has_prefix("http://") ||
           t.has_prefix("https://") ||
           t.has_prefix("git@") {
@@ -1028,9 +1050,8 @@ fn Collector::classify(
       // carrying a colon or an at-sign; for the rest, the first operand.
       if n == "scp" || n == "sftp" {
         for it in operands {
-          let (h, hd) = it
-          if h.contains(":") || h.contains("@") {
-            self.push(Net, h, hd, line)
+          if it.text.contains(":") || it.text.contains("@") {
+            self.push(Net, it.text, it.dynamic, line)
           }
         }
       } else if n == "ssh" ||
@@ -1040,7 +1061,7 @@ fn Collector::classify(
         n == "nc" ||
         n == "ncat" {
         match operands {
-          [(t, d), ..] => self.push(Net, t, d, line)
+          [head, ..] => self.push(Net, head.text, head.dynamic, line)
           [] => ()
         }
       }
@@ -1051,14 +1072,12 @@ fn Collector::classify(
       // the destination cannot be worked out.
       let dest : String? = match operands {
         [first, ..] =>
-          match first {
-            (t, false) =>
-              if t == "-" || t == "~" || t.has_prefix("~") {
-                None
-              } else {
-                Some(t)
-              }
-            (_, true) => None
+          // A destination that is a hole (`$DIR`) or an expansion (`~`) is not
+          // a directory this tool can name, so the base becomes unknown.
+          if first.dynamic || first.unrooted {
+            None
+          } else {
+            Some(first.text)
           }
         [] => None
       }
@@ -1074,22 +1093,20 @@ fn Collector::classify(
     _ => operands
   }
   for it in checked {
-    let (t, d) = it
-    if d && !t.has_prefix("-") {
-      self.push(Unknown, t, true, line)
+    if it.dynamic && !it.text.has_prefix("-") {
+      self.push(Unknown, it.text, true, line)
     }
   }
 }
 
 ///|
 /// The value that follows one of `names` in an argument list, if present.
-fn flag_value(items : Array[(String, Bool)], names : Array[String]) -> String? {
+fn flag_value(items : Array[PathArg], names : Array[String]) -> String? {
   for i, it in items {
-    let (t, _) = it
+    let t = it.text
     for n in names {
       if t == n && i + 1 < items.length() {
-        let (v, _) = items[i + 1]
-        return Some(v)
+        return Some(items[i + 1].text)
       }
       if t.has_prefix(n + "=") {
         return Some(t.unsafe_substring(start=n.length() + 1, end=t.length()))
@@ -1113,10 +1130,10 @@ fn has_flag_text(flags : Array[String], f : String) -> Bool {
 /// `tar cf out dir` and `tar xfC in.tgz dest`.
 fn tar_take_cluster_values(
   cluster : String,
-  args : Array[(String, Bool)],
-) -> ((String, Bool)?, (String, Bool)?, Array[(String, Bool)]) {
-  let mut archive : (String, Bool)? = None
-  let mut dir : (String, Bool)? = None
+  args : Array[PathArg],
+) -> (PathArg?, PathArg?, Array[PathArg]) {
+  let mut archive : PathArg? = None
+  let mut dir : PathArg? = None
   let mut i = 0
   for k in 0..<cluster.length() {
     match cluster.get_char(k) {
@@ -1168,13 +1185,13 @@ fn tar_operation_letters(scan : ArgScan, cluster : String) -> String {
 /// requires an argument`). What used to be wrong was where this tool applied
 /// it: to the first leftover *operand*, where the `out` that `-f` consumes
 /// looked like a cluster and the real member `dir` looked like the archive.
-fn tar_old_style_word(items : Array[(String, Bool)]) -> String? {
+fn tar_old_style_word(items : Array[PathArg]) -> String? {
   match items {
-    [(t, _), ..] =>
-      if t.length() > 0 &&
-        !t.has_prefix("-") &&
-        t.to_string().all(fn(c) { c.is_ascii_alphabetic() }) {
-        Some(t)
+    [head, ..] =>
+      if head.text.length() > 0 &&
+        !head.text.has_prefix("-") &&
+        head.text.to_string().all(fn(c) { c.is_ascii_alphabetic() }) {
+        Some(head.text)
       } else {
         None
       }
@@ -1213,8 +1230,8 @@ fn tar_cluster_letters() -> String {
 fn Collector::tar_effects(
   self : Collector,
   scan : ArgScan,
-  items : Array[(String, Bool)],
-  operands : Array[(String, Bool)],
+  items : Array[PathArg],
+  operands : Array[PathArg],
   flags : Array[String],
   line : Int,
 ) -> Unit {
@@ -1223,8 +1240,8 @@ fn Collector::tar_effects(
   }
   let mut cluster = ""
   let mut args = operands
-  let mut cluster_archive : (String, Bool)? = None
-  let mut cluster_dir : (String, Bool)? = None
+  let mut cluster_archive : PathArg? = None
+  let mut cluster_dir : PathArg? = None
   match tar_old_style_word(items) {
     Some(w) => {
       if !w.to_string().all(fn(c) { tar_cluster_letters().contains_char(c) }) {
@@ -1244,7 +1261,7 @@ fn Collector::tar_effects(
       // scanner reads it as a flag, so it is missing from `operands`, and the
       // cluster's value letters have to see it where it was written.
       if flags.contains("-") {
-        let merged : Array[(String, Bool)] = [("-", false)]
+        let merged : Array[PathArg] = [PathArg::lit("-")]
         for it in args {
           merged.push(it)
         }
@@ -1271,16 +1288,16 @@ fn Collector::tar_effects(
     return
   }
   let archive = match value_entry_of(scan, ["-f", "--file"]) {
-    Some(v) => Some((v.text, v.dynamic))
+    Some(v) => Some(v.to_path_arg())
     None => cluster_archive
   }
   let dir = match value_entry_of(scan, ["-C", "--directory"]) {
-    Some(v) => Some((v.text, v.dynamic))
+    Some(v) => Some(v.to_path_arg())
     None => cluster_dir
   }
   if archive_written {
     match archive {
-      Some((a, ad)) => if a != "-" { self.push(Write, a, ad, line) }
+      Some(a) => if a.text != "-" { self.push_path(Write, a, line) }
       None =>
         self.push(
           Unknown,
@@ -1290,19 +1307,18 @@ fn Collector::tar_effects(
         )
     }
     for it in args {
-      let (m, md) = it
-      self.push(Read, m, md, line)
+      self.push_path(Read, it, line)
     }
   } else if listing {
     // The operands of a list run are member names inside the archive, not
     // paths on disk, so only the archive itself is read.
     match archive {
-      Some((a, ad)) => if a != "-" { self.push(Read, a, ad, line) }
+      Some(a) => if a.text != "-" { self.push_path(Read, a, line) }
       None => ()
     }
   } else {
     match dir {
-      Some((d, dd)) => self.push(Write, d, dd, line)
+      Some(d) => self.push_path(Write, d, line)
       None =>
         self.push(
           Unknown,
@@ -1312,7 +1328,7 @@ fn Collector::tar_effects(
         )
     }
     match archive {
-      Some((a, ad)) => if a != "-" { self.push(Read, a, ad, line) }
+      Some(a) => if a.text != "-" { self.push_path(Read, a, line) }
       None => ()
     }
   }
@@ -1334,9 +1350,9 @@ fn compressor_suffixes(n : String, decompress : Bool) -> Array[String] {
 }
 
 ///|
-fn strip_suffix(t : String, suffixes : Array[(String, Bool)]) -> String? {
+fn strip_suffix(t : String, suffixes : Array[PathArg]) -> String? {
   for it in suffixes {
-    let (s, _) = it
+    let s = it.text
     if s.length() > 0 && t.has_suffix(s) && t.length() > s.length() {
       return Some(t.unsafe_substring(start=0, end=t.length() - s.length()))
     }
@@ -1345,11 +1361,8 @@ fn strip_suffix(t : String, suffixes : Array[(String, Bool)]) -> String? {
 }
 
 ///|
-fn any_dynamic(xs : Array[(String, Bool)]) -> Bool {
-  xs.any(fn(it) {
-    let (_, d) = it
-    d
-  })
+fn any_dynamic(xs : Array[PathArg]) -> Bool {
+  xs.any(fn(it) { it.dynamic })
 }
 
 ///|
@@ -1376,7 +1389,7 @@ fn Collector::compressor_effects(
   self : Collector,
   n : String,
   scan : ArgScan,
-  operands : Array[(String, Bool)],
+  operands : Array[PathArg],
   line : Int,
 ) -> Unit {
   let decompress = match n {
@@ -1400,20 +1413,20 @@ fn Collector::compressor_effects(
   } else {
     !scan.opts.any(fn(o) { o == "-k" || o == "--keep" })
   }
-  let suffixes : Array[(String, Bool)] = match
+  let suffixes : Array[PathArg] = match
     value_entry_of(scan, ["-S", "--suffix"]) {
-    Some(v) => if v.text != "" { [(v.text, v.dynamic)] } else { [] }
+    Some(v) => if v.text != "" { [v.to_path_arg()] } else { [] }
     None => {
-      let out : Array[(String, Bool)] = []
+      let out : Array[PathArg] = []
       for s in compressor_suffixes(n, decompress) {
-        out.push((s, false))
+        out.push(PathArg::lit(s))
       }
       out
     }
   }
   for it in operands {
-    let (t, d) = it
-    self.push(Read, t, d, line)
+    let t = it.text
+    self.push_path(Read, it, line)
     if read_only || recursive || suffixes.length() == 0 {
       continue
     }
@@ -1423,23 +1436,42 @@ fn Collector::compressor_effects(
       // read is reported.
       match strip_suffix(t, suffixes) {
         Some(base) => {
-          self.push(Write, base, d || any_dynamic(suffixes), line)
+          // The derived name is the operand with its suffix removed: same head,
+          // same variables, and the suffixes' own holes matter too.
+          let product : PathArg = {
+            text: base,
+            dynamic: it.dynamic || any_dynamic(suffixes),
+            unrooted: it.unrooted,
+            vars: it.vars,
+          }
+          self.push_path(Write, product, line)
           if removes_source {
-            self.push(Delete, t, d, line)
+            self.push_path(Delete, it, line)
           }
         }
         None => ()
       }
     } else {
-      let (suffix, sd) = suffixes[0]
+      let first_suffix = suffixes[0]
+      let suffix = first_suffix.text
+      let sd = first_suffix.dynamic
       // Measured: gzip, xz and bzip2 leave a name that already carries their
       // suffix alone ("already has .gz suffix"), while zstd happily makes
       // f.txt.zst.zst.
       let already = (n != "zstd" && n != "unzstd") && t.has_suffix(suffix)
       if !already {
-        self.push(Write, t + suffix, d || sd, line)
+        self.push_path(
+          Write,
+          {
+            text: t + suffix,
+            dynamic: it.dynamic || sd,
+            unrooted: it.unrooted,
+            vars: it.vars,
+          },
+          line,
+        )
         if removes_source {
-          self.push(Delete, t, d, line)
+          self.push_path(Delete, it, line)
         }
       }
     }
@@ -1650,27 +1682,20 @@ fn wrapper_target(n : String, words : Array[Word]) -> Wrapped? {
 /// three spellings `-a list`, `-alist` and `--arg-file=list`. Wrappers are
 /// scanned from their words rather than from the option table, so the one path
 /// option they have (`xargs -a`) is found here.
-fn option_word_value(
-  words : Array[Word],
-  names : Array[String],
-) -> (String, Bool)? {
+fn option_word_value(words : Array[Word], names : Array[String]) -> PathArg? {
   for i, w in words {
     let t = w.literal_text()
-    let dynamic = w.has_hole() || w.has_glob()
     for n in names {
       if t == n && i + 1 < words.length() {
-        let v = words[i + 1]
-        return Some((v.literal_text(), v.has_hole() || v.has_glob()))
+        return Some(PathArg::of(words[i + 1]))
       }
       if t.has_prefix(n + "=") {
-        return Some(
-          (t.unsafe_substring(start=n.length() + 1, end=t.length()), dynamic),
-        )
+        let value = t.unsafe_substring(start=n.length() + 1, end=t.length())
+        return Some(value_arg(PathArg::of(w), value))
       }
       if !n.has_prefix("--") && t.has_prefix(n) && t.length() > n.length() {
-        return Some(
-          (t.unsafe_substring(start=n.length(), end=t.length()), dynamic),
-        )
+        let value = t.unsafe_substring(start=n.length(), end=t.length())
+        return Some(value_arg(PathArg::of(w), value))
       }
     }
   }
@@ -1737,7 +1762,7 @@ fn Collector::wrapper_effects(
         // -a/--arg-file: the list is read from a file instead of stdin, and
         // that file is a path. Measured: `xargs -a list rm` opens list.
         match option_word_value(s.words, ["-a", "--arg-file"]) {
-          Some((f, fd)) => self.push(Read, f, fd, line)
+          Some(f) => self.push_path(Read, f, line)
           None => ()
         }
         if xargs_replaces(s.words) {

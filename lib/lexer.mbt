@@ -1150,22 +1150,31 @@ fn Lexer::bracket_end(self : Lexer) -> Int? {
 fn Lexer::read_tilde(self : Lexer) -> String? {
   let start = self.pos
   self.advance(1)
+  // bash's tilde_find_suffix runs to the first `/`, not to the end of a name
+  // (lib/tilde/tilde.c): `~+` is PWD, `~-` is OLDPWD and `~3` is a directory
+  // stack entry, none of which are name-shaped. Our narrower rule left them as
+  // literal text, which then looked like a relative path called `~+`.
   for ;; {
     match self.peek() {
-      Some(c) if is_name_char(c) => self.advance(1)
-      _ => break
+      None => break
+      Some(c) => {
+        if c == '/' || is_blank(c) || is_meta(c) || c == '\n' {
+          break
+        }
+        // "If none of the characters in the tilde-prefix are quoted, the
+        // characters following the tilde are treated as a possible login name"
+        // (bash 5.3 manual, "Tilde Expansion"). A quoted or escaped character
+        // therefore makes the whole thing ordinary text, and the word stays a
+        // literal.
+        if c == '"' || c == '\'' || c == '\\' {
+          self.pos = start
+          return None
+        }
+        self.advance(1)
+      }
     }
   }
-  match self.peek() {
-    None | Some('/') => Some(self.slice(start, self.pos))
-    Some(c) =>
-      if is_blank(c) || is_meta(c) || c == '\n' {
-        Some(self.slice(start, self.pos))
-      } else {
-        self.pos = start
-        None
-      }
-  }
+  Some(self.slice(start, self.pos))
 }
 
 ///|

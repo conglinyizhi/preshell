@@ -7,10 +7,10 @@
 ///
 /// Row evidence for the table is the measurement described in commands_test;
 /// what is tested here is that the parser routes each spelling to that row.
-fn scan_items(xs : Array[String]) -> Array[(String, Bool)] {
-  let out : Array[(String, Bool)] = []
+fn scan_items(xs : Array[String]) -> Array[@lib.PathArg] {
+  let out : Array[@lib.PathArg] = []
   for x in xs {
-    out.push((x, false))
+    out.push(@lib.PathArg::lit(x))
   }
   out
 }
@@ -42,11 +42,10 @@ fn scan_render(n : String, args : Array[String]) -> String {
   }
   let operands : Array[String] = []
   for it in scan.operands {
-    let (t, _) = it
-    operands.push(t)
+    operands.push(it.text)
   }
   let tdir = match scan.target_dir {
-    Some((d, _)) => d
+    Some(d) => d.text
     None => "-"
   }
   "opts=[" +
@@ -168,11 +167,14 @@ test "the -t destination joins the operand basename" {
   // A directory that is a hole is kept dynamic, so `cp -t $D a.txt` writes a
   // target nobody can name yet.
   let scan = @lib.scan_args(@lib.opts_of("cp"), [
-    ("-t", false),
-    ("$D", true),
-    ("a.txt", false),
+    @lib.PathArg::lit("-t"),
+    { text: "$D", dynamic: true, unrooted: true, vars: ["D"], },
+    @lib.PathArg::lit("a.txt"),
   ])
-  debug_inspect(scan.target_dir, content="Some((\"$D\", true))")
+  debug_inspect(
+    scan.target_dir,
+    content="Some({ text: \"$D\", dynamic: true, unrooted: true, vars: [\"D\"] })",
+  )
   // An empty -t value must not turn into the absolute path `/a.txt`.
   inspect(
     scan_render("cp", ["-t", "", "a.txt"]),
@@ -219,12 +221,23 @@ test "tar's archive and directory values leave the operand side" {
   // A value that is a hole stays a hole: the archive of `tar -czf $A dir` is
   // a name nobody can write down yet.
   let scan = @lib.scan_args(@lib.opts_of("tar"), [
-    ("-czf", false),
-    ("$A", true),
-    ("dir", false),
+    @lib.PathArg::lit("-czf"),
+    { text: "$A", dynamic: true, unrooted: true, vars: ["A"], },
+    @lib.PathArg::lit("dir"),
   ])
   debug_inspect(
     @lib.value_entry_of(scan, ["-f", "--file"]),
-    content="Some({ opt: \"-f\", val: Path, text: \"$A\", dynamic: true })",
+    content=(
+      #|Some(
+      #|  {
+      #|    opt: "-f",
+      #|    val: Path,
+      #|    text: "$A",
+      #|    dynamic: true,
+      #|    unrooted: true,
+      #|    vars: ["A"],
+      #|  },
+      #|)
+    ),
   )
 }

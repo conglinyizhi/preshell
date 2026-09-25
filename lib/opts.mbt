@@ -436,6 +436,11 @@ pub(all) struct OptValue {
   val : OptVal
   text : String
   dynamic : Bool
+  /// Whether the value may turn out to be absolute, and the variables it reads.
+  /// A value carved out of the word (`-of.txt`) decides the first for itself;
+  /// a value that is its own word (`-o f.txt`) inherits the word's answer.
+  unrooted : Bool
+  vars : Array[String]
 } derive(Debug, Eq)
 
 ///|
@@ -447,15 +452,28 @@ pub(all) struct ArgScan {
   /// `-o`). Cases like `sed -i` are looked up here.
   opts : Array[String]
   /// Operands: everything that is neither an option nor a value it consumed.
-  operands : Array[(String, Bool)]
+  operands : Array[PathArg]
   values : Array[OptValue]
   /// The value of the target-directory option and whether it is a closed set,
   /// when the program has one. The flag matters: `cp -t $D a.txt` writes into
   /// a directory this tool cannot name, so the derived write is dynamic too.
-  target_dir : (String, Bool)?
+  target_dir : PathArg?
   to_stdout : Bool
   from_option : Bool
 } derive(Debug, Eq)
+
+///|
+
+///|
+/// The same value as a path argument, for callers that push it as a path.
+pub fn OptValue::to_path_arg(self : OptValue) -> PathArg {
+  {
+    text: self.text,
+    dynamic: self.dynamic,
+    unrooted: self.unrooted,
+    vars: self.vars,
+  }
+}
 
 ///|
 pub fn has_table(p : ProgOpts) -> Bool {
@@ -476,9 +494,9 @@ fn spec_of(specs : Array[OptSpec], name : String) -> OptSpec? {
 fn empty_scan(
   flags : Array[String],
   opts : Array[String],
-  operands : Array[(String, Bool)],
+  operands : Array[PathArg],
   values : Array[OptValue],
-  target_dir : (String, Bool)?,
+  target_dir : PathArg?,
   to_stdout : Bool,
   from_option : Bool,
 ) -> ArgScan {
@@ -488,14 +506,13 @@ fn empty_scan(
 ///|
 /// The split used before the table existed: any argument starting with a dash
 /// is a flag, the rest are operands. Programs with no table keep this exactly.
-pub fn scan_legacy(items : Array[(String, Bool)]) -> ArgScan {
+pub fn scan_legacy(items : Array[PathArg]) -> ArgScan {
   let flags : Array[String] = []
-  let operands : Array[(String, Bool)] = []
+  let operands : Array[PathArg] = []
   for it in items {
-    let (t, _) = it
-    if t.has_prefix("-") {
-      flags.push(t)
-    } else if t != "" {
+    if it.text.has_prefix("-") {
+      flags.push(it.text)
+    } else if it.text != "" {
       operands.push(it)
     }
   }
@@ -509,16 +526,39 @@ fn note_value(
   values : Array[OptValue],
   name : String,
   val : OptVal,
-  text : String,
-  dynamic : Bool,
+  arg : PathArg,
 ) -> Bool {
   match val {
     NoVal => ()
-    _ => if text != "" { values.push({ opt: name, val, text, dynamic, }) }
+    _ =>
+      if arg.text != "" {
+        values.push({
+          opt: name,
+          val,
+          text: arg.text,
+          dynamic: arg.dynamic,
+          unrooted: arg.unrooted,
+          vars: arg.vars,
+        })
+      }
   }
   match val {
-    TargetDir => text != ""
+    TargetDir => arg.text != ""
     _ => false
+  }
+}
+
+///|
+/// The path argument an option value stands for, given the word it was read
+/// from. An attached value (`-of.txt`, `--file=a`) is carved out of the word, so
+/// its own first segment decides whether the base can be applied; the word's
+/// variables still apply to it either way.
+pub fn value_arg(source : PathArg, text : String) -> PathArg {
+  {
+    text,
+    dynamic: source.dynamic,
+    unrooted: value_head_unresolved(text, source.dynamic),
+    vars: source.vars,
   }
 }
 
@@ -526,15 +566,16 @@ fn note_value(
 /// Split an argument list using the table: values are consumed, operands are
 /// what is left. Unknown short options are treated as taking no value (the
 /// safe direction) but the scan continues, so `-no out.txt` still finds `-o`.
-pub fn scan_args(p : ProgOpts, items : Array[(String, Bool)]) -> ArgScan {
+pub fn scan_args(p : ProgOpts, items : Array[PathArg]) -> ArgScan {
   let flags : Array[String] = []
   let opts : Array[String] = []
-  let operands : Array[(String, Bool)] = []
+  let operands : Array[PathArg] = []
   let values : Array[OptValue] = []
-  let mut target_dir : (String, Bool)? = None
+  let mut target_dir : PathArg? = None
   let mut i = 0
   while i < items.length() {
-    let (t, d) = items[i]
+    let item = items[i]
+    let t = item.text
     if t.has_prefix("-") {
       flags.push(t)
       if t.has_prefix("--") && t.length() > 2 {
@@ -545,8 +586,8 @@ pub fn scan_args(p : ProgOpts, items : Array[(String, Bool)]) -> ArgScan {
             match spec_of(p.specs, name) {
               Some(s) => {
                 opts.push(name)
-                if note_value(values, name, s.val, text, d) {
-                  target_dir = Some((text, d))
+                if note_value(values, name, s.val, value_arg(item, text)) {
+                  target_dir = Some(value_arg(item, text))
                 }
               }
               None => ()
@@ -561,9 +602,9 @@ pub fn scan_args(p : ProgOpts, items : Array[(String, Bool)]) -> ArgScan {
                     opts.push(t)
                     if i + 1 < items.length() {
                       i += 1
-                      let (v, vd) = items[i]
-                      if note_value(values, t, s.val, v, vd) {
-                        target_dir = Some((v, vd))
+                      let value = items[i]
+                      if note_value(values, t, s.val, value) {
+                        target_dir = Some(value)
                       }
                     }
                   }
@@ -585,21 +626,22 @@ pub fn scan_args(p : ProgOpts, items : Array[(String, Bool)]) -> ArgScan {
                 Attached => {
                   opts.push(name)
                   let rest = t.unsafe_substring(start=k + 1, end=t.length())
-                  ignore(note_value(values, name, s.val, rest, d))
+                  ignore(note_value(values, name, s.val, value_arg(item, rest)))
                   k = t.length()
                 }
                 _ => {
                   opts.push(name)
                   let rest = t.unsafe_substring(start=k + 1, end=t.length())
                   if rest != "" {
-                    if note_value(values, name, s.val, rest, d) {
-                      target_dir = Some((rest, d))
+                    let value = value_arg(item, rest)
+                    if note_value(values, name, s.val, value) {
+                      target_dir = Some(value)
                     }
                   } else if i + 1 < items.length() {
                     i += 1
-                    let (v, vd) = items[i]
-                    if note_value(values, name, s.val, v, vd) {
-                      target_dir = Some((v, vd))
+                    let value = items[i]
+                    if note_value(values, name, s.val, value) {
+                      target_dir = Some(value)
                     }
                   }
                   k = t.length()
