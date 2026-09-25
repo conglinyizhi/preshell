@@ -40,6 +40,7 @@ preshell --pretty 'make -j8'      # indented JSON for humans
 preshell --shadow 'cat <<EOF'     # dump the syntax tree
 preshell --scan '<cmd>'           # one line: parse status, issue count, effects
 preshell --bench=2000             # timing loop
+preshell --cwd=/srv/app 'rm -rf dist'   # resolve relative paths from a base
 ```
 
 Many commands, one process: `--stream` reads one JSON string per line and writes
@@ -73,6 +74,28 @@ boundary that makes a subprocess call the safe way to use it.
 
 Exit codes describe the tool, never the command: `0` when a report was produced.
 There is no exit code that means "dangerous".
+
+## Relative paths and pwd
+
+The tool never reads the file system, so it does not know which directory you are
+in. `rm -rf dist` comes back as `Delete: dist`, with no `impact.cwd`.
+
+Pass `--cwd=/srv/app` and the same command reports `/srv/app/dist`, with
+`impact.cwd` set to the base. The value must be absolute; a relative one is a
+usage error. Absolute paths are reported as written, and relative paths that
+cannot be resolved are reported as written too, so the answer says which base it
+was read against instead of inventing one.
+
+`--cwd` is a starting point, not a `cd`: it adds no effect, and a `cd` inside the
+command overrides it. A `cd` only affects the rest of the same command line —
+a subshell, a command substitution, a pipeline element and a script handed to
+another shell each get their own copy, and consecutive `cd`s accumulate. When the
+base cannot be worked out (`cd $DIR`, or a relative `cd` with no base),
+`impact.uncertain` is set rather than a missing base passing as "no change".
+
+A caller that does not supply a base has to resolve the paths itself, or hand
+them to whatever runs in the real directory. See
+[`docs/integration.md`](docs/integration.md) for the caller contract.
 
 ## Output
 

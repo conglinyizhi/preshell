@@ -61,6 +61,7 @@ printf '%s' 'rm -rf build' | preshell
 ```bash
 preshell 'rm -rf build'
 preshell --pretty 'make -j8'
+preshell --cwd=/srv/app 'rm -rf dist'
 ```
 
 结果是 JSON 报告：
@@ -86,6 +87,35 @@ preshell --pretty 'make -j8'
 - `Unsupported`：shell 接受，但 PreShell 没有建模其中一部分
 - `Invalid`：有证据表明 shell 自身也会拒绝这条命令
 - `uncertain: true`：效果列表不是封闭集合，空列表不等于“什么都没碰”
+
+## 相对路径与 pwd
+
+PreShell 不读磁盘，也不知道你在哪个目录里调用它。所以：
+
+```bash
+preshell 'rm -rf dist'
+```
+
+报告的是 `Delete: dist`，不带 `impact.cwd`。
+
+传一个基准：
+
+```bash
+preshell --cwd=/srv/app 'rm -rf dist'
+```
+
+同样一条命令会报 `/srv/app/dist`，`impact.cwd` 是 `/srv/app`。基准必须是绝对路径，
+相对值直接是用法错误。绝对路径原样报出；相对路径在算不出基准时也原样报出，
+宁可说清它是对着哪个基准读的，也不编一个出来。
+
+`--cwd` 是解析起点，不是 `cd`：它不产生任何效果，命令内部的 `cd` 优先于它。`cd`
+只影响同一条命令行里它之后的部分——子 shell、命令替换、管道的每个元素、交给别的
+shell 的脚本各有一份副本，多个 `cd` 依次累积。基准算不出来时（`cd $DIR`，或未知
+基准下的相对 `cd`）报告置 `uncertain`，不把「缺失」当成「没有变化」。
+
+**调用方必须提供 pwd**：不传 `--cwd` 时，要么自己拼接相对路径，要么把相对路径原样
+交给在你的真实工作目录里执行的那一侧。报告是 `Complete`，从状态上看不出基准错了。
+完整契约见 [docs/integration.md](docs/integration.md)。
 
 ## Bash 和 zsh
 

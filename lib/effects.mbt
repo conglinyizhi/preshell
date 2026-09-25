@@ -279,7 +279,11 @@ struct Collector {
 }
 
 ///|
-pub fn impact(seq : Seq, dialect? : Dialect = Bash) -> Impact {
+pub fn impact(
+  seq : Seq,
+  dialect? : Dialect = Bash,
+  base_cwd? : String? = None,
+) -> Impact {
   let c : Collector = {
     items: [],
     roots: [],
@@ -287,7 +291,13 @@ pub fn impact(seq : Seq, dialect? : Dialect = Bash) -> Impact {
     uncertain: false,
     depth: 0,
     dialect,
-    cwd: None,
+    // The base is where relative paths are resolved from. `--cwd` supplies it
+    // for a command line that does not `cd` itself; it is a starting point, not
+    // a move, so it never shows up as an effect.
+    cwd: match base_cwd {
+      None => None
+      Some(dir) => Some(normalize_path(dir))
+    },
   }
   c.walk_seq(seq)
   {

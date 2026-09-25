@@ -26,6 +26,7 @@ preshell --man-markdown
 ## Options
 
 - `--shell=S`: read the input as `auto` (default), `bash`, `zsh`, or `probe`. `auto` follows the shebang and otherwise uses bash. `probe` tries the declared dialect first and then the other supported dialect.
+- `--cwd=PATH`: resolve relative paths from this absolute directory. It is a starting point, not a `cd`, so it adds no effect and a `cd` in the command overrides it.
 - `--pretty`: indent the JSON in single-command mode.
 - `--stream`: read one JSON request per line and write one answer per line.
 - `--spec`: print the machine-readable protocol contract as JSON.
@@ -44,6 +45,17 @@ preshell 'rm -rf build'
 ```
 
 Standard output contains exactly one JSON report. Diagnostics and help go to standard error. Exit status `0` means the answer was produced; status `2` means a usage error; another non-zero status means the tool itself failed. No exit status means dangerous: read the JSON.
+
+## Paths and pwd
+
+PreShell never reads the file system, so it does not know which directory the caller is in. Without help it reports `rm -rf dist` as `Delete: dist`, and `impact.cwd` is absent.
+
+- Pass `--cwd=/a/b` and the same command reports `/a/b/dist`, with `impact.cwd` set to `/a/b`. The value must be absolute; a relative one is a usage error.
+- Absolute paths are reported as written. Relative paths are resolved when a base is known, and reported as written when it is not.
+- `--cwd` is a starting point, not a movement: it produces no effect, and a `cd` inside the command takes precedence.
+- `cd` affects the rest of the same command line only. A subshell, a command substitution, a pipeline element and a script handed to another shell each get their own copy, and consecutive `cd`s accumulate in order.
+- When the base cannot be worked out (`cd $DIR`, or a relative `cd` with no base), the report sets `impact.uncertain` rather than letting a missing base pass as "no change".
+- A caller that does not supply a base must hand the relative paths to whatever runs in the real directory.
 
 ## Stream mode
 
@@ -105,6 +117,7 @@ Shell constructs such as `eval $X`, `$CMD`, and `base64 -d | sh` are not statica
 ## More information
 
 - Integration and license boundary: <https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md>
+- Relative paths and pwd: run `preshell --help`, or pass `--cwd=PATH`
 - Third-party materials and provenance: <https://github.com/conglinyizhi/preshell/blob/main/docs/third-party-licenses.md>
 - Source and releases: <https://github.com/conglinyizhi/preshell>
 - License: GPL-3.0-or-later

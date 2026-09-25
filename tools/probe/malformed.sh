@@ -53,7 +53,7 @@ fi
 if ! printf '%s' "$spec_json" | node -e '
 let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
   let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
-  const need = ["tool","version","schema","doc","modes","exit_codes","refusal","client_obligations","how_to_read"];
+  const need = ["tool","version","schema","doc","modes","exit_codes","refusal","client_obligations","how_to_read","paths"];
   const missing = need.filter(k => !(k in d));
   if (missing.length) { console.log("缺字段: " + missing.join(",")); process.exit(1) }
   const modes = (d.modes || []).map(m => m.name).join(",");

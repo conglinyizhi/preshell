@@ -10,23 +10,30 @@
 /// directory are the caller's to resolve, and `Impact.uncertain` says when that
 /// matters.
 pub fn normalize_path(p : String) -> String {
+  let absolute = p.has_prefix("/")
   let out : Array[String] = []
   for seg in p.split("/") {
     if seg == "" || seg == "." {
       continue
     }
     if seg == ".." {
-      if out.length() > 0 {
+      let top = if out.length() > 0 { out[out.length() - 1] } else { "" }
+      if out.length() > 0 && top != ".." {
         ignore(out.pop())
-      } else {
+      } else if !absolute {
+        // Two `..` in a row are two levels up, and a relative path may climb
+        // above where it started. Letting the second one pop the first
+        // collapsed `cd ../..` into a single level and reported the wrong
+        // directory.
         out.push("..")
       }
+      // An absolute path cannot climb above the root: `/..` is `/`.
       continue
     }
     out.push(seg.to_owned())
   }
   let body = out.join("/")
-  if p.has_prefix("/") {
+  if absolute {
     "/" + body
   } else {
     body

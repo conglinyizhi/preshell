@@ -56,6 +56,9 @@ async fn main {
   let mut pretty = false
   let mut bench = 0
   let mut shell : String? = None
+  // The directory relative paths are resolved from, supplied by the caller.
+  // It is a starting point, not a move: it is never reported as an effect.
+  let mut base_cwd : String? = None
   let mut evidence = false
   let mut stream = false
   let mut operands_started = false
@@ -117,6 +120,18 @@ async fn main {
     if a == "--" && !operands_started {
       // Everything after this is the command, even if it looks like an option.
       operands_started = true
+      continue
+    }
+    if a.has_prefix("--cwd=") {
+      let dir = a.unsafe_substring(start=6, end=a.length())
+      // A relative base is not a base: there would be nothing to resolve it
+      // against, and accepting it would produce paths that look resolved and
+      // are not.
+      if !dir.has_prefix("/") {
+        usage_error("--cwd must be an absolute path: \{dir}")
+        return
+      }
+      base_cwd = Some(dir)
       continue
     }
     if a.has_prefix("--shell=") {
@@ -185,7 +200,7 @@ async fn main {
     _ => false
   }
   if stream {
-    stream_reports(shell, probe)
+    stream_reports(shell, probe, base_cwd)
     return
   }
   let from_argv = rest.length() > 0
@@ -226,16 +241,16 @@ async fn main {
   }
   let report = if probe {
     if from_argv {
-      @lib.analyze_probe(src)
+      @lib.analyze_probe(src, base_cwd~)
     } else {
-      @lib.analyze_bytes_probe(stdin_bytes.unwrap())
+      @lib.analyze_bytes_probe(stdin_bytes.unwrap(), base_cwd~)
     }
   } else {
     let dialect = dialect_for(src, shell)
     if from_argv {
-      @lib.analyze_dialect(src, dialect)
+      @lib.analyze_dialect(src, dialect, base_cwd~)
     } else {
-      @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect)
+      @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect, base_cwd~)
     }
   }
   if scan {
@@ -332,6 +347,9 @@ async fn usage() -> Unit {
     #|              auto follows the shebang, then falls back to bash
     #|              probe tries the declared dialect first, then the others,
     #|              and names the one it used in the report
+    #|  --cwd=PATH  resolve relative paths from this absolute directory. It is a
+    #|              starting point, not a cd: it adds no effect, and a cd in the
+    #|              command overrides it. Must be absolute
     #|  --pretty    indent the JSON for humans (single-shot mode only)
     #|  --stream    many commands: one request per line on stdin, one answer per
     #|              line on stdout, in the same order. A request is a JSON string,
@@ -359,6 +377,9 @@ async fn usage() -> Unit {
     #|  impact.uncertain read this first. true means the effect list is not a
     #|                   closed set, and an empty list must not be read as
     #|                   "touches nothing"
+    #|  impact.cwd       the base relative paths in this report are relative to.
+    #|                   Absent means no base is known: the caller either passes
+    #|                   --cwd=PATH or resolves the paths itself
     #|  In --stream a refused line answers {"error":...,"line":N}. That is
     #|  deliberately not a report: it means the line was not a request, never
     #|  that the command is bad.
@@ -448,12 +469,13 @@ async fn answer_stream_line(
   shell : String?,
   probe : Bool,
   counts : Counts,
+  base_cwd : String?,
 ) -> Unit {
   match @lib.decode_stream_line(line) {
     Ok(request) => {
       let bytes = request.command
       let report = if probe {
-        @lib.analyze_bytes_probe(bytes)
+        @lib.analyze_bytes_probe(bytes, base_cwd~)
       } else {
         // The same two steps as the single-shot path: the dialect is chosen
         // from the text, so a shebang still decides under `auto`, and the
@@ -461,7 +483,7 @@ async fn answer_stream_line(
         // treated the way the shell treats them. Anything else would make the
         // two modes disagree about the same command.
         let (text, _) = @lib.decode_command(bytes)
-        @lib.analyze_bytes_dialect(bytes, dialect_for(text, shell))
+        @lib.analyze_bytes_dialect(bytes, dialect_for(text, shell), base_cwd~)
       }
       // The report goes out untouched: an id, when the caller used one, arrives
       // in an envelope around it, so the report itself stays the same object the
@@ -502,7 +524,11 @@ async fn write_report_line(text : String) -> Unit {
 /// process alive gets the answer to a command before sending the next one. That
 /// is the entire reason the mode exists: process startup costs about two hundred
 /// times what the analysis does.
-async fn stream_reports(shell : String?, probe : Bool) -> Unit {
+async fn stream_reports(
+  shell : String?,
+  probe : Bool,
+  base_cwd : String?,
+) -> Unit {
   let framer = @lib.LineFramer::new()
   let counts : Counts = { reports: 0, errors: 0, }
   let chunk : FixedArray[Byte] = FixedArray::make(65536, b'\x00')
@@ -521,7 +547,7 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
       match framed {
         @lib.FramedLine::Line(line) => {
           number += 1
-          answer_stream_line(line, number, shell, probe, counts)
+          answer_stream_line(line, number, shell, probe, counts, base_cwd)
         }
         @lib.FramedLine::TooLong => {
           // The line was dropped before it could be parsed, but it still
@@ -542,7 +568,7 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
   match framer.finish() {
     Some(@lib.FramedLine::Line(line)) => {
       number += 1
-      answer_stream_line(line, number, shell, probe, counts)
+      answer_stream_line(line, number, shell, probe, counts, base_cwd)
     }
     _ => ()
   }
@@ -622,6 +648,20 @@ fn contract_json() -> Json {
         "do not let other child processes inherit the pipe fd (CLOEXEC / close_fds)",
       ),
     ]),
+    "paths": Json::object({
+      "base": Json::string(
+        "impact.cwd is the base for relative paths. Pass --cwd=PATH (absolute) so the report can carry absolute paths",
+      ),
+      "fallback": Json::string(
+        "a relative path is resolved when a base is known, and reported as written when it is not",
+      ),
+      "cd_scope": Json::string(
+        "cd affects the rest of the same command line; a subshell, a command substitution, a pipeline element and a script handed to another shell get their own copy, and consecutive cds accumulate",
+      ),
+      "no_base": Json::string(
+        "when the base cannot be worked out (cd $DIR, or a relative cd with no base), impact.uncertain is set instead of the base being silently treated as absent",
+      ),
+    }),
     "how_to_read": Json::string(
       "read impact.uncertain first: true means the effect list is not a closed set, and an empty list does not mean \"touches nothing\"",
     ),

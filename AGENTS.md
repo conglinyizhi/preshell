@@ -223,6 +223,11 @@ moon run --target native tools/ci/check.mbtx
 `node tools/embed_manual.mjs`，并确认生成文件无 diff。这样二进制、Markdown 和 man 页不会漂移。
 `tools/probe/malformed.sh` 会检查 `--spec`；发布前还要检查手册生成物是最新的。
 
+**相对路径的基准由调用方给**，见 `docs/integration.md` 的「相对路径与 pwd」。
+`--cwd=PATH` 只是解析起点，不是 `cd`：不产生效果，命令内的 `cd` 优先。基准算不出来时
+必须置 `uncertain`，不能把「缺失」当成「没有变化」。这条的回归用例在
+`lib/cwd_position_test.mbt`（单 cd 位置、多 cd 累积、越过根、作用域隔离）。
+
 ## 发布前的四项准备
 
 打 tag 之前逐项过，任何一项不过就先修，不要带着问题发版。四项都过再打 `vX.Y`，

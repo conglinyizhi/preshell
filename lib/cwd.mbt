@@ -39,11 +39,23 @@ fn Collector::change_dir(self : Collector, arg : String?, line : Int) -> Unit {
             },
           )
         None =>
-          // A relative `cd` from an unmodelled directory stays unmodelled.
+          // A relative `cd` from an unmodelled directory stays unmodelled, and
+          // it must not pass as "no cd happened". A caller that reads a missing
+          // `cwd` as "relative to my own directory" would then resolve
+          // `cd .. && rm -rf dist` against the wrong base and get a path that
+          // is silently wrong, which is the same failure the no-argument branch
+          // above refuses to allow.
           if dir.has_prefix("/") {
             self.cwd = Some(normalize_path(dir))
           } else {
             self.cwd = None
+            self.uncertain = true
+            self.push(
+              Unknown,
+              "cd to a relative directory from an unknown one",
+              true,
+              line,
+            )
           }
       }
   }
