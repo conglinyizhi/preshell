@@ -80,7 +80,7 @@ while IFS= read -r f; do
 
   # 只把「解析期会被拒绝」那一级算作 claim：dash -n 是解析级 oracle，
   # 测不了「能解析但语义不同」（[[ ]]、(( ))）那一级。
-  scan="$("$bin" --scan <"$f" 2>/dev/null)"
+  scan="$("$bin" --cwd="$root" --scan <"$f" 2>/dev/null)"
   out="$(printf '%s\n' "$scan" | tail -n +2)"
   # 我们自己也没解析成功的话，就不是「漏报 bashism」：两边都认为这个文件有问题
   ours="${scan%% *}"

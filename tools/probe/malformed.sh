@@ -40,6 +40,41 @@ fi
 # 它与 --help、man 页是三份说同一件事的副本，缺字段意味着有人只改了其中一份。
 total=$((total + 1))
 spec_json=$("$BIN" --spec 2>/dev/null)
+# 路径基准的契约：不给 --cwd 时用本进程当前目录推演，并且必须留下警告；
+# 给了基准就以它为准，且不该再出现那条警告。绝对路径是硬要求，没有相对回退。
+total=$((total + 3))
+no_cwd=$("$BIN" <<<"rm -rf x" 2>/dev/null)
+if ! printf '%s' "$no_cwd" | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
+  const notes = (d.issues || []).filter(i => i.kind === "Note" && (i.message || "").includes("--cwd"));
+  if (notes.length !== 1) { console.log("缺 --cwd 时没有恰好一条关于基准的 Note，实际 " + notes.length); process.exit(1) }
+  if (d.impact.uncertain !== true) { console.log("推演基准时没有置 uncertain"); process.exit(1) }
+  const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
+  if (del.length !== 1 || !del[0].target.startsWith("/")) { console.log("推演的基准没有给出绝对路径: " + JSON.stringify(del)); process.exit(1) }
+  if (!d.impact.cwd || !d.impact.cwd.startsWith("/")) { console.log("cwd 不是绝对路径: " + String(d.impact.cwd)); process.exit(1) }
+})'; then
+  echo "  未给 --cwd 时的回退行为不合格"
+  bad=$((bad + 1))
+fi
+
+with_cwd=$(printf '%s' 'rm -rf x' | "$BIN" --cwd=/tmp/base 2>/dev/null)
+if ! printf '%s' "$with_cwd" | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  let d; try { d = JSON.parse(s) } catch (e) { console.log("不是合法 JSON"); process.exit(1) }
+  const notes = (d.issues || []).filter(i => (i.message || "").includes("--cwd"));
+  if (notes.length !== 0) { console.log("给了 --cwd 仍出现基准警告"); process.exit(1) }
+  if (d.impact.cwd !== "/tmp/base") { console.log("cwd 不是给定基准: " + String(d.impact.cwd)); process.exit(1) }
+  const del = (d.impact.effects || []).filter(e => e.kind === "Delete");
+  if (del.length !== 1 || del[0].target !== "/tmp/base/x") { console.log("相对路径没有对着基准解析: " + JSON.stringify(del)); process.exit(1) }
+})'; then
+  echo "  给定 --cwd 时的解析不合格"
+  bad=$((bad + 1))
+fi
+
+printf '%s' 'rm -rf x' | "$BIN" --cwd=relative/base >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "  相对 --cwd 的退出码不是 2"; bad=$((bad + 1)); }
+
 total=$((total + 2))
 if ! "$BIN" --man 2>/dev/null | grep -q '^PreShell$'; then
   echo "  --man 没有输出纯文本手册"

@@ -26,7 +26,7 @@ preshell --man-markdown
 ## Options
 
 - `--shell=S`: read the input as `auto` (default), `bash`, `zsh`, or `probe`. `auto` follows the shebang and otherwise uses bash. `probe` tries the declared dialect first and then the other supported dialect.
-- `--cwd=PATH`: resolve relative paths from this absolute directory. It is a starting point, not a `cd`, so it adds no effect and a `cd` in the command overrides it.
+- `--cwd=PATH`: the base every relative path in the input is resolved against. It must be absolute. It is a starting point, not a `cd`, so it adds no effect and a `cd` in the command overrides it. It is required by the caller contract: without it the tool falls back to its own current directory and says so in a note.
 - `--pretty`: indent the JSON in single-command mode.
 - `--stream`: read one JSON request per line and write one answer per line.
 - `--spec`: print the machine-readable protocol contract as JSON.
@@ -48,14 +48,13 @@ Standard output contains exactly one JSON report. Diagnostics and help go to sta
 
 ## Paths and pwd
 
-PreShell never reads the file system, so it does not know which directory the caller is in. Without help it reports `rm -rf dist` as `Delete: dist`, and `impact.cwd` is absent.
+Paths are reported **absolute**. PreShell never reads the file system, so the base they are resolved against has to come from somewhere, and that somewhere is the caller.
 
-- Pass `--cwd=/a/b` and the same command reports `/a/b/dist`, with `impact.cwd` set to `/a/b`. The value must be absolute; a relative one is a usage error.
-- Absolute paths are reported as written. Relative paths are resolved when a base is known, and reported as written when it is not.
+- Pass `--cwd=/a/b` and `rm -rf dist` reports `Delete: /a/b/dist`, with `impact.cwd` set to `/a/b`. The value must be absolute; a relative one is a usage error.
+- `--cwd` is required by the caller contract. Without it the tool uses its own current directory as the base — which is the caller's directory whenever the caller spawned it without changing directory — and attaches a `Note` to every report saying so. That note also marks `impact.uncertain`, so the answer is not presented as a closed one.
 - `--cwd` is a starting point, not a movement: it produces no effect, and a `cd` inside the command takes precedence.
 - `cd` affects the rest of the same command line only. A subshell, a command substitution, a pipeline element and a script handed to another shell each get their own copy, and consecutive `cd`s accumulate in order.
-- When the base cannot be worked out (`cd $DIR`, or a relative `cd` with no base), the report sets `impact.uncertain` rather than letting a missing base pass as "no change".
-- A caller that does not supply a base must hand the relative paths to whatever runs in the real directory.
+- The one case that cannot be absolute is a path after a `cd` whose destination cannot be modelled, such as `cd $DIR`. Those paths stay as written and `impact.uncertain` is set, so the gap is visible rather than filled in with a guess.
 
 ## Stream mode
 

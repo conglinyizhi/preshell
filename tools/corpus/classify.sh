@@ -11,11 +11,12 @@
 #   PFLAGS 同 run.sh：zsh 语料要 PFLAGS=--shell=zsh
 set -uo pipefail
 bin="${1:?用法：classify.sh <preshell 可执行文件> < 文件列表}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   # shellcheck disable=SC2086
-  out="$("$bin" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
+  out="$("$bin" --cwd="$root" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
   case "$out" in
     *Unsupported* | *Invalid*) ;;
     *) continue ;;

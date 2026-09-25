@@ -140,6 +140,15 @@ check "CRLF 输入" "$(printf '"ls"\r\n"pwd"\r\n' | "$BIN" --stream 2>/dev/null 
 check "最后一行没有换行也算一条" "$(printf '"ls"' | "$BIN" --stream 2>/dev/null | wc -l)" "1"
 
 # --- 5) 退出码与 stdout 纯净 ---------------------------------------------
+# 基准警告必须逐行出现：流式里每条报告都要能独立交给下游，不能只在开头说一次。
+total_note=$(printf '"rm -rf x"\n' | "$BIN" --stream 2>/dev/null | node -e '
+let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+  const d = JSON.parse(s.trim().split("\n")[0])
+  const notes = (d.issues || []).filter(i => i.kind === "Note" && (i.message || "").includes("--cwd"))
+  console.log((notes.length === 1 && d.impact.uncertain === true) ? "ok" : "bad")
+})')
+check "无 --cwd 时每条报告都带基准警告" "$total_note" "ok"
+
 printf '"ls"\n{oops}\n' | "$BIN" --stream >/tmp/stream_out.txt 2>/tmp/stream_err.txt
 check "有坏行时退出码仍为 0" "$?" "0"
 check "stdout 每行都是合法 JSON" "$(node -e 'const fs=require("fs");const ls=fs.readFileSync("/tmp/stream_out.txt","utf8").split("\n").filter(Boolean);let bad=0;for(const l of ls){try{JSON.parse(l)}catch(e){bad++}}process.stdout.write(String(bad))')" "0"

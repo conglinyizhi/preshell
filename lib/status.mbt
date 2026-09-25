@@ -137,6 +137,16 @@ fn add_notes(
 }
 
 ///|
+/// Attach caveats to a finished report.
+///
+/// The status is kept: the analysis did run. The impact is marked uncertain,
+/// because an answer that needed a caveat is not a closed one — a caller that
+/// ignores this reads "no writes reported" as "writes nothing".
+pub fn with_caveats(r : Report, messages : Array[String]) -> Report {
+  add_notes(r, messages, kind=Note)
+}
+
+///|
 /// How many issues a report carries. Diagnostics scale with the input: a
 /// 5000-level nesting produced 5001 issues and a 280KB answer for a 15KB
 /// question. The count of what was left out is reported instead, so a caller

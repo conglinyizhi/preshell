@@ -143,7 +143,11 @@ for (let round = 0; round < n; round++) {
     applied.push(mutations[rnd(mutations.length)](buf));
   }
 
-  const r = spawnSync(bin, [], { input: buf, timeout, maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(bin, ["--cwd=" + root], {
+    input: buf,
+    timeout,
+    maxBuffer: 64 * 1024 * 1024,
+  });
   let verdict = "ok";
   if (r.error && r.error.code === "ETIMEDOUT") verdict = "hang";
   else if (r.signal) verdict = "crash";

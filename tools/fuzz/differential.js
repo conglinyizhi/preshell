@@ -168,7 +168,7 @@ function shellOk(src) {
 }
 
 function ourStatus(src) {
-  const r = spawnSync(bin, [dialectFlag, "--scan"], {
+  const r = spawnSync(bin, ["--cwd=" + root, dialectFlag, "--scan"], {
     input: src,
     encoding: "utf8",
     timeout,

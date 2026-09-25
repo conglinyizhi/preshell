@@ -10,6 +10,7 @@
 #   awk 统计第一列计数        看每个状态各有多少
 set -uo pipefail
 bin="${1:?用法：snapshot.sh <bin> <列表> <输出>}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 list="${2:?用法：snapshot.sh <bin> <列表> <输出>}"
 out="${3:?用法：snapshot.sh <bin> <列表> <输出>}"
 [ -f "$list" ] || { echo "找不到列表：$list" >&2; exit 2; }
@@ -18,7 +19,7 @@ out="${3:?用法：snapshot.sh <bin> <列表> <输出>}"
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   # shellcheck disable=SC2086
-  s="$("$bin" ${PFLAGS:-} --scan <"$f" 2>/dev/null | head -1 | sed 's/^status=//; s/ .*//')"
+  s="$("$bin" --cwd="$root" ${PFLAGS:-} --scan <"$f" 2>/dev/null | head -1 | sed 's/^status=//; s/ .*//')"
   printf '%s\t%s\n' "${s:-CRASH}" "$f" >>"$out"
 done <"$list"
 wc -l <"$out" >&2

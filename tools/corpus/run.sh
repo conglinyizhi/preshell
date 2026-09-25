@@ -69,7 +69,7 @@ max_line=20   # 每个象限最多打印多少条文件名
 # 而 grep 出来的东西跟工具实际用的规则可能悄悄分叉。
 table_msgs="$(mktemp)"
 # shellcheck disable=SC2086
-"$bin" ${PFLAGS:-} --evidence >"$table_msgs"
+"$bin" --cwd="$root" ${PFLAGS:-} --evidence >"$table_msgs"
 
 both_ok=0
 we_gap=0
@@ -94,7 +94,7 @@ while IFS= read -r f; do
   # PFLAGS lets a caller pick the dialect: zsh code in this tree carries no
   # shebang (it is sourced), so auto-detection cannot see it.
   # shellcheck disable=SC2086
-  out="$(timeout 20 "$bin" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
+  out="$(timeout 20 "$bin" --cwd="$root" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
   line="$(printf '%s\n' "$out" | head -1)"
   ours="${line%% *}"
   ours="${ours#status=}"

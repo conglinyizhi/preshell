@@ -26,7 +26,8 @@ fn mentions_unknown_cd(im : @lib.Impact) -> Bool {
 
 ///|
 test "no base and no cd leaves the path as written" {
-  // 没有基准就没有绝对路径可给：原样返回，并把基准交给调用方。
+  // 库这一层不猜基准：`base_cwd=None` 时原样返回。命令行入口不会走到这里，
+  // 它要么用 --cwd，要么用本进程当前目录推演（见下面的 CLI 契约与 probe）。
   let im = impact_from(None, "rm -rf dist")
   debug_inspect(im.cwd, content="None")
   debug_inspect(deleted_paths(im), content="[\"dist\"]")
@@ -158,4 +159,24 @@ test "normalize sums leading .. in a relative path" {
   inspect(@lib.normalize_path("../.."), content="../..")
   inspect(@lib.normalize_path("a/../../.."), content="../..")
   inspect(@lib.normalize_path("../x"), content="../x")
+}
+
+///|
+test "a caveat keeps the status and marks the impact uncertain" {
+  // 用来承载「基准是推演来的」这类说明：警告必须让调用方看见，
+  // 而不是只留一条可以被忽略的文字。
+  let plain = @lib.analyze_dialect(
+    "rm -rf x",
+    @lib.Dialect::Bash,
+    base_cwd=Some("/a"),
+  )
+  inspect(plain.issues.length(), content="0")
+  inspect(plain.impact.uncertain, content="false")
+  let warned = @lib.with_caveats(plain, ["no --cwd given"])
+  debug_inspect(warned.status, content="Complete")
+  inspect(warned.issues.length(), content="1")
+  debug_inspect(warned.issues[0].kind, content="Note")
+  inspect(warned.impact.uncertain, content="true")
+  // 路径本身不受警告影响。
+  debug_inspect(deleted_paths(warned.impact), content="[\"/a/x\"]")
 }

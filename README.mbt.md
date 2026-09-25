@@ -77,25 +77,28 @@ There is no exit code that means "dangerous".
 
 ## Relative paths and pwd
 
-The tool never reads the file system, so it does not know which directory you are
-in. `rm -rf dist` comes back as `Delete: dist`, with no `impact.cwd`.
+Paths are reported **absolute**. The tool never reads the file system, so the
+base they are resolved against has to come from the caller:
 
-Pass `--cwd=/srv/app` and the same command reports `/srv/app/dist`, with
-`impact.cwd` set to the base. The value must be absolute; a relative one is a
-usage error. Absolute paths are reported as written, and relative paths that
-cannot be resolved are reported as written too, so the answer says which base it
-was read against instead of inventing one.
+```bash
+preshell --cwd=/srv/app 'rm -rf dist'   # Delete: /srv/app/dist
+```
+
+`--cwd` must be absolute, and it is required by the caller contract. Without it
+the tool falls back to its own current directory — which is the caller's
+directory whenever the caller spawned it without changing directory — and
+attaches a `Note` saying so, which also marks `impact.uncertain`. Seeing that
+note means the base was inferred, not asserted.
 
 `--cwd` is a starting point, not a `cd`: it adds no effect, and a `cd` inside the
-command overrides it. A `cd` only affects the rest of the same command line —
-a subshell, a command substitution, a pipeline element and a script handed to
-another shell each get their own copy, and consecutive `cd`s accumulate. When the
-base cannot be worked out (`cd $DIR`, or a relative `cd` with no base),
-`impact.uncertain` is set rather than a missing base passing as "no change".
+command overrides it. A `cd` only affects the rest of the same command line — a
+subshell, a command substitution, a pipeline element and a script handed to
+another shell each get their own copy, and consecutive `cd`s accumulate. The one
+case that stays as written is a path after a `cd` whose destination cannot be
+modelled (`cd $DIR`), and there `uncertain` is set rather than a gap being filled
+in with a guess.
 
-A caller that does not supply a base has to resolve the paths itself, or hand
-them to whatever runs in the real directory. See
-[`docs/integration.md`](docs/integration.md) for the caller contract.
+See [`docs/integration.md`](docs/integration.md) for the caller contract.
 
 ## Output
 
