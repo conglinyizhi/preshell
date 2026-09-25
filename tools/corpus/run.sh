@@ -65,6 +65,15 @@ fi
 
 max_line=20   # 每个象限最多打印多少条文件名
 
+# oracle 判不了的输入：它们的有效性取决于运行时的 shell 选项，而 `bash -n` 什么都
+# 不执行（`shopt -s extglob` 在 -n 下不生效），所以它的拒绝在这里不构成证据。
+# 实测：`bash -n` 拒 `echo @(?|.?)`，`bash -O extglob -n` 过，`zsh -n` 也过——也就是说
+# 工具接受它是对的，是 oracle 少了上下文。
+#
+# 每条都必须真的落在「我们太宽松」象限，否则这个列表就是在替真缺口打掩护；反过来
+# 「我们太宽松」里出现了没登记的条目也会被点名。两条都打印出来，不静默。
+oracle_blind="extglob4.sub extglob6.sub"
+
 # 已佐证的原文清单问工具本身要，不从源码 grep：那张表现在按方言分支，
 # 而 grep 出来的东西跟工具实际用的规则可能悄悄分叉。
 table_msgs="$(mktemp)"
@@ -214,6 +223,25 @@ echo
 echo "## 我们太宽松的文件"
 echo
 print_capped "$permissive_files"
+echo
+blind_seen=0
+blind_missing=""
+for name in $oracle_blind; do
+  if grep -q "/$name$" "$permissive_files"; then
+    blind_seen=$((blind_seen + 1))
+  else
+    blind_missing="$blind_missing $name"
+  fi
+done
+unlisted="$(grep -v '^  oracle:' "$permissive_files" |
+  grep -vE "/($(printf '%s' "$oracle_blind" | tr ' ' '|'))$" | grep -c . || true)"
+echo "  其中 oracle 判不了的（选项上下文缺失，已登记）：$blind_seen"
+if [ -n "$blind_missing" ]; then
+  echo "  登记了却没出现在这个象限：$blind_missing  ← 列表过期了，删掉对应条目"
+fi
+if [ "$unlisted" != "0" ]; then
+  echo "  未登记、也没被解释的：$unlisted 条  ← 这些要当缺口查"
+fi
 echo
 echo "## 我们缺口的文件"
 echo

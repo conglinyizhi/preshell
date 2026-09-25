@@ -152,10 +152,11 @@ test "naming the dialect we are already reading is not a caveat" {
 
 ///|
 test "syntax evidence is per dialect" {
-  // The one corroborated message was measured against bash. zsh accepts two of
-  // the files that produced it, so under zsh the table is empty and nothing may
-  // be upgraded to Invalid.
-  inspect(@lib.syntax_evidence(Bash).length(), content="1")
+  // Both corroborated messages were measured against bash: an unclosed `${`,
+  // and a seventeenth here-document on one line. zsh accepts files that produce
+  // the first, and has no here-document limit at all, so under zsh the table is
+  // empty and nothing may be upgraded to Invalid.
+  inspect(@lib.syntax_evidence(Bash).length(), content="2")
   inspect(@lib.syntax_evidence(Zsh).length(), content="0")
 }
 

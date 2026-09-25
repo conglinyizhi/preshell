@@ -58,3 +58,46 @@ test "unclosed constructs are not silently accepted" {
     }
   }
 }
+
+///|
+/// One command line carrying `n` here-documents.
+fn heredocs_on_one_line(n : Int) -> String {
+  let sb = StringBuilder()
+  sb.write_string("cat")
+  for _ in 0..<n {
+    sb.write_string(" <<EOF")
+  }
+  sb.write_string("\n")
+  for _ in 0..<n {
+    sb.write_string("EOF\n")
+  }
+  sb.to_string()
+}
+
+///|
+/// bash keeps pending here-documents in a fixed stack: shell.h:172 has
+/// `#define HEREDOC_MAX 16`, and y.tab.c's push_heredoc reports "maximum
+/// here-document count exceeded" and exits when a seventeenth is pushed.
+/// Measured in bash 5.3: sixteen on one line parse, seventeen do not, and a
+/// second line starts over because the stack is drained when the command before
+/// it is gathered. zsh has no such limit, so the check is bash-only and the
+/// message therefore is not in zsh's evidence table either.
+test "a seventeenth here-document on one line is a syntax error" {
+  debug_inspect(
+    @lib.analyze(heredocs_on_one_line(16)).status,
+    content="Complete",
+  )
+  debug_inspect(
+    @lib.analyze(heredocs_on_one_line(17)).status,
+    content="Invalid",
+  )
+  // The budget is per line, not per file.
+  debug_inspect(
+    @lib.analyze(heredocs_on_one_line(8) + heredocs_on_one_line(8)).status,
+    content="Complete",
+  )
+  debug_inspect(
+    @lib.analyze_dialect(heredocs_on_one_line(17), @lib.Dialect::Zsh).status,
+    content="Complete",
+  )
+}

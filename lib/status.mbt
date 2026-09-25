@@ -512,6 +512,11 @@ fn corroborated_syntax_messages(dialect : Dialect) -> Array[String] {
         // 缺口象限 0 次；手动对照 `bash -n -c 'echo ${x'` 也是解析期报错。
         // 强度上限就是这点证据（n=1，无反正例）。
         "unterminated ${",
+        // 证据：一行里的 here-document 超过 16 个。bash 的计数器在 shell.h:172
+        // （HEREDOC_MAX 16），y.tab.c 的 push_heredoc 在第 17 个时报
+        // "maximum here-document count exceeded" 并退出；实测 16 个过、17 个不过，
+        // 第二行重新计数。语料里 exportfunc1.sub 正是这一条，落在「两边都报错」象限。
+         "maximum here-document count exceeded",
       ]
   }
 }

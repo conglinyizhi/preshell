@@ -33,6 +33,10 @@ pub(all) struct Parser {
   /// `while true; { : }` is that shape: the brace group joins the condition
   /// (a separator lets the list continue) and the loop keeps an empty body.
   mut eof_ok : Bool
+  /// Line the pending here-document count belongs to, and how many were pushed
+  /// on it. bash gathers them when the command ends, so the budget is per line.
+  mut heredoc_line : Int
+  mut heredoc_count : Int
 }
 
 ///|
@@ -48,6 +52,8 @@ pub fn Parser::Parser(lex : Lexer) -> Parser {
     brace_body: false,
     brace_stop: false,
     eof_ok: false,
+    heredoc_line: -1,
+    heredoc_count: 0,
   }
 }
 
@@ -1500,6 +1506,7 @@ fn Parser::parse_redirect(self : Parser, fd : Int?) -> Redirect {
   // registered *before* the parser pulls the token that may be the newline.
   if self.cur is TWord(w) && (op is RHereDoc || op is RHereDocStrip) {
     let r : Redirect = { fd, op, target: w, body: None, }
+    self.count_heredoc()
     self.lex.pending.push(r)
     self.advance()
     return r
@@ -1519,6 +1526,32 @@ fn Parser::parse_redirect(self : Parser, fd : Int?) -> Redirect {
   }
   let r : Redirect = { fd, op, target, body: None, }
   r
+}
+
+///|
+/// bash keeps pending here-documents in a fixed stack and refuses the command
+/// when a seventeenth is pushed on the same one: shell.h:172 has
+/// `#define HEREDOC_MAX 16`, and y.tab.c:5467 reports "maximum here-document
+/// count exceeded" and exits. Measured in bash 5.3: sixteen on one line parse,
+/// seventeen do not, and a second line starts over because the stack is drained
+/// when the command before it is gathered. zsh has no such limit (measured), so
+/// this is bash-only, which is also why the message is not in zsh's evidence.
+fn Parser::count_heredoc(self : Parser) -> Unit {
+  if !(self.lex.dialect is Bash) {
+    return
+  }
+  let line = self.lex.line
+  if self.heredoc_line == line {
+    self.heredoc_count = self.heredoc_count + 1
+  } else {
+    self.heredoc_line = line
+    self.heredoc_count = 1
+  }
+  // Exactly once per line: bash exits at the first one, and repeating it for
+  // every further here-document would only pad the issue list.
+  if self.heredoc_count == 17 {
+    self.lex.fail("maximum here-document count exceeded")
+  }
 }
 
 ///|
