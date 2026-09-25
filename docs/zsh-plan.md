@@ -1,4 +1,6 @@
-# zsh 支持计划
+# PreShell zsh 支持计划
+
+许可与分发边界见 [`docs/third-party-licenses.md`](third-party-licenses.md)：本计划使用外部 zsh 源码树和 `zsh -n` 作验证，不把 zsh 源码复制进 PreShell 仓库。
 
 目标：**按 zsh 语义解析 zsh**，不是遇到 `#!/bin/zsh` 就报一句「没建模」。
 

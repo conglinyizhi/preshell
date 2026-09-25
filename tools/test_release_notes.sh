@@ -35,6 +35,7 @@ assets="$TMP/assets"
 mkdir "$assets"
 printf checksum > "$assets/SHA256SUMS"
 printf man > "$assets/preshell.1"
+printf markdown > "$assets/preshell.md"
 printf binary > "$assets/preshell-v0.2-x86_64-linux"
 
 out="$TMP/notes.md"

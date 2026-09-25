@@ -1,4 +1,4 @@
-# preshell
+# PreShell
 
 A shell command *analyzer*, not an approver.
 
@@ -16,7 +16,7 @@ It is a **standalone tool, not a library**: invoke it as a subprocess and read
 JSON. Callers in any language can use it without linking anything in, and the
 GPL stays on this side of the process boundary. What that boundary means for
 your project's licence, and how to call it without footguns, is
-[`docs/integration.md`](docs/integration.md).
+[`docs/integration.md`](docs/integration.md) and [`docs/third-party-licenses.md`](docs/third-party-licenses.md).
 
 ## What it is not
 
@@ -58,11 +58,11 @@ The full manual is available from the binary as `preshell --man` (plain text) or
 `preshell --man-markdown` (for agents and document tools); `docs/preshell.md` is
 the single source, also generated as `docs/preshell.1` for `man preshell`.
 
-The CI orchestration lives in MoonBit `.mbtx` scripts: `tools/ci/check.mbtx` is used by both
+PreShell CI orchestration lives in MoonBit `.mbtx` scripts: `tools/ci/check.mbtx` is used by both
 GitHub Actions and `tools/ci_local.py`, while non-MoonBit corpus and probe tools remain
 external commands invoked by that engine.
 
-Every [release](https://github.com/conglinyizhi/preshell/releases) is a compact changelog generated from the commits between tags: user-visible changes come first, while detailed commit lists are folded and engineering maintenance is kept below. It carries a
+Every [PreShell release](https://github.com/conglinyizhi/preshell/releases) is a compact changelog generated from the commits between tags: user-visible changes come first, while detailed commit lists are folded and engineering maintenance is kept below. It carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
 `.github/workflows/release.yml`. Building it yourself is one `moon build`; see
 [`docs/integration.md`](docs/integration.md) for both paths and for the licence
@@ -333,5 +333,6 @@ moon fmt && moon check --target native
 
 GPL-3.0-or-later. The implementation is an original rewrite, but it was written
 with heavy reference to bash's own source (`parse.y` for the grammar and lexer)
-and to `bash -n` for behaviour. See LICENSE.
+and to `bash -n` for behaviour. Third-party test materials and provenance are
+listed in [`docs/third-party-licenses.md`](docs/third-party-licenses.md). See LICENSE.
 

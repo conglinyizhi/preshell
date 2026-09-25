@@ -1,8 +1,8 @@
-.TH PRESHELL 1 "" "preshell 0.2.1" "User Commands"
+.TH PreShell 1 "" "preshell 0.2.1" "User Commands"
 .SH NAME
 preshell \- report what a shell command touches, as JSON
 .PP
-Facts-only shell command analyzer. It reports what a command touches without executing the command or making an allow/deny decision.
+PreShell is a facts-only shell command analyzer. It reports what a command touches without executing the command or making an allow/deny decision.
 .PP
 .SH SYNOPSIS
 .PP
@@ -109,7 +109,7 @@ Read \fBimpact.uncertain\fR before treating the effect list as complete. When it
 .PP
 The effect kinds include \fBExec\fR, \fBRead\fR, \fBWrite\fR, \fBDelete\fR, \fBNet\fR, \fBSpawn\fR, and \fBUnknown\fR. \fBmodeled: false\fR means control was handed to a program whose internal behavior is not modeled. \fBdynamic: true\fR means the target is not a closed set, for example because it contains a variable or glob.
 .PP
-.SH WHAT THIS TOOL DOES NOT DECIDE
+.SH WHAT PRESHELL DOES NOT DECIDE
 .PP
 The report is factual. It is not a security proof, sandbox, approval, or allow/deny verdict. Whether a command should run depends on the caller's user, sandbox, working directory, and policy.
 .PP
@@ -119,6 +119,8 @@ Shell constructs such as \fBeval $X\fR, \fB$CMD\fR, and \fBbase64 -d | sh\fR are
 .PP
 .IP "\(bu" 4
 Integration and license boundary: https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md
+.IP "\(bu" 4
+Third-party materials and provenance: https://github.com/conglinyizhi/preshell/blob/main/docs/third-party-licenses.md
 .IP "\(bu" 4
 Source and releases: https://github.com/conglinyizhi/preshell
 .IP "\(bu" 4

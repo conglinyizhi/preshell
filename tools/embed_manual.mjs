@@ -70,7 +70,7 @@ function roffInline(value) {
 function toRoff(input, version) {
   const lines = input.split("\n");
   const out = [
-    `.TH PRESHELL 1 "" "preshell ${version}" "User Commands"`,
+    `.TH PreShell 1 "" "preshell ${version}" "User Commands"`,
     ".SH NAME",
     "preshell \\- report what a shell command touches, as JSON",
   ];

@@ -1,4 +1,4 @@
-# preshell 项目规约（给 agent）
+# PreShell 项目规约（给 agent）
 
 shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit，native target。
 
@@ -210,10 +210,11 @@ tools/ci_local.py 语料 模糊   # 传给 mbtx，按步骤名过滤
 moon run --target native tools/ci/check.mbtx
 ```
 
-## 契约与手册的事实来源
+## PreShell 契约与手册的事实来源
 
 `--help` 是短契约，`--spec` 是机读契约，完整手册的唯一事实来源是 `docs/preshell.md`。
 `tools/embed_manual.mjs` 从这份 Markdown 生成：
+第三方材料的来源与许可见 `docs/third-party-licenses.md`；改动分析语料或 oracle 前先更新那份说明。
 
 - `cmd/preshell/manual_generated.mbt`：二进制内置的 `--man` 纯文本和 `--man-markdown`
 - `docs/preshell.1`：系统 `man preshell` 使用的 roff 页面
@@ -367,7 +368,7 @@ docs/zsh-plan.md；这里只放记分牌和口径。**缺口已经到零。**
 - 验收：`tools/probe/stream.sh`（真流式 + 裸形态逐字节等价 + 信封里的报告与单条
   模式一致 + 形态约定），lib 侧的帧逻辑
   在 `lib/stream_test.mbt`；两个工作流都跑这道
-- 收益的量级要看调用方：只跑 preshell 的批处理快约 10 倍；差分 harness 里 oracle
+- 收益的量级要看调用方：只跑 PreShell 的批处理快约 10 倍；差分 harness 里 oracle
   （`zsh -n` 3.19 ms/份、`bash -n` 1.35 ms）才是大头，流式只拿掉其中一份
 
 ## MoonBit 坑

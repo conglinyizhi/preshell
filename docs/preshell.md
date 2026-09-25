@@ -1,6 +1,6 @@
-# preshell
+# PreShell
 
-Facts-only shell command analyzer. It reports what a command touches without executing the command or making an allow/deny decision.
+PreShell is a facts-only shell command analyzer. It reports what a command touches without executing the command or making an allow/deny decision.
 
 ## Synopsis
 
@@ -96,7 +96,7 @@ Read `impact.uncertain` before treating the effect list as complete. When it is 
 
 The effect kinds include `Exec`, `Read`, `Write`, `Delete`, `Net`, `Spawn`, and `Unknown`. `modeled: false` means control was handed to a program whose internal behavior is not modeled. `dynamic: true` means the target is not a closed set, for example because it contains a variable or glob.
 
-## What this tool does not decide
+## What PreShell does not decide
 
 The report is factual. It is not a security proof, sandbox, approval, or allow/deny verdict. Whether a command should run depends on the caller's user, sandbox, working directory, and policy.
 
@@ -105,5 +105,6 @@ Shell constructs such as `eval $X`, `$CMD`, and `base64 -d | sh` are not statica
 ## More information
 
 - Integration and license boundary: <https://github.com/conglinyizhi/preshell/blob/main/docs/integration.md>
+- Third-party materials and provenance: <https://github.com/conglinyizhi/preshell/blob/main/docs/third-party-licenses.md>
 - Source and releases: <https://github.com/conglinyizhi/preshell>
 - License: GPL-3.0-or-later

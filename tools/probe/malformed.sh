@@ -41,11 +41,11 @@ fi
 total=$((total + 1))
 spec_json=$("$BIN" --spec 2>/dev/null)
 total=$((total + 2))
-if ! "$BIN" --man 2>/dev/null | grep -q '^preshell$'; then
+if ! "$BIN" --man 2>/dev/null | grep -q '^PreShell$'; then
   echo "  --man 没有输出纯文本手册"
   bad=$((bad + 1))
 fi
-if ! "$BIN" --man-markdown 2>/dev/null | grep -q '^# preshell$'; then
+if ! "$BIN" --man-markdown 2>/dev/null | grep -q '^# PreShell$'; then
   echo "  --man-markdown 没有输出 Markdown 手册"
   bad=$((bad + 1))
 fi

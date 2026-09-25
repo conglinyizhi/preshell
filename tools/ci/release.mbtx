@@ -35,10 +35,10 @@ async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
     #|  exit 0
     #|fi
     #|if gh release view "$TAG" >/dev/null 2>&1; then
-    #|  gh release edit "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+    #|  gh release edit "$TAG" --title "PreShell $TAG" --notes-file "$RUNNER_TEMP/notes.md"
     #|  gh release upload "$TAG" dist/* --clobber
     #|else
-    #|  gh release create "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+    #|  gh release create "$TAG" --title "PreShell $TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
     #|fi
     #|gh release view "$TAG" --json url,assets --jq '"\\(.url)\\n" + ([.assets[].name] | join(", "))'
   let code = @process.run("bash", ["-e", "-o", "pipefail", "-c", script, "release.mbtx", tag, repo, dry_run])

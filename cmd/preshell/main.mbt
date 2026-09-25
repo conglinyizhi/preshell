@@ -10,7 +10,7 @@ extern "C" fn exit(code : Int) = "exit"
 let usage_exit_code : Int = 2
 
 ///|
-/// preshell — report what a shell command touches. No verdicts.
+/// PreShell — report what a shell command touches. No verdicts.
 ///
 /// The contract callers rely on is deliberately small:
 ///
@@ -310,7 +310,7 @@ fn tool_version() -> String {
 /// A command line this tool refuses to read. The reason goes to stderr first,
 /// then the usage text, and the status says no report was produced.
 async fn usage_error(message : String) -> Unit {
-  @stdio.stderr.write("preshell: \{message}\n\n")
+  @stdio.stderr.write("PreShell: \{message}\n\n")
   usage()
   exit(usage_exit_code)
 }
@@ -318,7 +318,7 @@ async fn usage_error(message : String) -> Unit {
 ///|
 async fn usage() -> Unit {
   let text =
-    #|preshell — what a shell command touches, as JSON. It passes no judgement.
+    #|PreShell — what a shell command touches, as JSON. It passes no judgement.
     #|
     #|usage: preshell [options] [<command>]
     #|       preshell < script.sh          one command from stdin (preferred)
@@ -474,7 +474,7 @@ async fn answer_stream_line(
       counts.reports += 1
     }
     Err(refused) => {
-      @stdio.stderr.write("preshell: line \{number}: \{refused.message}\n")
+      @stdio.stderr.write("PreShell: line \{number}: \{refused.message}\n")
       write_report_line(
         @lib.stream_error(refused.message, number, refused.id).stringify(),
       )
@@ -529,7 +529,7 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
           // matching their input.
           number += 1
           let message = "line longer than \{@lib.max_stream_line()} bytes"
-          @stdio.stderr.write("preshell: line \{number}: \{message}\n")
+          @stdio.stderr.write("PreShell: line \{number}: \{message}\n")
           write_report_line(
             @lib.stream_error(message, number, None).stringify(),
           )
@@ -547,10 +547,10 @@ async fn stream_reports(shell : String?, probe : Bool) -> Unit {
     _ => ()
   }
   @stdio.stderr.write(
-    "preshell: \{counts.reports} reports, \{counts.errors} lines refused\n",
+    "PreShell: \{counts.reports} reports, \{counts.errors} lines refused\n",
   )
   if read_failed {
-    @stdio.stderr.write("preshell: reading stdin failed\n")
+    @stdio.stderr.write("PreShell: reading stdin failed\n")
     exit(io_exit_code)
   }
 }

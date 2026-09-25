@@ -1,23 +1,23 @@
 # 接入指引
 
-给要把 preshell 接进自己项目的读者。读这一份就够：从许可边界到调用姿势、
+给要把 PreShell 接进自己项目的读者。读这一份就够：从许可边界到调用姿势、
 到上线前该检查什么。它只做静态分析——**不执行你的命令、不读磁盘、不联网**，
 所以你可以放心把不可信的文本喂给它。
 
 ## 只有一种接法：子进程
 
-preshell 是**独立工具**，不是库。接它的唯一方式是起子进程，命令从 stdin 进，
+PreShell 是**独立工具**，不是库。接它的唯一方式是起子进程，命令从 stdin 进，
 报告从 stdout 出：
 
 ```
-你的程序  ──stdin──▶  preshell  ──stdout──▶  JSON 报告
+你的程序  ──stdin──▶  PreShell  ──stdout──▶  JSON 报告
 ```
 
 不链接、不 import、不静态打包。这样调用方用任何语言都行，GPL 也停在进程边界上。
 
 ## 许可边界
 
-preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的许可。
+PreShell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的许可。
 你和它之间只有一条管道，两个程序在手臂长度上通信，自由软件的通行读法不把
 这当成「你的作品包含了我」——所以你的项目可以闭源、可以用任何许可，
 包括与 GPL 不兼容的许可。
@@ -40,7 +40,7 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 - 你改过就标明改动
 - 不对下游加额外限制
 
-推荐的接法因此是**别分发它**：在文档里写一句「需要 preshell，请自行安装」，
+推荐的接法因此是**别分发它**：在文档里写一句「需要 PreShell，请自行安装」，
 你只调用 PATH 上的 `preshell`。这样你没有分发义务，也没有跟进版本的义务。
 
 不要做的事：抹掉它的来源与许可；把它说成你自研的实现；把它的 JSON 契约
@@ -75,10 +75,10 @@ preshell 是 GPL-3.0-or-later。那是**程序**的许可，不是**协议**的�
 上面这些不止在这份文档里：`preshell --help` 是同一份契约的速查（带地址），
 `preshell --spec` 是它的机读形式（JSON，给拿得到二进制、拿不到仓库的 agent 用），
 完整手册的唯一事实来源是 `docs/preshell.md`：二进制用 `preshell --man` 输出纯文本，
-用 `preshell --man-markdown` 输出 Markdown，`docs/preshell.1` 则供 `man preshell`。
+用 `preshell --man-markdown` 输出 Markdown，`docs/preshell.1` 则供 `man preshell`；第三方材料和许可见 `docs/third-party-licenses.md`。
 生成链由 `tools/embed_manual.mjs` 维护，不要直接编辑生成文件。
 
-GitHub Release 页面是变更记录，不重复 README 的项目介绍。发布 workflow 从 tag 之间的
+PreShell 的 GitHub Release 页面是变更记录，不重复 README 的项目介绍。发布 workflow 从 tag 之间的
 提交标题自动生成说明：`feat`、`fix`、`perf`、`refactor` 排在前面，所有详细记录折叠，
 `ci`、`test`、`chore`、`build` 放在工程维护区。本地预览用
 `tools/release_notes.sh --from v旧 --to HEAD --assets dist`。
@@ -134,7 +134,7 @@ man preshell                # 同上，给人看的
 文档里写清依赖，代码里只调用 `preshell`：
 
 ```markdown
-本工具需要 preshell（GPL-3.0-or-later），请自行安装：
+本工具需要 PreShell（GPL-3.0-or-later），请自行安装：
 <moon build 的说明，或发行版包名>
 ```
 
@@ -155,7 +155,7 @@ import { spawnSync } from "node:child_process";
 
 export function analyze(command) {
   const r = spawnSync("preshell", [], { input: command, encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`preshell failed: ${r.stderr}`);
+  if (r.status !== 0) throw new Error(`PreShell failed: ${r.stderr}`);
   return JSON.parse(r.stdout);
 }
 ```
@@ -168,7 +168,7 @@ import json, subprocess
 def analyze(command: str) -> dict:
     r = subprocess.run(["preshell"], input=command, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"preshell failed: {r.stderr}")
+        raise RuntimeError(f"PreShell failed: {r.stderr}")
     return json.loads(r.stdout)
 ```
 
@@ -184,7 +184,7 @@ pub fn analyze(command: &str) -> serde_json::Value {
         .spawn().expect("spawn preshell");
     child.stdin.take().unwrap().write_all(command.as_bytes()).unwrap();
     let out = child.wait_with_output().expect("wait preshell");
-    assert!(out.status.success(), "preshell failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success(), "PreShell failed: {}", String::from_utf8_lossy(&out.stderr));
     serde_json::from_slice(&out.stdout).expect("preshell produced invalid JSON")
 }
 ```
@@ -239,11 +239,11 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
         r = subprocess.run([BIN], input=command, capture_output=True,
                            text=True, timeout=timeout)
     except FileNotFoundError as e:
-        raise PreshellUnavailable("preshell 不在 PATH 上") from e
+        raise PreshellUnavailable("PreShell 不在 PATH 上") from e
     except subprocess.TimeoutExpired as e:
-        raise PreshellUnavailable("preshell 超时") from e
+        raise PreshellUnavailable("PreShell 超时") from e
     if r.returncode != 0:
-        raise PreshellUnavailable(f"preshell 退出 {r.returncode}: {r.stderr.strip()[:200]}")
+        raise PreshellUnavailable(f"PreShell 退出 {r.returncode}: {r.stderr.strip()[:200]}")
     return json.loads(r.stdout)
 ```
 
@@ -485,7 +485,7 @@ export function openAnalyzer(bin = "preshell", args = []) {
 3. **id 必须不可猜**（随机，不要自增），理由见上一节
 4. **别让别的子进程继承那根 fd。** 谁拿到写端谁就能投递请求，还能拖住 EOF 让调用方
    永远等不到收工。Python 的 `close_fds=True` 与 Node 的 libuv 默认都设 CLOEXEC
-   （实测：两者的旁系子进程都拿不到 preshell 的那两个管道 inode），自己漏 fd 才会中招
+   （实测：两者的旁系子进程都拿不到 PreShell 的那两个管道 inode），自己漏 fd 才会中招
 
 夹带能做到什么：最多让工具去分析一段别人选的文本，调用方得到一份没要的报告。工具不执行、
 不读盘、不联网、不改状态，这一层是它的安全垫；带 id 时调用方还能把「无主的应答」认出来
@@ -503,6 +503,6 @@ export function openAnalyzer(bin = "preshell", args = []) {
 
 如果你跑的是一套差分 harness（每条命令还要起 oracle，比如 `bash -n`、`zsh -n`），
 别指望流式能把总时间压掉一个量级：那里 oracle 才是大头（实测 `zsh -n` 每份 3.19 ms，
-`bash -n` 1.35 ms，preshell 0.95 ms），流式只把其中属于 preshell 的那一份拿掉。
+`bash -n` 1.35 ms，PreShell 0.95 ms），流式只把其中属于 PreShell 的那一份拿掉。
 
 不做守护进程、不做 socket、不做库存调用：仍然是子进程，仍然走 stdin/stdout。
