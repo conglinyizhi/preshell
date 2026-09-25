@@ -122,13 +122,14 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist, impact.cwd: /s
   - **词首是运行时才展开的东西**（`$HOME/x`、`~/x`）。参数的值按原样使用，它是不是绝对
     路径是运行时事实，把基准拼上去只会算错（`$HOME/x` 配 `HOME=/home/u` 是 `/home/u/x`，
     不是 `/base/home/u/x`）。这个值调用方知道，由它收尾
-- **路径读了哪些变量写在报告里**：每条路径效果带自己的 `vars`，`impact.vars` 是去重后的并集。
-  工具不读环境，所以它交出来的正是你能查的东西——拿 `HOME` 替换 `$HOME/x` 就得到真实路径。
-  词首的 `~` 是 `HOME`、`~+` 是 `PWD`、`~-` 是 `OLDPWD`；`~user` 与 `~N` 不是环境变量能查到的
-  东西，所以它们是没有名字的洞（分别走口令库与目录栈）
+- **词首是运行时才展开的东西**（`$HOME/x`、`~/x`、`~+`、`~user/x`）。参数的值按原样使用，
+  是不是绝对路径是运行时事实，把基准拼上去只会算错：`$HOME/x` 配 `HOME=/home/u` 是
+  `/home/u/x`，不是 `/base/home/u/x`。这些值调用方知道，由它收尾——报告把要替换的名字
+  一并交出来，见下一节
 - 词首的 `~` 属于后一类：`~` 是 `$HOME`、`~+` 是 `$PWD`、`~-` 是 `$OLDPWD`、`~user` 是那个
-  用户的家目录；**登录名无效时 bash 原样保留前缀**，那时它反倒是相对路径。加引号的 `"~"`
-  是字面量，照常锚定（依据：bash 5.3 手册的 "Tilde Expansion" 与 "Expansion"）
+  用户的家目录（`~N` 是 shell 的目录栈）。**登录名无效时 bash 原样保留前缀**，那时它反倒是
+  相对路径；工具不知道那个用户在不在，所以一律算洞。加引号的 `"~"` 是字面量，照常锚定
+  （依据：bash 5.3 手册的 "Tilde Expansion" 与 "Expansion"）
 
 ### cd 影响基准的范围
 
@@ -141,6 +142,76 @@ preshell --cwd=/srv/app 'rm -rf dist'    # Delete: /srv/app/dist, impact.cwd: /s
 - 管道的每个元素各有一份：`cd /tmp | rm x` 里 `x` 不跟着 `/tmp`
 - 交给另一个 shell 的脚本自己一份：`bash -c "cd /tmp; rm x"; rm y`
 - `..` 到根为止：`cd / && cd ..` 仍是 `/`
+
+### 谁来替换那些变量
+
+读不出来的路径不是死路：报告把**要替换的名字**交出来了，替换是调用方的事，因为环境在
+调用方手上。每条效果带自己的 `vars`（它的 `target` 文本读了哪些名字），`impact.vars` 是
+去重后的并集——需要准备好哪些值，看这一个字段就够。
+
+| 路径写法 | `vars` | 谁来收尾 |
+|---|---|---|
+| `$HOME/x`、`${HOME}y` | `["HOME"]` | 调用方查环境替换 |
+| `~/x` | `["HOME"]` | 同上（`~` 就是 `$HOME`） |
+| `~+/x`、`~-/x` | `["PWD"]` / `["OLDPWD"]` | 同上 |
+| `~someone/x` | `[]` | **谁都不行**：它走口令库，不是环境变量 |
+| `~3`、`~+3` | `[]` | **谁都不行**：它是 shell 自己的目录栈 |
+| `'$HOME/x'`（带引号的） | `[]` | 不用替换：那是字面量，工具已按字面量锚定 |
+| `$1/x`、`$@` | `[]` | 没得查：位置参数不在环境里 |
+| `$CMD --help`（命令名本身） | `["CMD"]` | 同上，能查出程序名的就查 |
+
+规则就两条：
+
+- **只替换 `vars` 报出来的名字。** `dynamic: false` 的路径里那个 `$` 是字面量（`'$X/y'`），
+  替换它等于把命令的意思改了
+- **替换完还要看结果。** 值可能本身就是相对的（`HOME=rel`），也可能没设（展开成空，路径
+  形状跟着变）。收尾是你的判断，不是工具的：它只告诉你「缺哪个名字」
+
+一个能用的替换函数（Node）：
+
+```js
+import path from "node:path";
+
+// 吃整条效果，别只吃 target：`dynamic` 与 `vars` 都是替换要用到的信息。
+// 替换只认 vars 报出来的名字——工具的 AST 知道哪个 `~`、哪个 `$` 真的会展开，
+// 按文本猜的话，`~someone/x` 会被当成 `~/x` 替换错。
+export function resolvePath(effect, env, cwd) {
+  const { target, vars = [], dynamic = true } = effect;
+  // dynamic 为假：这段文本没有运行时展开，`'$LIT/x'` 里的 `$` 是字面量。
+  // 工具已经把它锚定好了，原样收下就行。
+  if (!dynamic) return { known: true, path: path.resolve(cwd, target) };
+
+  let out = target;
+  const tilde = out.startsWith("~+")
+    ? "PWD"
+    : out.startsWith("~-")
+      ? "OLDPWD"
+      : out.startsWith("~")
+        ? "HOME"
+        : null;
+  if (tilde !== null && vars.includes(tilde)) {
+    if (env[tilde] === undefined) return { known: false, reason: `${tilde} 未设` };
+    out = env[tilde] + out.slice(tilde === "HOME" ? 1 : 2);
+  }
+  for (const name of vars) {
+    if (env[name] === undefined) return { known: false, reason: `${name} 未设` };
+    out = out.replaceAll(`\${${name}}`, env[name]);
+    // 名字后面必须不是名字字符，否则 $XY 会被当成 $X 加个 Y
+    out = out.replace(new RegExp(`\\$${name}(?![A-Za-z0-9_])`, "g"), () => env[name]);
+  }
+  // 剩下的 `$` 是补不上的洞（`$1`、`$@` 这类不在环境里的）；词首的 `~` 是
+  // `~user`/`~N`，走口令库与目录栈，环境里也没有。路径中间的 `~` 是字面量
+  // （bash 只在词首展开它），不算。
+  if (out.includes("$") || out.startsWith("~")) {
+    return { known: false, reason: "还有补不上的东西" };
+  }
+  return { known: true, path: path.resolve(cwd, out) };
+}
+```
+
+最后那个 `path.resolve` 就是收尾：替换出来的是绝对路径就直接用，是相对的（值本身相对）
+再拿 `impact.cwd` 收一下。**顺序不能反**：先替换、再看结果，才是参数值「按原样使用」的意思。
+替换值用字面替换（`replaceAll` 带字符串参数、或传函数），别让值里的 `$` 被当成替换模板。
 
 ### 要求：调用方必须提供 pwd
 
@@ -339,9 +410,10 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
     每门语言的生态都实现一遍），所以它只报出交接对象并置 `uncertain`。
     调用方可以把这类条目单独计数：它们是「你需要另想办法」而不是「什么都没发生」
   - `Unknown` — 有个洞（动态路径、没建模的程序、here-doc 正文之类）
-- `impact.write_roots` — 会被改到的目录
-- `impact.vars` — 这些路径读到的变量名，去重后的并集；每条路径效果另有自己的 `vars`。
-  调用方拿它去查环境，替工具把值填上
+- `impact.write_roots` — 会被改到的目录。目录名本身可能带变量（`rm -rf $HOME/x` 的父目录
+  就是 `$HOME`），判断前先按 `vars` 替换，或者干脆当洞
+- `impact.vars` — 这份报告里所有效果读到的变量名，去重后的并集；每条效果另有自己的
+  `vars`（它的 `target` 读了哪些名字）。要替换哪些值看这里就够，见上面「谁来替换那些变量」
 - `impact.uncertain` — **先看这个**。true 表示这份影响面不是封闭集合
 - `impact.cwd` — 这份报告里的路径是对着哪个基准解析的。路径本身已经是绝对路径，
   这个字段是给「基准对不对」用的：它是推演来的还是命令自己 `cd` 出来的，见上面「相对路径与 pwd」
@@ -362,6 +434,8 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
       `Unknown` 处理（这样工具出新版本不会把你的解析器打挂）
 - [ ] 分发方式定了：用户自装（零义务）还是随包分发（GPLv3 §6 那四条义务）
 - [ ] 传了 `--cwd`（绝对路径），或者接受报告里那条「基准是推演来的」的 `Note` 及 `uncertain`
+- [ ] 需要真实路径时，你用 `vars` 加自己的环境去替换；`~user`、`~N` 与位置参数没有硬猜
+- [ ] 你没有把 `impact.cwd` 拼到变量路径前面（`$HOME/x` 的值是绝对的还是相对的，由它的值决定）
 - [ ] 命令是原样喂进去的，没有经过二次引用、二次展开
 - [ ] 批量调用时：读到 EOF 就把未决请求全部判失败，另有超时兜底，绝不挂着等应答
 - [ ] 批量且带 id 时：应答是信封，先取 `report`；有 `error` 就是那一行不是请求

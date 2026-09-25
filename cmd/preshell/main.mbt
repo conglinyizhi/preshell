@@ -404,6 +404,10 @@ async fn usage() -> Unit {
     #|reading an answer:
     #|  status           Complete / Unsupported / Invalid: how much was understood
     #|  impact.effects   facts: Exec, Read, Write, Delete, Net, Spawn, Unknown
+    #|  impact.vars      the variables those targets read. Each effect carries its
+    #|                   own vars. The tool never reads the environment, so the
+    #|                   name is what it hands over: substitute HOME and $HOME/x
+    #|                   resolves. Substitute only the names it reports
     #|  impact.uncertain read this first. true means the effect list is not a
     #|                   closed set, and an empty list must not be read as
     #|                   "touches nothing"
@@ -700,7 +704,7 @@ fn contract_json() -> Json {
         "pass --cwd=PATH (absolute): every relative path in the input is resolved against it and reported as an absolute path",
       ),
       "vars": Json::string(
-        "each path effect carries vars, and impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute HOME and $HOME/x resolves. A ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N are holes with no name",
+        "every effect carries vars, the names its own target reads; impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute it and $HOME/x resolves. Substitute only the reported names, because in a target that is not dynamic the $ is literal text. ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N have no name a caller could look up. write_roots can contain a name too",
       ),
       "required": Json::string(
         "--cwd is required by this contract. Without it the tool uses its own current directory as the base and attaches a Note saying so, which also marks the impact uncertain",

@@ -75,6 +75,33 @@ test "command substitutions inside conditions still count" {
 }
 ```
 
+## 路径读到的变量
+
+工具不读环境，所以它把**要替换的名字**交出来：每条效果带自己的 `vars`，`impact.vars` 是
+去重后的并集。调用方拿名字去查环境，替它把值填上。
+
+```mbt check
+///|
+test "paths report the variables they read" {
+  let report = @lib.analyze("rm -rf \"$HOME/cache\" $DIR/tmp")
+  debug_inspect(report.impact.vars, content="[\"HOME\", \"DIR\"]")
+  debug_inspect(report.impact.effects[1].vars, content="[\"HOME\"]")
+}
+```
+
+`~` 也算：`~` 是 `HOME`、`~+` 是 `PWD`、`~-` 是 `OLDPWD`。`~user`（口令库）与 `~N`（目录栈）
+不是环境变量能查到的，所以它们是没有名字的洞：
+
+```mbt check
+///|
+test "a ~user prefix names nothing" {
+  let report = @lib.analyze("rm -rf ~/x ~someone/y")
+  debug_inspect(report.impact.vars, content="[\"HOME\"]")
+  inspect(report.impact.effects[1].target, content="~/x")
+  inspect(report.impact.effects[2].target, content="~someone/y")
+}
+```
+
 ## 运行这份文档
 
 在仓库根目录：

@@ -35,7 +35,8 @@ preshell < cmd.sh |
 ```
 
 注意这段代码里的 `"ask"` / `"allow"` 是**调用方**的词汇，不是 preshell 的输出。
-工具里没有这两个词。
+工具里没有这两个词。上面这段遇到 `~`/`$` 一律 `ask`，因为 jq 里查不到环境；真接进
+应用里通常不必这么保守，见第 7 节。
 
 ## 3. 一个完整的调用方（Python）
 
@@ -124,3 +125,35 @@ preshell --pretty < cmd.sh | jq -r '
   这份影响面**不完整**，不能当「没写任何东西」读
 - `status: "Invalid"`：有证据说明 bash 自己也会拒绝这条命令。此时 `effects` 为空，
   但那是因为命令跑不起来，不是因为它是安全的
+
+## 7. 路径里有变量：先替换，再判定
+
+报告会把路径读到的变量名交出来（每条效果的 `vars`）。你的进程环境是你给的，所以替
+换这件事你做得成——第 2 节那种「见到 `~` 就问人」只是拿不到环境时的保守做法。
+
+替换函数在[接入指引](integration.md#谁来替换那些变量)里。区别在判定上：
+
+| 目标 | 不替换 | 替换之后 |
+|---|---|---|
+| `$HOME/x` | ask | `/home/me/x`，按 `/home` 在不在允许列表里判 |
+| `~+/x` | ask | `$PWD/x`，同上 |
+| `~someone/x` | ask | 仍然 ask：走口令库，环境里没有 |
+| `$1/x` | ask | 仍然 ask：位置参数不在环境里 |
+| `'$LIT/x'` | ask（若按文本硬替换还会改错） | 不用替换：它是字面量，工具已锚定 |
+
+```python
+def judge(effect, env, cwd, allowed):
+    resolved = resolve(effect, env, cwd)      # 见接入指引
+    if resolved is None:
+        return "ask", f"{effect['kind']} {effect['target']} 补不出真实路径"
+    if not allowed(resolved):
+        return "ask", f"{effect['kind']} {resolved} 在允许目录之外"
+    return "allow", ""
+```
+
+两个坑：
+
+- **替换用的是「这条命令实际会看到的环境」**，不是你自己的 `os.environ`。命令跑在哪个
+  用户、哪个容器、哪份 env 里，只有你知道
+- **值本身可能是相对路径，也可能没设**（展开成空，路径形状就变了）。所以替换完要再看
+  一眼结果，别把「替换过了」当成「确定安全」

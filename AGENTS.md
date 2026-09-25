@@ -243,7 +243,9 @@ Expansion" 规定 `~`=`$HOME`、`~user` 在登录名无效时**前缀原样保�
 **变量名从 AST 抽，不从渲染文本抽。** `PathArg`（`lib/word.mbt`）把一条路径的四个事实绑在
 一起：文本、是否封闭集合、能否锚定、读了哪些变量；加路径效果只走 `push_path`。`${X}y` 与
 `$Xy`、`"~"` 与 `~` 在文本上分不开，只看文本必然出错。`~`→`HOME`、`~+`→`PWD`、`~-`→`OLDPWD`
-是标准映射（bash 5.3 手册 "Tilde Expansion"），`~user`/`~N` 给不出名字。实现看 `Collector::push` 的 `starts_unresolved`
+是标准映射（bash 5.3 手册 "Tilde Expansion"），`~user`/`~N` 给不出名字。
+
+**同一条路径在所有效果上说同样的话。** `Delete` 与它并列的 `Unknown`、动态命令名与它的 `Exec`，`vars` 必须一致：调用方按其中任何一条去找值都该得到答案。加效果时走 `push_path` 就不会漏。实现看 `Collector::push` 的 `starts_unresolved`
 加上词本身的洞标记，两条必须同时成立——只看文本会把 `'$X/y'` 误判成未解析。回归用例在 `lib/cwd_position_test.mbt`
 （单 cd 位置、多 cd 累积、越过根、作用域隔离）与 `tools/probe/malformed.sh`（基准回退与警告）。
 
