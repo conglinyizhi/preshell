@@ -1,0 +1,99 @@
+///|
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/core/env" @env,
+}
+
+///|
+fn wanted(name : String, filters : ArrayView[String]) -> Bool {
+  if filters.length() == 0 {
+    true
+  } else {
+    filters.any(f => name.contains(f))
+  }
+}
+
+///|
+async fn run_step(name : String, cmd : String, args : Array[String]) -> Bool {
+  println("--- \{name}")
+  let code = @process.run(cmd, args)
+  if code == 0 {
+    println("    通过")
+    true
+  } else {
+    println("    失败（退出码 \{code}）")
+    false
+  }
+}
+
+///|
+async fn main {
+  let filters = @env.args()[1:].to_owned()
+  let failures = []
+  let steps : Array[(String, String, Array[String])] = [
+    (
+      "Versions",
+      "moon",
+      ["version", "--all"],
+    ),
+    (
+      "Build",
+      "moon",
+      ["build", "--release", "--target", "native"],
+    ),
+    (
+      "Unit tests",
+      "moon",
+      ["test", "--target", "native"],
+    ),
+    (
+      "Format and check",
+      "bash",
+      ["-e", "-o", "pipefail", "-c", "moon fmt && git diff --exit-code -- '*.mbt' && moon check --target native"],
+    ),
+    (
+      "Manual generation",
+      "node",
+      ["tools/embed_manual.mjs", "--check"],
+    ),
+    (
+      "Differential against bash -n",
+      "bash",
+      ["-e", "-o", "pipefail", "-c", "bash tools/corpus/run.sh | tee /tmp/corpus.txt"],
+    ),
+    (
+      "Dialect claims against a real POSIX shell",
+      "bash",
+      ["-e", "-o", "pipefail", "-c", "SH_ORACLE=\"dash -n\" bash tools/corpus/posix_oracle.sh --strict"],
+    ),
+    (
+      "Malformed input probe",
+      "bash",
+      ["tools/probe/malformed.sh"],
+    ),
+    (
+      "Streaming mode",
+      "bash",
+      ["tools/probe/stream.sh"],
+    ),
+    (
+      "Short fuzz",
+      "node",
+      ["tools/fuzz/mutate.js", "--n", "400", "--seed", "1"],
+    ),
+  ]
+  for step in steps {
+    let (name, cmd, args) = step
+    if wanted(name, filters) {
+      if !run_step(name, cmd, args) {
+        failures.push(name)
+      }
+    }
+  }
+  if failures.length() > 0 {
+    println("本地 CI：\{failures.length()} 步失败：\{failures.join(", ")}")
+    abort("CI failed")
+  }
+  println("本地 CI：全部通过")
+}

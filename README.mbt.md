@@ -58,6 +58,10 @@ The full manual is available from the binary as `preshell --man` (plain text) or
 `preshell --man-markdown` (for agents and document tools); `docs/preshell.md` is
 the single source, also generated as `docs/preshell.1` for `man preshell`.
 
+The CI orchestration lives in MoonBit `.mbtx` scripts: `tools/ci/check.mbtx` is used by both
+GitHub Actions and `tools/ci_local.py`, while non-MoonBit corpus and probe tools remain
+external commands invoked by that engine.
+
 Every [release](https://github.com/conglinyizhi/preshell/releases) is a compact changelog generated from the commits between tags: user-visible changes come first, while detailed commit lists are folded and engineering maintenance is kept below. It carries a
 prebuilt x86_64 Linux binary plus a `SHA256SUMS` file, built from that tag by
 `.github/workflows/release.yml`. Building it yourself is one `moon build`; see

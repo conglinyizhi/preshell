@@ -199,13 +199,15 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 
 ## 本地先跑一遍 CI
 
-推送之前用 `tools/ci_local.py`。它直接读 `.github/workflows/check.yml` 执行那里面
-的步骤，不在这里另抄一份：抄一份就有两处定义，改了一边忘另一边。只有 runner 上
-才需要的两步（安装 MoonBit、moon update）按名字跳过。
+推送之前用 `tools/ci_local.py`。它调用和 GitHub Actions 相同的
+`tools/ci/check.mbtx` 引擎，不在这里另抄一份：抄一份就有两处定义，改了一边忘另一边。
+workflow 只保留 checkout、安装 MoonBit、`moon update` 与启动 `.mbtx` 的 bootstrap。
+语料、oracle、probe、fuzz 等外部工具由 `.mbtx` 统一编排。
 
 ```bash
 tools/ci_local.py            # 全部
-tools/ci_local.py 语料 模糊   # 只跑名字匹配的步骤
+tools/ci_local.py 语料 模糊   # 传给 mbtx，按步骤名过滤
+moon run --target native tools/ci/check.mbtx
 ```
 
 ## 契约与手册的事实来源
@@ -231,7 +233,9 @@ Release changelog 由 `tools/release_notes.sh` 从提交标题生成：详细记
 1. **对接文档对齐当前版本**：`docs/integration.md` 的契约、`--version` 示例、release
    安装片段里的 tag，与 `moon.mod` 的 `version`、`cmd/preshell/main.mbt` 的
    `tool_version()` 一致。漏一处就会出现「文档说 0.1、二进制说 0.2」
-2. **本地模拟 CI 全过**：`tools/ci_local.py`，它直接读 `.github/workflows/check.yml`
+2. **本地模拟 CI 全过**：`tools/ci_local.py`，它和 GitHub Actions 共用
+   `tools/ci/check.mbtx`；CI 的 MoonBit 工具链调用统一经 `.mbtx` 引擎编排。
+   发布 workflow 同样由 `tools/ci/release.mbtx` 编排，workflow 只负责 bootstrap
 3. **格式验证后无变动**：`moon fmt` 连跑两次无差异，或提交后
    `git diff --exit-code -- '*.mbt'` 干净
 4. **最新每夜构建无警告**：`moon upgrade --dev`（交互式，需要真终端）之后

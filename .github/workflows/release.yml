@@ -34,85 +34,16 @@ jobs:
           # 读 tag 注解、比对历史都要完整历史，浅克隆拿不到。
           fetch-depth: 0
 
-      - name: Resolve tag
-        id: tag
-        run: |
-          TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
-          git rev-parse --verify "refs/tags/$TAG" >/dev/null
-          PREVIOUS_TAG=$(git tag --sort=-version:refname --merged "$TAG" | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | awk -v tag="$TAG" '$0 != tag { print; exit }' || true)
-          echo "name=$TAG" >> "$GITHUB_OUTPUT"
-          echo "previous=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
-          echo "发布 $TAG ($(git rev-parse --short "$TAG^{commit}"))，上一版本 ${PREVIOUS_TAG:-无}"
-
       - name: Install MoonBit
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
       - name: Update registry
-        # 新装的工具链带的注册表索引是旧的，直接 build 会报
-        # "module was not found in the registry"（moonbitlang/async）。
-        # 本地环境早就更新过，所以只有 CI 会碰这个。
+        # 新装的工具链带的注册表索引是旧的，先更新 async 依赖索引。
         run: moon update
 
-      - name: Build
-        run: moon build --release --target native
-
-      - name: Unit tests
-        run: moon test --target native
-
-      - name: Corpus gate
-        # 发布前跑一次差分。run.sh 本身只对崩溃与佐证表违反退出非零，
-        # 缺口是它只报不拦的——发布版不许可有缺口，所以这里明着一道。
-        # 「太宽松」那一列是 oracle 自身的噪声（±1~2，详见 tools/corpus/run.sh
-        # 与 README 的说明），不作为门。
-        run: |
-          bash tools/corpus/run.sh | tee /tmp/corpus.txt
-          if ! grep -qE '缺口（我们报错，oracle 通过）：0' /tmp/corpus.txt; then
-            echo "语料出现缺口，不发布"
-            exit 1
-          fi
-
-      - name: Streaming mode
-        # 发布门也过一遍：流式模式坏掉的版本不该挂出去。
-        run: bash tools/probe/stream.sh
-
-      - name: Package
-        run: |
-          TAG="${{ steps.tag.outputs.name }}"
-          BIN=_build/native/release/build/cmd/preshell/preshell.exe
-          "$BIN" --version
-          mkdir -p dist
-          install -Dm755 "$BIN" "dist/preshell-$TAG-$(uname -m)-linux"
-          install -Dm644 docs/preshell.1 dist/preshell.1
-          install -Dm644 docs/preshell.md dist/preshell.md
-          ( cd dist && sha256sum preshell-* preshell.1 preshell.md > SHA256SUMS && cat SHA256SUMS )
-
-      - name: Write notes
-        run: |
-          TAG="${{ steps.tag.outputs.name }}"
-          tools/release_notes.sh \
-            --from "${{ steps.tag.outputs.previous }}" \
-            --to "$TAG" \
-            --assets dist \
-            --repo "${{ github.server_url }}/${{ github.repository }}" \
-            > "$RUNNER_TEMP/notes.md"
-          cat "$RUNNER_TEMP/notes.md"
-
-      - name: Publish
+      - name: MoonBit release engine
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.tag.outputs.name }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # 重跑：说明与产物都覆盖，保持幂等。
-            gh release edit "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md"
-            gh release upload "$TAG" dist/* --clobber
-          else
-            gh release create "$TAG" \
-              --title "preshell $TAG" \
-              --notes-file "$RUNNER_TEMP/notes.md" \
-              dist/*
-          fi
-          gh release view "$TAG" --json url,assets --jq '"\(.url)\n" + ([.assets[].name] | join(", "))'
+        run: moon run --quiet --target native tools/ci/release.mbtx -- "${{ inputs.tag || github.ref_name }}" "${{ github.server_url }}/${{ github.repository }}"

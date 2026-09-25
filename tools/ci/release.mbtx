@@ -1,0 +1,60 @@
+///|
+import {
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/core/env" @env,
+}
+
+///|
+async fn run_release(tag : String, repo : String, dry_run : String) -> Unit {
+  let script = #|set -euo pipefail
+    #|TAG="$1"
+    #|REPO="$2"
+    #|DRY_RUN="${3:-}"
+    #|git rev-parse --verify "refs/tags/$TAG" >/dev/null
+    #|PREVIOUS_TAG=$(git tag --sort=-version:refname --merged "$TAG" | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' | awk -v tag="$TAG" '$0 != tag { print; exit }' || true)
+    #|echo "发布 $TAG，上一版本 ${PREVIOUS_TAG:-无}"
+    #|moon build --release --target native
+    #|moon test --target native
+    #|bash tools/corpus/run.sh | tee /tmp/corpus.txt
+    #|grep -qE '缺口（我们报错，oracle 通过）：0' /tmp/corpus.txt
+    #|bash tools/probe/stream.sh
+    #|BIN=_build/native/release/build/cmd/preshell/preshell.exe
+    #|"$BIN" --version
+    #|rm -rf dist
+    #|mkdir -p dist
+    #|install -Dm755 "$BIN" "dist/preshell-$TAG-$(uname -m)-linux"
+    #|install -Dm644 docs/preshell.1 dist/preshell.1
+    #|install -Dm644 docs/preshell.md dist/preshell.md
+    #|( cd dist && sha256sum preshell-* preshell.1 preshell.md > SHA256SUMS && cat SHA256SUMS )
+    #|RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
+    #|tools/release_notes.sh --from "$PREVIOUS_TAG" --to "$TAG" --assets dist --repo "$REPO" > "$RUNNER_TEMP/notes.md"
+    #|cat "$RUNNER_TEMP/notes.md"
+    #|if [ "$DRY_RUN" = "--dry-run" ]; then
+    #|  echo "dry-run：跳过 GitHub Release 发布"
+    #|  exit 0
+    #|fi
+    #|if gh release view "$TAG" >/dev/null 2>&1; then
+    #|  gh release edit "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+    #|  gh release upload "$TAG" dist/* --clobber
+    #|else
+    #|  gh release create "$TAG" --title "preshell $TAG" --notes-file "$RUNNER_TEMP/notes.md" dist/*
+    #|fi
+    #|gh release view "$TAG" --json url,assets --jq '"\\(.url)\\n" + ([.assets[].name] | join(", "))'
+  let code = @process.run("bash", ["-e", "-o", "pipefail", "-c", script, "release.mbtx", tag, repo, dry_run])
+  if code != 0 {
+    abort("release failed with exit code \\{code}")
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() >= 2 else {
+    abort("usage: moon run --target native tools/ci/release.mbtx -- TAG REPOSITORY [--dry-run]")
+  }
+  let tag = args[1]
+  let repo = if args.length() >= 3 { args[2] } else { "https://github.com/conglinyizhi/preshell" }
+  let dry_run = if args.length() >= 4 { args[3] } else { "" }
+  run_release(tag, repo, dry_run)
+}

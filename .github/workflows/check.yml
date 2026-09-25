@@ -30,48 +30,5 @@ jobs:
         # 本地环境早就更新过，所以只有 CI 会碰这个。
         run: moon update
 
-      - name: Versions
-        run: |
-          moon version --all
-          bash --version | head -1
-
-      - name: Build
-        run: moon build --release --target native
-
-      - name: Unit tests
-        run: moon test --target native
-
-      - name: Format and check
-        run: |
-          moon fmt
-          git diff --exit-code -- '*.mbt' || {
-            echo "moon fmt 改动了文件，请本地跑 moon fmt 后提交"
-            exit 1
-          }
-          moon check --target native
-
-      - name: Manual generation
-        run: |
-          node tools/embed_manual.mjs --check
-
-      - name: Differential against bash -n
-        run: bash tools/corpus/run.sh | tee /tmp/corpus.txt
-
-      - name: Dialect claims against a real POSIX shell
-        # ubuntu runners have dash as /bin/sh, so the oracle needs no setup.
-        # The population is whatever sh scripts the host has, which on a runner
-        # is the distribution's own. Strict mode fails only on a false alarm: a
-        # claim that sh rejects something it actually accepts. Missed dialect
-        # uses are a documented weakness, not a regression.
-        run: SH_ORACLE="dash -n" bash tools/corpus/posix_oracle.sh --strict
-
-      - name: Malformed input probe
-        run: bash tools/probe/malformed.sh
-
-      - name: Streaming mode
-        # 两件事都要真做到：不等 EOF 就能读到第一条（否则只是批量），
-        # 以及同一条命令在流式与单条两种模式下报告逐字节相同。
-        run: bash tools/probe/stream.sh
-
-      - name: Short fuzz
-        run: node tools/fuzz/mutate.js --n 400 --seed 1
+      - name: MoonBit CI engine
+        run: moon run --quiet --target native tools/ci/check.mbtx

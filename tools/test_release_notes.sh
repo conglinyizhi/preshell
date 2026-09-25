@@ -56,6 +56,7 @@ contains '## 下载'
 contains '<details>'
 contains '重点：流式接口有变化'
 contains 'preshell.1'
+contains 'preshell.md'
 contains 'sha256sum -c SHA256SUMS'
 
 # Every detailed category is folded, and the visible categories stay ordered.
