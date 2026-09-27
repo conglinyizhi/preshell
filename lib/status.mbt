@@ -450,12 +450,7 @@ fn analyze_clean(
   } else {
     base.mark_uncertain()
   }
-  {
-    status,
-    impact: impact_,
-    issues,
-    issues_dropped: dropped,
-  }
+  { status, impact: impact_, issues, issues_dropped: dropped, }
 }
 
 ///|
