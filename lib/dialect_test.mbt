@@ -409,10 +409,7 @@ test "zsh's csh forms for and repeat run their body for real" {
   // Measured against zsh 5.9.2 for every line here.
   debug_inspect(zstatus("for x (a b) echo $x"), content="Complete")
   inspect(ztouched("for x (a b) rm $x"), content="D:a D:b")
-  debug_inspect(
-    zstatus("for x (a b)\nrm $x"),
-    content="Complete",
-  )
+  debug_inspect(zstatus("for x (a b)\nrm $x"), content="Complete")
   // The `;` after the word list belongs to the loop, not to the caller: zsh
   // prints `two` twice for `for x (a b); echo two`.
   inspect(ztouched("for x (a b); rm $x"), content="D:a D:b")
@@ -806,4 +803,35 @@ test "an unmatched right brace is pushed back the way zsh does" {
   debug_inspect(zstatus("echo \"{a,b}\""), content="Complete")
   debug_inspect(zstatus("case x in {a,b}) : ;; esac"), content="Complete")
   inspect(ztouched("echo $${x<y}"), content="U:$${x<y}")
+}
+
+///|
+test "a function body has to be what the shell wants" {
+  // Measured against bash 5.3 and zsh 5.9.2: both refuse `f()` with nothing
+  // after it, and bash also refuses a simple command as the body while zsh runs
+  // one. Every expectation below is that pair of answers.
+  debug_inspect(@lib.analyze("f()").status, content="Unsupported")
+  debug_inspect(zstatus("f()"), content="Unsupported")
+  debug_inspect(@lib.analyze("f() echo hi").status, content="Unsupported")
+  debug_inspect(zstatus("f() echo hi"), content="Complete")
+  debug_inspect(
+    @lib.analyze("function f echo hi").status,
+    content="Unsupported",
+  )
+  debug_inspect(zstatus("function f echo hi"), content="Complete")
+  debug_inspect(
+    @lib.analyze("f() cat <<EOF\nbody\nEOF").status,
+    content="Unsupported",
+  )
+  // A compound body is common ground, and the body is audited.
+  debug_inspect(@lib.analyze("f() { echo hi; }").status, content="Complete")
+  debug_inspect(zstatus("f() { echo hi; }"), content="Complete")
+  debug_inspect(@lib.analyze("f() ( echo hi )").status, content="Complete")
+  debug_inspect(zstatus("f() ( echo hi )"), content="Complete")
+  debug_inspect(
+    @lib.analyze("f() if true; then :; fi").status,
+    content="Complete",
+  )
+  debug_inspect(zstatus("f() if true; then :; fi"), content="Complete")
+  inspect(touched("f() { rm -rf /tmp/fx; }"), content="D:/tmp/fx")
 }

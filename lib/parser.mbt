@@ -1003,11 +1003,9 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   let csh_body = in_parens &&
     self.lex.dialect is Zsh &&
     !foreach &&
-    !(
-      self.reserved() == Some("do") ||
-      self.reserved() == Some("{") ||
-      self.reserved() == Some("end")
-    )
+    !(self.reserved() == Some("do") ||
+    self.reserved() == Some("{") ||
+    self.reserved() == Some("end"))
   if !foreach &&
     !csh_body &&
     !(self.reserved() == Some("do") || self.reserved() == Some("{")) {
@@ -1262,8 +1260,15 @@ fn Parser::parse_function_kw(self : Parser) -> Cmd {
   let body = self.parse_command()
   // bash refuses a body-less `function g` (measured: `bash -n -c 'function g'`
   // is a syntax error) while zsh takes it as a definition with an empty body.
-  if self.lex.dialect is Bash && is_empty_command(body) {
-    self.lex.fail("expected a body after the function definition")
+  if self.lex.dialect is Bash {
+    if is_empty_command(body) {
+      self.lex.fail("expected a body after the function definition")
+    }
+    if body is Simple(_) {
+      // bash wants a compound command: measured, `function f echo hi` is a
+      // syntax error there while zsh runs it.
+      self.lex.fail("expected a compound command as the function body")
+    }
   }
   Cmd::FuncDef(name~, body~, keyword=true)
 }
@@ -1331,7 +1336,17 @@ fn Parser::parse_simple_or_funcdef(self : Parser, w : Word) -> Cmd {
         self.advance()
         if self.cur is TOp(")") {
           self.advance()
-          return Cmd::FuncDef(name~, body=self.parse_command(), keyword=false)
+          let body = self.parse_command()
+          // `f()` with nothing after it is refused by both shells (measured),
+          // and bash wants a compound command as the body: `f() echo hi` and
+          // `f() :` are syntax errors there, while zsh runs both.
+          if is_empty_command(body) {
+            self.lex.fail("expected a body after the function definition")
+          }
+          if self.lex.dialect is Bash && body is Simple(_) {
+            self.lex.fail("expected a compound command as the function body")
+          }
+          return Cmd::FuncDef(name~, body~, keyword=false)
         }
         self.lex.fail("expected ) in function definition")
         return Cmd::FuncDef(
