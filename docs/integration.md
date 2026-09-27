@@ -480,7 +480,10 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
     而是在跑 `uv run`、`npx`、`poetry run`、`cargo run` 这类运行器时把命令行
     交给它。被交出去的那个程序碰什么，不在本工具的建模范围内（追下去等于把
     每门语言的生态都实现一遍），所以它只报出交接对象并置 `uncertain`。
-    调用方可以把这类条目单独计数：它们是「你需要另想办法」而不是「什么都没发生」
+    调用方可以把这类条目单独计数：它们是「你需要另想办法」而不是「什么都没发生」。
+    目标就是交接对象本身：`uv run --with plyvel python -c 1` 报 `Spawn: python`（选项的
+    值不是程序名），`docker run --rm node -e 'x'` 报 `Spawn: node`（镜像是容器起的东西）。
+    拿它当解释器归属的依据时，注意 `Spawn` 的 `uncertain` 始终为真
   - `Unknown` — 有个洞（动态路径、没建模的程序、here-doc 正文之类）
 - `impact.write_roots` — 会被改到的目录。目录名本身可能带变量（`rm -rf $HOME/x` 的父目录
   就是 `$HOME`），判断前先按 `vars` 替换，或者干脆当洞
