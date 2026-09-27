@@ -101,8 +101,8 @@ console.log(`  带 id 信封：${cases.length} 条命令，id 或报告不对 ${
 const shape = [
   ['{"id":17,"command":"ls"}', r => r.id === 17 && r.report && r.report.status === "Complete"],
   ['{"id":"w1","command":"ls"}', r => r.id === "w1" && r.report && r.report.status === "Complete"],
-  ['{"command":"ls"}', r => r.version === 1 && !("id" in r)],
-  ['"ls"', r => r.version === 1 && !("id" in r)],
+  ['{"command":"ls"}', r => r.status === "Complete" && !("id" in r)],
+  ['"ls"', r => r.status === "Complete" && !("id" in r)],
   ['{"id":"w2","command":5}', r => r.id === "w2" && typeof r.error === "string"],
   ['{"id":"w3","command":"ls","timeout":5}', r => r.id === "w3" && /timeout/.test(r.error)],
   ['{"id":0,"command":"ls"}', r => r.id === 0 && !!r.report],
