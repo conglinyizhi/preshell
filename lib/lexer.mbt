@@ -17,14 +17,6 @@ fn is_meta(c : Char) -> Bool {
 }
 
 ///|
-fn is_blank(c : Char) -> Bool {
-  match c {
-    ' ' | '\t' | '\r' => true
-    _ => false
-  }
-}
-
-///|
 fn is_name_start(c : Char) -> Bool {
   c.is_ascii_alphabetic() || c == '_'
 }

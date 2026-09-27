@@ -697,26 +697,12 @@ pub fn value_entry_of(scan : ArgScan, names : Array[String]) -> OptValue? {
 /// Measured: `cp -t destdir sub/a.txt` writes `destdir/a.txt` (basename), and
 /// `cp -t destdir/ a.txt` writes `destdir/a.txt` (no doubled slash).
 pub fn join_dir(dir : String, file : String) -> String {
-  let base = basename_of(file)
+  let base = basename(file)
   if base == "" {
     dir
   } else if dir.has_suffix("/") {
     dir + base
   } else {
     dir + "/" + base
-  }
-}
-
-///|
-/// Last path segment: `sub/a.txt` -> `a.txt`, `a.txt/` -> `a.txt`, `/` -> ``.
-fn basename_of(p : String) -> String {
-  let mut end = p.length()
-  while end > 0 && p.unsafe_substring(start=end - 1, end~) == "/" {
-    end -= 1
-  }
-  let trimmed = p.unsafe_substring(start=0, end~)
-  match trimmed.rev_find("/") {
-    Some(i) => trimmed.unsafe_substring(start=i + 1, end=trimmed.length())
-    None => trimmed
   }
 }

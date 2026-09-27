@@ -18,13 +18,6 @@ fn default_ifs() -> String {
 }
 
 ///|
-/// Whether a character is one this shell treats as IFS whitespace rather than as
-/// a separator in its own right.
-fn is_blank_char(c : Char) -> Bool {
-  c == ' ' || c == '\t' || c == '\n'
-}
-
-///|
 fn ifs_has(ifs : String, c : Char) -> Bool {
   for x in ifs {
     if x == c {
@@ -111,7 +104,7 @@ fn split_fields(value : String, ifs : String) -> Array[String] {
       }
       continue
     }
-    if is_blank_char(c) {
+    if is_ifs_blank(c) {
       // Whitespace only ends a field that was being built; on its own it is
       // padding and produces nothing.
       match cur {

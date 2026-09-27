@@ -202,21 +202,6 @@ fn payload_make(
 }
 
 ///|
-/// The longest prefix of `s` that fits in `max` UTF-8 bytes.
-///
-/// The cut lands on a character boundary: a continuation byte (`10xxxxxx`) is
-/// not a place to stop, or the prefix would be half a character and decoding it
-/// would produce a replacement mark that is not in the input.
-fn utf8_prefix(s : String, max : Int) -> String {
-  let b = @utf8.encode(s)
-  let mut end = if max > b.length() { b.length() } else { max }
-  while end > 0 && (b[end].to_int() & 0xC0) == 0x80 {
-    end -= 1
-  }
-  @utf8.decode_lossy(b[:end])
-}
-
-///|
 /// The payload, only when the caller asked for one. Attaching it by default
 /// would make every report's size depend on text most callers never read.
 fn Collector::payload_for(

@@ -47,14 +47,6 @@ pub fn declared_shell(src : String) -> String? {
 }
 
 ///|
-fn basename(p : String) -> String {
-  match p.rev_find("/") {
-    Some(i) => p.unsafe_substring(start=i + 1, end=p.length())
-    None => p
-  }
-}
-
-///|
 /// Shells this tool parses. bash is the reference; sh and dash are close enough
 /// that a POSIX script has to keep working without a warning on every file.
 fn is_modelled_shell(name : String) -> Bool {

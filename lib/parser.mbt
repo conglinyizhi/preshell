@@ -1399,19 +1399,6 @@ fn assign_ok(words : Array[Word]) -> Bool {
 }
 
 ///|
-fn all_digits(s : String) -> Bool {
-  if s.length() == 0 {
-    return false
-  }
-  for c in s {
-    if !c.is_ascii_digit() {
-      return false
-    }
-  }
-  true
-}
-
-///|
 fn parse_fd(s : String) -> Int {
   let mut v = 0
   for c in s {
