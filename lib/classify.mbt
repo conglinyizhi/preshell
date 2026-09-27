@@ -2,6 +2,10 @@
 /// Which program does what: the dispatcher that turns a command word into
 /// effects.
 ///
+/// It is a dispatcher and nothing more — the shape to read here is which
+/// programs have an entry at all, and which fall through to the generic operand
+/// model.
+///
 /// Each entry is a claim about one program or one family of them, and the entry
 /// exists only when the behaviour was measured or read off the program's own
 /// documentation. A program with no entry falls through to the generic operand
@@ -9,10 +13,11 @@
 /// than guessed at — saying "we do not model this" is a fact, and it is the one
 /// that keeps the effect list from reading as complete when it is not.
 ///
-/// The scanning helpers at the bottom (`leading_operands`, `flag_value`,
-/// `drop_flag_value`, `has_flag_text`) are deliberately coarse: modelling how
-/// every program parses its own arguments is a project of its own, and getting
-/// it wrong is the main source of false paths.
+/// The behaviour behind the dispatch is in programs.mbt, one function per family
+/// of commands; the helpers that scan an argument list are in options.mbt. This
+/// file keeps the two decisions that come before either: whether the command is a
+/// wrapper that runs something else, and whether it is a program whose effect is
+/// decided by a flag or subcommand rather than by an operand list (tools.mbt).
 
 ///|
 fn Collector::classify(
@@ -154,21 +159,13 @@ fn Collector::classify(
       _ => ()
     }
   }
-  let writes = fn(xs : Array[PathArg]) {
-    for it in xs {
-      self.push_path(Write, it, line)
-    }
-  }
-  let reads = fn(xs : Array[PathArg]) {
-    for it in xs {
-      self.push_path(Read, it, line)
-    }
-  }
+  // Which family the command belongs to decides its effects. The families
+  // themselves are in programs.mbt, one function each; what is left here is the
+  // dispatch, so a reader can see at a glance which programs this tool has an
+  // opinion about and which it does not.
   match n {
     "rm" | "rmdir" | "unlink" | "shred" =>
-      for it in operands {
-        self.push_path(Delete, it, line)
-      }
+      self.delete_operand_effects(operands, line)
     "cat"
     | "head"
     | "tail"
@@ -200,109 +197,18 @@ fn Collector::classify(
     | "du"
     | "df"
     | "tree"
-    | "realpath" => reads(operands)
-    "find" =>
-      // Predicates are not paths: only the starting points are.
-      reads(leading_operands(items))
-    "grep" | "rg" | "awk" | "sed" => {
-      let in_place = n == "sed" &&
-        (scan.opts.contains("-i") || scan.opts.contains("--in-place"))
-      if in_place {
-        writes(script_operands)
-        // `sed -i.bak 's/a/b/' data.txt` also writes data.txt.bak. The suffix
-        // has to be attached; a bare -i makes no backup.
-        match value_of(scan, ["-i", "--in-place"]) {
-          Some(suffix) =>
-            for it in script_operands {
-              self.push_path(Write, it.plus_suffix(suffix), line)
-            }
-          None => ()
-        }
-      } else {
-        reads(script_operands)
-      }
-    }
-    "tee" | "touch" | "truncate" | "mkdir" => writes(operands)
-    "chmod" | "chown" | "chgrp" => {
-      // The first operand is the mode, the owner or the group; the rest are
-      // files. With --reference the mode/owner comes from an option, so every
-      // operand is a file. Reporting `644` as a written path is the kind of
-      // invented fact that makes a report untrustworthy.
-      let files = if scan.opts.contains("--reference") {
-        operands
-      } else if operands.length() > 1 {
-        operands[1:].to_owned()
-      } else {
-        []
-      }
-      writes(files)
-    }
-    "ln" =>
-      match scan.target_dir {
-        // `ln -t dir a`: the link is created inside dir, under the basename.
-        // The directory's own hole (or its glob) makes the link dynamic.
-        Some(dir) =>
-          for it in operands {
-            self.push_path(Read, it, line)
-            self.push_path(Write, it.in_dir(dir), line)
-          }
-        // `ln target link`: the last operand is what gets created.
-        None =>
-          if operands.length() > 0 {
-            let n_op = operands.length()
-            for i, it in operands {
-              if i == n_op - 1 {
-                self.push_path(Write, it, line)
-              } else {
-                self.push_path(Read, it, line)
-              }
-            }
-          }
-      }
-    "split" | "csplit" => {
-      // The input is read; the outputs are named by the tool (xaa, xab, ...),
-      // which is not something this table can derive.
-      reads(operands)
-      if operands.length() > 0 {
-        self.push(Unknown, n + ": output file names are derived", true, line)
-      }
-    }
+    | "realpath" => self.read_operand_effects(operands, line)
+    "find" => self.find_operand_effects(items, line)
+    "grep" | "rg" | "awk" | "sed" =>
+      self.script_effects(n, scan, script_operands, line)
+    "tee" | "touch" | "truncate" | "mkdir" =>
+      self.write_operand_effects(operands, line)
+    "chmod" | "chown" | "chgrp" => self.mode_effects(operands, scan, line)
+    "ln" => self.link_effects(operands, scan, line)
+    "split" | "csplit" => self.split_effects(n, operands, line)
     "cp" | "mv" | "install" | "rsync" =>
-      match scan.target_dir {
-        // `cp -t dir a b` writes dir/a and dir/b. mv removes the sources
-        // instead of reading them (measured: D:a.txt W:destdir/a.txt).
-        // The directory's own hole (or its glob) makes the write dynamic.
-        Some(dir) =>
-          for it in operands {
-            if n == "mv" {
-              self.push_path(Delete, it, line)
-            } else {
-              self.push_path(Read, it, line)
-            }
-            self.push_path(Write, it.in_dir(dir), line)
-          }
-        None => {
-          let n_op = operands.length()
-          for i, it in operands {
-            if i == n_op - 1 {
-              self.push_path(Write, it, line)
-            } else {
-              self.push_path(Read, it, line)
-            }
-          }
-        }
-      }
-    "zip" =>
-      // `zip archive.zip members...`: the archive is written, the members read.
-      match operands {
-        [head, .. rest] => {
-          self.push_path(Write, head, line)
-          for it in rest {
-            self.push_path(Read, it, line)
-          }
-        }
-        [] => ()
-      }
+      self.copy_effects(n, operands, scan, line)
+    "zip" => self.zip_effects(operands, line)
     "gzip"
     | "gunzip"
     | "bzip2"
@@ -311,47 +217,9 @@ fn Collector::classify(
     | "unxz"
     | "zstd"
     | "unzstd" => self.compressor_effects(n, scan, operands, line)
-    "dd" =>
-      for it in items {
-        let t = it.text
-        if t.has_prefix("of=") {
-          let value = t.unsafe_substring(start=3, end=t.length())
-          self.push(
-            Write,
-            value,
-            it.dynamic,
-            line,
-            unrooted=value_head_unresolved(value, it.dynamic),
-            vars=it.vars,
-          )
-        }
-        if t.has_prefix("if=") {
-          let value = t.unsafe_substring(start=3, end=t.length())
-          self.push(
-            Read,
-            value,
-            it.dynamic,
-            line,
-            unrooted=value_head_unresolved(value, it.dynamic),
-            vars=it.vars,
-          )
-        }
-      }
+    "dd" => self.dd_effects(items, line)
     "tar" => self.tar_effects(scan, items, operands, flags, line)
-    "unzip" => {
-      let dest = flag_value(items, ["-d"])
-      match dest {
-        Some(d) => self.push(Write, d, false, line)
-        None =>
-          self.push(
-            Unknown,
-            "unzip: extraction point is the working directory",
-            true,
-            line,
-          )
-      }
-      reads(drop_flag_value(operands, dest))
-    }
+    "unzip" => self.unzip_effects(items, operands, line)
     "curl"
     | "wget"
     | "nc"
@@ -361,59 +229,8 @@ fn Collector::classify(
     | "sftp"
     | "telnet"
     | "ping"
-    | "dig" => {
-      for it in items {
-        let t = it.text
-        if t.has_prefix("http://") ||
-          t.has_prefix("https://") ||
-          t.has_prefix("git@") {
-          self.push(Net, t, false, line)
-        }
-      }
-      if n == "curl" || n == "wget" {
-        match flag_value(items, ["-o", "-O", "--output", "--output-document"]) {
-          Some(o) => self.push(Write, o, false, line)
-          None => ()
-        }
-      }
-      // A host argument is also something leaving the machine, and it does not
-      // start with http. For the file-transfer tools the host is the operand
-      // carrying a colon or an at-sign; for the rest, the first operand.
-      if n == "scp" || n == "sftp" {
-        for it in operands {
-          if it.text.contains(":") || it.text.contains("@") {
-            self.push(Net, it.text, it.dynamic, line)
-          }
-        }
-      } else if n == "ssh" ||
-        n == "telnet" ||
-        n == "ping" ||
-        n == "dig" ||
-        n == "nc" ||
-        n == "ncat" {
-        match operands {
-          [head, ..] => self.push(Net, head.text, head.dynamic, line)
-          [] => ()
-        }
-      }
-    }
-    "cd" => {
-      // `cd` is not an effect on a file, it is a change to how every later
-      // relative path in this command line reads. Track it, and say so when
-      // the destination cannot be worked out.
-      let dest : String? = match operands {
-        [first, ..] =>
-          // A destination that is a hole (`$DIR`) or an expansion (`~`) is not
-          // a directory this tool can name, so the base becomes unknown.
-          if first.dynamic || first.unrooted {
-            None
-          } else {
-            Some(first.text)
-          }
-        [] => None
-      }
-      self.change_dir(dest, line)
-    }
+    | "dig" => self.net_effects(n, items, operands, line)
+    "cd" => self.cd_effects(operands, line)
     _ => if recurses { self.recurse_static(s, n, line) }
   }
   // Only the operands this command treats as paths get the hole check;
