@@ -1,4 +1,4 @@
-.TH PreShell 1 "" "preshell 0.3.0" "User Commands"
+.TH PreShell 1 "" "preshell 0.4.0" "User Commands"
 .SH NAME
 preshell \- report what a shell command touches, as JSON
 .PP
@@ -44,7 +44,7 @@ preshell --man-markdown
 .IP "\(bu" 4
 \fB--man-markdown\fR: print this manual as Markdown.
 .IP "\(bu" 4
-\fB--version\fR: print the tool and report schema version as JSON.
+\fB--version\fR: print the tool version as JSON.
 .PP
 Developer-only modes are \fB--scan\fR, \fB--shadow\fR, \fB--bench=N\fR, and \fB--evidence\fR. They are not part of the integration contract.
 .PP
@@ -159,7 +159,7 @@ A tagged request produces an envelope:
 .fi
 .PP
 .nf
-{\"id\":\"random-value\",\"report\":{\"version\":1,\"status\":\"Complete\"}}
+{\"id\":\"random-value\",\"report\":{\"status\":\"Complete\"}}
 .fi
 .PP
 The report inside the envelope is the same report as single-command mode. Every input line receives exactly one answer, including refusals. A refusal is not a report:

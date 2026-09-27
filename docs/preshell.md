@@ -33,7 +33,7 @@ preshell --man-markdown
 - `--help`: print the short contract quick reference to stderr.
 - `--man`: print this manual as plain text.
 - `--man-markdown`: print this manual as Markdown.
-- `--version`: print the tool and report schema version as JSON.
+- `--version`: print the tool version as JSON.
 
 Developer-only modes are `--scan`, `--shadow`, `--bench=N`, and `--evidence`. They are not part of the integration contract.
 
@@ -120,7 +120,7 @@ A tagged request produces an envelope:
 ```
 
 ```json
-{"id":"random-value","report":{"version":1,"status":"Complete"}}
+{"id":"random-value","report":{"status":"Complete"}}
 ```
 
 The report inside the envelope is the same report as single-command mode. Every input line receives exactly one answer, including refusals. A refusal is not a report:
