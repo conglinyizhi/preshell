@@ -229,7 +229,13 @@ fn Collector::container_effects(
           j += 1 + wrapper_option_extra_words(image_opts, t)
           continue
         }
-        self.push(Spawn, t, true, line)
+        self.push(
+          Spawn,
+          t,
+          true,
+          line,
+          payload=self.payload_for(t, words[j + 1:], s.redirects),
+        )
         break
       }
       let mut k = 1
@@ -427,7 +433,7 @@ fn runner_value_opts(name : String) -> Array[String] {
 /// (this invocation does not decide what happens next), not a verdict, and it
 /// is what lets a caller count and surface delegations separately from the
 /// programs the tool does understand.
-fn runner_delegate(name : String, s : SimpleCmd) -> String? {
+fn runner_delegate(name : String, s : SimpleCmd) -> (String, Int)? {
   let words = s.words
   // Which word holds the delegate depends on the runner.
   let takes_subcommand = match name {
@@ -459,10 +465,12 @@ fn runner_delegate(name : String, s : SimpleCmd) -> String? {
       // Some other subcommand (`uv pip install`, `go test`): not a delegation.
       return None
     }
-    return Some(t)
+    // The index comes along: what follows the program is what it reads as its
+    // source, and a caller asking for payloads needs to know where that starts.
+    return Some((t, i))
   }
   // A runner with nothing to run: `cargo run` uses the package's own binary.
-  Some("")
+  Some(("", 0))
 }
 
 ///|
@@ -503,7 +511,7 @@ fn Collector::runner_effects(
   }
   match runner_delegate(n, s) {
     None => false
-    Some(target) => {
+    Some((target, at)) => {
       self.push(Exec, n, false, line)
       self.push(
         Spawn,
@@ -514,6 +522,7 @@ fn Collector::runner_effects(
         },
         true,
         line,
+        payload=self.payload_for(target, s.words[at + 1:], s.redirects),
       )
       true
     }
