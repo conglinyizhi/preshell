@@ -21,6 +21,12 @@ pub(all) struct Effect {
   /// that knows `HOME` can finish `$HOME/x` itself. Empty for anything that is
   /// not a path, and for paths that are already closed.
   vars : Array[String]
+  /// The paths this target could be, when the command line left a name with more
+  /// than one possible value: `if c; then x=a; else x=b; fi; rm $x` deletes one
+  /// of two paths. Empty for a target that is what it says. This is a set of
+  /// *possibilities*, not a list of things that happen: nothing here is a fact
+  /// on its own, and `target` stays the hole it was.
+  candidates : Array[String]
   /// True when the target is not a closed set: it has a hole or a glob.
   dynamic : Bool
   /// Only meaningful for `Exec`. False means: this program ran, and what it
@@ -279,6 +285,10 @@ struct Collector {
   mut cwd : String?
   /// Union of the variables the reported paths read, in first-seen order.
   vars : Array[String]
+  /// What the command line established for its own parameters: the values each
+  /// name may hold, and the scopes that decide how far that reaches. See
+  /// bind.mbt.
+  mut binds : Array[(String, Array[String])]
 }
 
 ///|
@@ -295,6 +305,7 @@ pub fn impact(
     depth: 0,
     dialect,
     vars: [],
+    binds: [],
     // The base is where relative paths are resolved from. `--cwd` supplies it
     // for a command line that does not `cd` itself; it is a starting point, not
     // a move, so it never shows up as an effect.
@@ -329,6 +340,7 @@ fn Collector::push(
   modeled? : Bool = true,
   unrooted? : Bool = false,
   vars? : Array[String] = [],
+  candidates? : Array[String] = [],
 ) -> Unit {
   let resolved = match kind {
     Read | Write | Delete =>
@@ -355,7 +367,25 @@ fn Collector::push(
     // Roots still accumulate: they are cheap, deduplicated, and they are the
     // part a caller most often acts on.
   } else {
-    self.items.push({ kind, target: resolved, vars, dynamic, modeled, line, })
+    self.items.push({
+      kind,
+      target: resolved,
+      vars,
+      // The candidates are paths like the target, so they are anchored the same
+      // way: an unrooted target (`$HOME/x`) leaves them as written too.
+      candidates: if unrooted {
+        candidates
+      } else {
+        let out : Array[String] = []
+        for c in candidates {
+          out.push(self.resolve(c))
+        }
+        out
+      },
+      dynamic,
+      modeled,
+      line,
+    })
   }
   if dynamic &&
     (
@@ -391,10 +421,12 @@ fn Collector::walk_seq(self : Collector, seq : Seq) -> Unit {
 ///|
 fn Collector::walk_pipeline(self : Collector, p : Pipeline) -> Unit {
   // Each element of a multi-command pipeline runs in its own subshell, so a
-  // `cd` inside one of them does not move the next one.
+  // `cd` inside one of them does not move the next one, and neither does a
+  // value it sets.
   let shared = p.cmds.length() == 1
   for i, c in p.cmds {
     let saved = self.saved_cwd()
+    let saved_binds = if shared { [] } else { self.open_isolated() }
     self.walk_cmd(c)
     match c {
       Cmd::Simple(s) =>
@@ -409,6 +441,7 @@ fn Collector::walk_pipeline(self : Collector, p : Pipeline) -> Unit {
       _ => ()
     }
     if !shared {
+      self.close_isolated(saved_binds)
       self.restore_cwd(saved)
     }
   }
@@ -419,9 +452,12 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
   match cmd {
     Cmd::Simple(s) => self.walk_simple(s)
     Cmd::Subshell(seq) => {
-      // `(cd /tmp; rm x)` moves only the subshell's own directory.
+      // `(cd /tmp; rm x)` moves only the subshell's own directory, and the
+      // values it sets are gone with it.
       let saved = self.saved_cwd()
+      let saved_binds = self.open_isolated()
       self.walk_seq(seq)
+      self.close_isolated(saved_binds)
       self.restore_cwd(saved)
     }
     Cmd::Group(seq) => self.walk_seq(seq)
@@ -443,27 +479,108 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
       self.walk_seq(always)
     }
     Cmd::If(cond~, then_~, elifs~, else_~) => {
+      // Exactly one branch runs, so the states they leave behind are joined
+      // rather than run one after another: `if c; then x=a; else x=b; fi` leaves
+      // both values possible, and `if c; then x=a; fi` on top of `x=old` leaves
+      // three (the old value is one of the outcomes, because the branch may not
+      // run).
       self.walk_seq(cond)
+      let base = self.snapshot()
+      let states : Array[Array[(String, Array[String])]] = []
+      match else_ {
+        Some(_) => ()
+        // No `else`, so taking no branch at all is one of the outcomes. It goes
+        // first, so the value from before the construct leads the set the report
+        // prints.
+        None => states.push(base)
+      }
+      self.restore(base)
       self.walk_seq(then_)
+      states.push(self.snapshot())
       for pair in elifs {
         let (c, b) = pair
+        self.restore(base)
         self.walk_seq(c)
         self.walk_seq(b)
+        states.push(self.snapshot())
       }
       match else_ {
-        Some(e) => self.walk_seq(e)
+        Some(e) => {
+          self.restore(base)
+          self.walk_seq(e)
+          states.push(self.snapshot())
+        }
         None => ()
+      }
+      // The union of what the branches left. The state before the construct is
+      // one of those outcomes only when no branch had to run, which is why it
+      // went into `states` above rather than staying the table to join into.
+      self.restore(states[0])
+      for k in 1..<states.length() {
+        self.join_with(states[k])
       }
     }
     Cmd::Loop(cond~, body~, ..) => {
+      // How many times a `while` runs is not modelled, so a value its body sets
+      // is an unknown rather than a set of possibilities: joining one pass would
+      // name a set that is not exhaustive.
       self.walk_seq(cond)
+      let base = self.snapshot()
       self.walk_seq(body)
+      self.drop_changed(base)
     }
-    Cmd::For(body~, words~, ..) => {
+    Cmd::For(name~, words~, body~) => {
+      // `for f in {a,b}` is a two-word list, so the braces come out before the
+      // list is read as a set, and `for f in $x` splits like any other unquoted
+      // expansion before that.
+      let listed : Array[Word] = []
       for w in words {
-        self.note_holes(w)
+        for e in w.brace_words(self.dialect) {
+          for v in self.value_words(e) {
+            listed.push(v)
+          }
+        }
       }
-      self.walk_seq(body)
+      match self.loop_values(name, listed) {
+        Some(values) => {
+          // A spelled-out word list is a closed set: the body runs once per
+          // word, with the loop name holding that word. `for f in a b; do rm
+          // "$f"; done` is two deletions, and reporting the one hole it used to
+          // report loses both. Each iteration starts from the same state so the
+          // states can be joined: `for i in a b; do x=$i; done` leaves `x` as `a`
+          // or `b`, and reporting only `b` would claim the loop always ends on
+          // the last word, which it does not when the body breaks out.
+          let base = self.snapshot()
+          let states : Array[Array[(String, Array[String])]] = []
+          for v in values {
+            self.restore(base)
+            self.bind_value(name, v)
+            self.walk_seq(body)
+            states.push(self.snapshot())
+          }
+          // The union of what the iterations left. The state before the loop is
+          // deliberately not one of the outcomes: the list is spelled out, so the
+          // body runs at least once. It is a union rather than the last
+          // iteration, because the body may break out of the loop before the last
+          // word (`for i in a b; do x=$i; break; done` leaves `a`), and a set
+          // that missed that would be claiming to be exhaustive.
+          self.restore(states[0])
+          for k in 1..<states.length() {
+            self.join_with(states[k])
+          }
+          // The loop name itself is whatever the last word left, one value this
+          // tool does not track, so it goes back to being unknown.
+          self.drop_value(name)
+        }
+        None => {
+          for w in listed {
+            self.note_list_word(w)
+          }
+          let base = self.snapshot()
+          self.walk_seq(body)
+          self.drop_changed(base)
+        }
+      }
     }
     Cmd::Case(subject~, items~) => {
       self.note_holes(subject)
@@ -471,19 +588,40 @@ fn Collector::walk_cmd(self : Collector, cmd : Cmd) -> Unit {
         for p in it.patterns {
           self.note_holes(p)
         }
+      }
+      // Which pattern matches is not modelled, and none of them may: every body
+      // is walked from the same state and the results are joined.
+      let base = self.snapshot()
+      let states : Array[Array[(String, Array[String])]] = [base]
+      for it in items {
+        self.restore(base)
         self.walk_seq(it.body)
+        states.push(self.snapshot())
+      }
+      self.restore(states[0])
+      for k in 1..<states.length() {
+        self.join_with(states[k])
       }
     }
-    Cmd::FuncDef(body~, ..) =>
+    Cmd::FuncDef(body~, ..) => {
+      // The definition does not run, and whether the function is called later is
+      // not modelled, so a name its body writes becomes unknown rather than a set
+      // of possibilities.
+      let base = self.snapshot()
       self.walk_seq(Seq::{
         items: [{ pipeline: { negated: false, cmds: [body], }, op: Semi, }],
       })
+      self.drop_changed(base)
+    }
     Cmd::Arith(_) => ()
     Cmd::Cond(subs~, ..) =>
-      // The condition text touches nothing, but a `$(...)` inside it runs.
+      // The condition text touches nothing, but a `$(...)` inside it runs, in
+      // its own process.
       for seq in subs {
         let saved = self.saved_cwd()
+        let saved_binds = self.open_isolated()
         self.walk_seq(seq)
+        self.close_isolated(saved_binds)
         self.restore_cwd(saved)
       }
     Cmd::Redirected(inner~, redirects~) => {
@@ -511,7 +649,8 @@ fn Collector::note_holes(self : Collector, w : Word) -> Unit {
 /// This is the only way a path effect should be added: the text, the closed-set
 /// flag, whether it may be anchored, and the variables it reads are four facts
 /// about one word, and splitting them apart is how `'$X/y'` gets mistaken for an
-/// expansion.
+/// expansion. The candidates come from the same word, so they are filled in here
+/// rather than left to the call sites.
 fn Collector::push_path(
   self : Collector,
   kind : EffectKind,
@@ -525,7 +664,106 @@ fn Collector::push_path(
     line,
     unrooted=arg.unrooted,
     vars=arg.vars,
+    candidates=self.candidates_for(arg),
   )
+}
+
+///|
+/// The paths a hole could be, from the values the command line left possible for
+/// the names in it.
+///
+/// A name reaches here only when it has more than one possible value: a single
+/// one would already have been put into the word, and an unbound one has nothing
+/// to offer. The product over several names is capped, and past the cap the hole
+/// says everything the list would, so the list stays empty.
+fn Collector::candidates_for(self : Collector, arg : PathArg) -> Array[String] {
+  if arg.vars.length() == 0 || !arg.dynamic {
+    return []
+  }
+  let mut texts : Array[String] = [arg.text]
+  let mut fanned = false
+  for name in arg.vars {
+    let values = match lookup_values(self.binds, name) {
+      Some(vs) => vs
+      None => continue
+    }
+    if values.length() < 2 {
+      continue
+    }
+    fanned = true
+    let out : Array[String] = []
+    for t in texts {
+      for v in values {
+        out.push(replace_name(t, name, v))
+        if out.length() > max_candidates() {
+          return []
+        }
+      }
+    }
+    texts = out
+  }
+  if !fanned {
+    return []
+  }
+  // A value that is empty names no path, so it is not a candidate either.
+  let out : Array[String] = []
+  for t in texts {
+    if t.length() > 0 && !out.contains(t) {
+      out.push(t)
+    }
+  }
+  out
+}
+
+///|
+/// One name in a rendered target replaced by one of its values. The renderer
+/// keeps a bare `$Xy` distinct from `${X}y` by spelling the second one with
+/// braces, so a name is either `$name` or `${name}` in the text and a bare one is
+/// never followed by a name character.
+fn replace_name(text : String, name : String, value : String) -> String {
+  let chars : Array[Char] = []
+  for c in text {
+    chars.push(c)
+  }
+  let target : Array[Char] = []
+  for c in name {
+    target.push(c)
+  }
+  let sb = StringBuilder()
+  let mut i = 0
+  while i < chars.length() {
+    if chars[i] == '$' {
+      // `${name}`
+      if i + 1 < chars.length() && chars[i + 1] == '{' {
+        let mut j = i + 2
+        let mut k = 0
+        while j < chars.length() && k < target.length() && chars[j] == target[k] {
+          j += 1
+          k += 1
+        }
+        if k == target.length() && j < chars.length() && chars[j] == '}' {
+          sb.write_string(value)
+          i = j + 1
+          continue
+        }
+      }
+      // `$name`
+      let mut j = i + 1
+      let mut k = 0
+      while j < chars.length() && k < target.length() && chars[j] == target[k] {
+        j += 1
+        k += 1
+      }
+      if k == target.length() && k > 0 {
+        sb.write_string(value)
+        i = j
+        continue
+      }
+    }
+    sb.write_char(chars[i])
+    i += 1
+  }
+  sb.to_string()
 }
 
 ///|
@@ -536,20 +774,29 @@ fn Collector::scan_assign_part(
   name : String,
   p : WordPart,
   line : Int,
+  closed? : Bool = false,
 ) -> Unit {
   match p {
     CmdSub(seq) | ProcSub(_, seq) => {
       // `x=$(cd /tmp; rm y)` moves only the substitution's directory: the
-      // command after it is still relative to where we were.
+      // command after it is still relative to where we were, and the value it
+      // set never arrives here.
       let saved = self.saved_cwd()
+      let saved_binds = self.open_isolated()
       self.walk_seq(seq)
+      self.close_isolated(saved_binds)
       self.restore_cwd(saved)
       self.note_temp_file(p, line)
     }
-    Param(_) | ArithSub(_) => self.push(Unknown, "${" + name + "}", true, line)
+    Param(_) | ArithSub(_) =>
+      // `closed` means the whole value came out as text the command line
+      // spelled out, in which case there is no second fact to report.
+      if !closed {
+        self.push(Unknown, "${" + name + "}", true, line)
+      }
     DQuote(inner) | Subscript(inner) =>
       for q in inner {
-        self.scan_assign_part(name, q, line)
+        self.scan_assign_part(name, q, line, closed~)
       }
     _ => ()
   }
@@ -612,12 +859,25 @@ fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
 ///|
 fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
   let line = line_of(s)
+  // bash expands braces before it expands parameters, so `x='{a,b}'; rm $x`
+  // names one file with braces in it while `rm -rf {a,b}` names two. The braces
+  // therefore come out first and the values go in after.
+  let s = self.brace_simple(s)
+  // Values the command line established go in before the command is read, so
+  // `x=dist; rm -rf $x` names a path instead of a hole. bash expands a
+  // command's own words before the assignments spelled in front of it take
+  // effect (measured: `x=old; x=new echo "$x"` prints `old`), so the table in
+  // use here is the one from before this command.
+  let s = self.resolved_simple(s)
   for a in s.assigns {
+    // A value that comes out as plain text is a closed set, and the hole it
+    // used to report is the same fact spelled twice.
+    let closed = value_texts(a.value, self.binds).length() > 0
     for p in a.index {
-      self.scan_assign_part(a.name, p, line)
+      self.scan_assign_part(a.name, p, line, closed=false)
     }
     for p in a.value {
-      self.scan_assign_part(a.name, p, line)
+      self.scan_assign_part(a.name, p, line, closed~)
     }
   }
   for r in s.redirects {
@@ -635,16 +895,41 @@ fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
       }
     Some(n) => self.classify(n, s, line)
   }
+  // What the assignments in this statement do to the shell's own parameters.
+  // A bare `x=a` statement sets it, and everything after it sees that value.
+  // An assignment in front of a command does not outlive the command
+  // (measured: `x=old; x=new echo hi; echo $x` prints `old`), so that case
+  // leaves the table alone rather than dropping what it held — which is bash's
+  // default mode, the one this tool models.
+  match decl_action(s) {
+    SetsValue =>
+      for a in s.assigns {
+        self.note_assign(a)
+      }
+    OtherValue =>
+      for a in s.assigns {
+        self.drop_value(a.name)
+      }
+    NoVariable =>
+      if s.words.length() == 0 {
+        for a in s.assigns {
+          self.note_assign(a)
+        }
+      }
+  }
+  self.note_command_writes(s)
 }
 
 ///|
 /// Walk a word: command substitutions inside it are real commands.
 fn Collector::walk_word(self : Collector, w : Word) -> Unit {
   // A command substitution is its own process: a `cd` inside it is gone by the
-  // time the surrounding command line continues.
+  // time the surrounding command line continues, and so is a value it set.
   for seq in w.subcommands() {
     let saved = self.saved_cwd()
+    let saved_binds = self.open_isolated()
     self.walk_seq(seq)
+    self.close_isolated(saved_binds)
     self.restore_cwd(saved)
   }
   for p in w.parts {

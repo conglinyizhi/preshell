@@ -396,7 +396,9 @@ test "zsh's csh forms for and repeat run their body for real" {
   debug_inspect(zstatus("repeat 3 { echo hi }"), content="Complete")
   debug_inspect(zstatus("repeat $n do echo hi done"), content="Unsupported")
   inspect(ztouched("repeat 3 { rm -rf /tmp/x }"), content="D:/tmp/x")
-  inspect(ztouched("for x ( a b ); do rm -rf $x; done"), content="D:$x U:$x")
+  // A spelled-out list is a closed set, so the loop name holds each word in
+  // turn and the body is audited once per word.
+  inspect(ztouched("for x ( a b ); do rm -rf $x; done"), content="D:a D:b")
   // bash has neither form.
   debug_inspect(
     @lib.analyze("for x ( a b ); do :; done").status,
@@ -436,7 +438,11 @@ test "a brace body belongs to an if, a while or an until" {
   inspect(ztouched("if x=1 { rm -rf /tmp/asx }"), content="D:/tmp/asx")
   inspect(ztouched("while { true } { rm -f /tmp/whx }"), content="D:/tmp/whx")
   inspect(ztouched("for i in a; { rm -f /tmp/forx }"), content="D:/tmp/forx")
-  inspect(ztouched("for x (a b) { rm -f /tmp/forf }"), content="D:/tmp/forf")
+  // Twice, because the list has two words and the body runs once per word.
+  inspect(
+    ztouched("for x (a b) { rm -f /tmp/forf }"),
+    content="D:/tmp/forf D:/tmp/forf",
+  )
   inspect(
     ztouched("if [[ x ]] { : } else { rm -f /tmp/elx }"),
     content="D:/tmp/elx",
