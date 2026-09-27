@@ -404,6 +404,31 @@ test "zsh's csh forms for and repeat run their body for real" {
     @lib.analyze("for x ( a b ); do :; done").status,
     content="Unsupported",
   )
+  // In zsh the csh spelling may also take its body with no `do` at all, and the
+  // body ends at the first `;` or newline that is not inside a nested construct.
+  // Measured against zsh 5.9.2 for every line here.
+  debug_inspect(zstatus("for x (a b) echo $x"), content="Complete")
+  inspect(ztouched("for x (a b) rm $x"), content="D:a D:b")
+  debug_inspect(
+    zstatus("for x (a b)\nrm $x"),
+    content="Complete",
+  )
+  // The `;` after the word list belongs to the loop, not to the caller: zsh
+  // prints `two` twice for `for x (a b); echo two`.
+  inspect(ztouched("for x (a b); rm $x"), content="D:a D:b")
+  // What follows the body runs once, so the second `rm $x` is outside the loop
+  // and names nothing (the loop name is dropped after it).
+  inspect(ztouched("for x (a b) rm $x; rm $x"), content="D:a D:b D:$x U:$x")
+  // A chain is part of the body, while `&` ends it and backgrounds the loop.
+  inspect(ztouched("for x (a b) rm f && rm $x"), content="D:f D:a D:b")
+  inspect(ztouched("for x (a b) rm f & rm g"), content="D:f D:g")
+  // A nested construct keeps its own separators: zsh runs `if` per word.
+  inspect(ztouched("for x (a b) if true; then rm $x; fi"), content="D:a D:b")
+  // No body at all is legal there and runs nothing.
+  debug_inspect(zstatus("for x (a b)"), content="Complete")
+  // bash refuses every one of those shapes.
+  debug_inspect(@lib.analyze("for x (a b) rm $x").status, content="Unsupported")
+  debug_inspect(@lib.analyze("for x (a b)").status, content="Unsupported")
   // bash has no `repeat`, so this is only a command named repeat followed by a
   // group -- which it accepts (bash -n rc=0), so Complete is the honest answer.
   debug_inspect(@lib.analyze("repeat 3 { echo hi }").status, content="Complete")

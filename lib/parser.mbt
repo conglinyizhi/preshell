@@ -895,6 +895,9 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   // either shell, while `for i` is a valid zsh loop over `$@` that does
   // nothing, and bash refuses even that.
   let mut had_words = false
+  // Whether the word list came from the csh spelling's parens. In zsh that is
+  // also what allows a body with no `do` after it.
+  let mut in_parens = false
   // `for x` and its `in` may sit on different lines: measured, bash and zsh
   // both accept `for x\nin x\ndo ... done`.
   self.skip_newlines()
@@ -934,8 +937,10 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     self.lex.in_arith = false
   } else {
     if self.lex.dialect is Zsh && self.cur is TOp("(") {
-      // `for x ( a b )`: the parens belong to the word list.
+      // `for x ( a b )`: the parens belong to the word list, and the body may
+      // follow without any `do` (see parse_csh_body).
       had_words = true
+      in_parens = true
       self.advance()
       for ;; {
         match self.cur {
@@ -992,7 +997,19 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
       break
     }
   }
+  // In zsh's csh spelling the body may follow the word list with no `do` at all:
+  // measured, `for x (a b) echo $x` runs `echo` per word, and the separators
+  // after the list belong to that shape rather than to the caller.
+  let csh_body = in_parens &&
+    self.lex.dialect is Zsh &&
+    !foreach &&
+    !(
+      self.reserved() == Some("do") ||
+      self.reserved() == Some("{") ||
+      self.reserved() == Some("end")
+    )
   if !foreach &&
+    !csh_body &&
     !(self.reserved() == Some("do") || self.reserved() == Some("{")) {
     // No body after all: the separators belong to whoever called us.
     self.restore(before_seps)
@@ -1020,6 +1037,8 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
       self.advance()
     }
     b
+  } else if csh_body {
+    self.parse_csh_body()
   } else {
     // A `for` that named a word list has to say what to do with it: measured,
     // both shells refuse `for i in a` and `for i in`. Without a word list the
@@ -1030,6 +1049,59 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     Seq::empty()
   }
   Cmd::For(name~, words~, body~)
+}
+
+///|
+/// The body of zsh's csh spelling, which needs no `do`: `for x (a b) echo $x`.
+///
+/// The body is one command list and it ends at the first `;` or newline that is
+/// not inside a nested construct. Measured against zsh 5.9.2:
+///
+/// - `for x (a b) echo $x; echo after` prints `a`, `b`, `after`, so the `after`
+///   is not part of the body, while `for x (a b) echo $x && echo yes` keeps the
+///   `&&` in it and prints `a yes b yes`
+/// - `for x (a b) if true; then echo $x; fi` is one body, because the `;` inside
+///   the `if` belongs to the `if`
+/// - `&` ends the body and puts the whole loop in the background: measured,
+///   `for x (a b) echo $x & echo two` prints `two` first
+/// - a body on the next line counts (`for x (a b)` then a newline then
+///   `echo $x`), and no body at all is legal: `for x (a b)` runs nothing
+///
+/// bash refuses every one of these shapes, so this stays zsh-only.
+fn Parser::parse_csh_body(self : Parser) -> Seq {
+  let items : Array[AndOr] = []
+  for ;; {
+    if self.cur is TEof {
+      break
+    }
+    let before = self.lex.pos
+    let pipeline = self.parse_pipeline()
+    // A `&&` or `||` chain stays in the body. Everything else — `;`, a newline,
+    // `&`, the end of the input — ends it, and that separator is left alone for
+    // the list that called us: `for x (a b) echo $x & echo two` backgrounds the
+    // whole loop, which is only true if the `&` is still there to be read.
+    let op = match self.cur {
+      TOp("&&") => {
+        self.advance()
+        self.check_operator_sequence()
+        And
+      }
+      TOp("||") => {
+        self.advance()
+        self.check_operator_sequence()
+        Or
+      }
+      _ => {
+        items.push({ pipeline, op: Semi, })
+        break
+      }
+    }
+    items.push({ pipeline, op, })
+    if self.lex.pos == before {
+      self.advance()
+    }
+  }
+  { items, }
 }
 
 ///|
