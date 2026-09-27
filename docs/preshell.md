@@ -70,6 +70,8 @@ A parameter is resolved only when the input itself says what it holds, and only 
 - A value that holds on one path only is dropped rather than kept: after `if c; then x=a; fi`, `rm $x` is a hole, because that branch may not have run. The same goes for a value set inside a subshell or a command substitution, which cannot reach the rest of the command line.
 - The loop name does not outlive the loop: after `for f in a b; do :; done`, `rm $f` is a hole, because a caller reading the report cannot see that the loop ran at all.
 
+- An effect whose target came from a value says which reference it was written as: `x=/usr/bin/jq; $x -n 1` reports `Exec: /usr/bin/jq` with `origin: "$x"`, because `/usr/bin/jq` appears nowhere in the command text and `$x` is what a caller can match it against. The field is absent when the target is what the word says, and the reference is rendered the way a hole is (`rm -rf "$x"` reports `$x`, not `"$x"`), so matching it against the command text is a plain text comparison.
+
 ## Word splitting
 
 A value with a blank in it is two paths in one place and one path in another, and where it lands decides which. This is the manual's word splitting, and the report follows it:

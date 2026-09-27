@@ -93,6 +93,9 @@ A value that holds on one path only is dropped rather than kept: after \fBif c; 
 .IP "\(bu" 4
 The loop name does not outlive the loop: after \fBfor f in a b; do :; done\fR, \fBrm $f\fR is a hole, because a caller reading the report cannot see that the loop ran at all.
 .PP
+.IP "\(bu" 4
+An effect whose target came from a value says which reference it was written as: \fBx=/usr/bin/jq; $x -n 1\fR reports \fBExec: /usr/bin/jq\fR with \fBorigin: \"$x\"\fR, because \fB/usr/bin/jq\fR appears nowhere in the command text and \fB$x\fR is what a caller can match it against. The field is absent when the target is what the word says, and the reference is rendered the way a hole is (\fBrm -rf \"$x\"\fR reports \fB$x\fR, not \fB\"$x\"\fR), so matching it against the command text is a plain text comparison.
+.PP
 .SH WORD SPLITTING
 .PP
 A value with a blank in it is two paths in one place and one path in another, and where it lands decides which. This is the manual's word splitting, and the report follows it:
