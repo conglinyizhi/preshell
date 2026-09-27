@@ -276,6 +276,21 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
 已知还没修的一类：二元算符后面又跟一个算符（`cmd &&& x`、`2>>&1`），两个 shell 都拒，
 我们接受。修法是在算符序列上做检查，属于下一个工作日。
 
+再扫一遍（bash `--n 1500 --seed 7`、zsh `--n 800 --seed 11`）分类出来的、**还没修**的：
+
+- **`${ ... }` 的本体不校验**（两边都拒而我们收：`echo ${ arr}`、`echo ${ find . -name x}`）。
+  注意 `echo ${arr]}` 是 bash 收、zsh 拒，所以这条规则必须分方言，否则会把 bash 认的
+  写成 Gap
+- **数组赋值括号里的东西不校验**（`arr=(1 arr=(1 2 3)`、`arr=(1 2 3 cat <<EOF … EOF )`）
+- **case 体在 `;;` 之后到 `esac` 之间的垃圾不校验**（`case $x in a) :;; es esac`）
+- **`[[ ]]` 整块不透明**是刻意取舍（见上面「刻意保留的取舍」），这几个样例属于那一类，
+  不打算修
+- 缺口那侧只剩两例且都是病理形状：zsh 的 `for i in a b;`（带尾分号的空体，zsh 收）、
+  bash 的 `` x=`() { echo anon; } arg` `` 与 `echo $((1 + 2) f() { echo body; } )`
+
+已经修掉的：`f()` 与 `f() echo hi`（bash 拒、zsh 收，见 `fix(parser)` 那笔）、
+zsh csh 形式的裸体 `for x (a b) rm $x`。
+
 ## 编译警告保持为 0
 
 `moon check --target native` 现在没有任何警告，别让它再攒起来。修的时候有个坑：
