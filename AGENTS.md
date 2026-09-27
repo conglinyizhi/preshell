@@ -88,6 +88,10 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   `if`、循环体、case 体、函数体共享但在结束时把在它里面写过的名字从外层丢掉（
   `if c; then x=a; fi; rm $x` 仍是洞：那条分支可能没跑）
 - `for f in <全字面量>` 按词表展开循环体（`max_unroll` 上限 64），展不开就只能留洞
+- **同一行的同一件事只报一次**：循环体走多遍时 `for f in a b; do rm x; done` 只出一条
+  `Delete`。去重在 `push` 里做（`Collector::seen`），所以副本不占 `max_effects` 的额度；
+  判据是 effects.mbt 的 `same_effect`，包含 `line`——同一行才叫同一件事，写在两行上的
+  `rm x` 仍旧是两条。代价是手写的 `rm x; rm x` 也塌成一条，「碰了几次」不再可见
 - 会写 shell 变量的内建分三类（`write_kind` / `decl_action`）：`unset`/`read`/`printf -v`
   等按参数点名丢掉，`export`/`declare`/`local` 等把 `NAME=VALUE` 当值设进去（带选项就不设，
   `declare -i x=1+2` 的值是 3），`let` 写的是算术结果（`let x=a` 得 0）而 `alias` 根本不写
