@@ -57,8 +57,53 @@ Paths are reported **absolute**. PreShell never reads the file system, so the ba
 - Two kinds of path cannot be made absolute, and both stay as written with `impact.uncertain` set, so the gap is visible rather than filled in with a guess:
   - a path after a `cd` whose destination cannot be modelled, such as `cd $DIR`;
   - a path whose first segment is expanded at run time, such as `$HOME/x` or `~/x`. The value of a parameter is used as it stands, so whether the result is absolute is a run-time fact, and the base cannot be applied on top of it. The caller knows the value and finishes the job.
-- A path that reads a variable says which one: every effect carries `vars` for the names its own target reads, and `impact.vars` is the deduplicated union. PreShell never reads the environment, so the name is what it hands over — substitute `HOME` and `$HOME/x` becomes the real path. Substitute only the names that were reported: in a path that is not `dynamic` the `$` is literal text (`'$X/y'`), and it is already anchored as one.
+- A path that reads a variable says which one: every effect carries `vars` for the names its own target reads, and `impact.vars` is the deduplicated union. PreShell never reads the environment, so the name is what it hands over — substitute `HOME` and `$HOME/x` becomes the real path. Substitute only the names that were reported: in a path that is not `dynamic` the `$` is literal text (`'$X/y'`), and it is already anchored as one. A name the command line itself set is resolved here instead, so it is not reported at all.
 - The tilde cases follow the same rule. `~` is `HOME`, `~+` is `PWD`, `~-` is `OLDPWD`. `~user` goes to the password database and `~N` to the shell's own directory stack, so neither has a name a caller could look up, and both are reported as holes; when the login name is invalid bash leaves the prefix exactly as written. Quoted (`"~"`) it is literal text and is anchored like any other relative path.
+
+## Values the command line sets
+
+A parameter is resolved only when the input itself says what it holds, and only when the shell would do nothing else to the value. Nothing is read from the environment, and nothing is guessed.
+
+- `x=dist; rm -rf $x` reports `Delete: /a/b/dist`, and `x` is not listed in `vars`: the name is resolved, so the caller has nothing left to substitute.
+- A value the shell would expand further stays a hole: `x='*.log'` would fan out against the file system at the use site, and `x=$(date)` is a run-time value. A blank is not in this list any more — it splits, which is the next section.
+- A `for` list the input spells out is a closed set: `for f in a b; do rm "$f"; done` reports both deletions, and the body is walked once per word, so its effects repeat. A list the shell has to work out (`for f in *.ts`) stays a hole.
+- A value that holds on one path only is dropped rather than kept: after `if c; then x=a; fi`, `rm $x` is a hole, because that branch may not have run. The same goes for a value set inside a subshell or a command substitution, which cannot reach the rest of the command line.
+- The loop name does not outlive the loop: after `for f in a b; do :; done`, `rm $f` is a hole, because a caller reading the report cannot see that the loop ran at all.
+
+## Word splitting
+
+A value with a blank in it is two paths in one place and one path in another, and where it lands decides which. This is the manual's word splitting, and the report follows it:
+
+- `x="a b"; rm $x` reports two deletions, and `rm "$x"` reports one path whose name has a space in it. Whitespace at either end of a value is padding and runs in the middle delimit, so `x="  a  b  "` is `a` and `b`.
+- The text around the value stays on the outer fields: `x="a b"; rm pre$x` is `prea` and `b`, and `rm $x/post` is `a` and `b/post`.
+- `IFS` is read from the values the command line set. An empty `IFS` turns splitting off, and with the default one only space, tab and newline separate.
+- An assignment is not split, the use site is: `x="a b"; y=$x` puts the whole value in `y`.
+- A value that comes out empty makes no argument at all: `x=""; rm $x` reports no deletion, and neither does `rm "$x"`, which names one empty path.
+- An unquoted redirect target that splits is an ambiguous redirect: bash refuses the command rather than opening anything, so the target is a hole and not a path.
+- Two names that both need splitting are left as a hole: the shell splits the whole expanded word, and gluing one name's fields onto another's is not modelled.
+
+## Braces
+
+Brace expansion is textual and runs before parameter expansion, so the two cases
+differ: `rm -rf {a,b}` names two files, and `x='{a,b}'; rm $x` names one file whose
+name has braces in it.
+
+- `rm -rf {a,b}` reports both deletions, in order. `{1..3}` counts, `{01..03}` pads with zeros, `{3..1}` counts down, and `{a..c}` walks letters. The words are spliced into the argument list exactly where bash puts them, so `{echo,true} hi` runs `echo` with two arguments rather than two commands.
+- A brace with no comma and no range is literal (`{a}`, `{a,b`), and so is one that is escaped (`\{a,b\}`) or quoted (`"{a,b}"`).
+- A list the report cannot carry — `{1..1000}` — becomes a hole rather than a word list or a literal name, and the same goes for the shapes that are not modelled, such as a brace glued to a parameter (`$x{a,b}`).
+- The two shells disagree about ranges and the report follows the dialect it was asked for: `{1..a}` is literal in bash and walks the ASCII table in zsh, and a step on a character range (`{a..f..3}`) works in bash while zsh leaves it literal.
+
+## Candidate paths
+
+A name the command line left with more than one possible value makes a hole that
+is not a mystery: `if c; then x=a; else x=b; fi; rm $x` deletes one of two paths,
+and the effect says which ones.
+
+- The effect keeps its hole (`target: "$x"`, `dynamic: true`, `vars: ["x"]`) and gains `candidates: ["/a/b/a", "/a/b/b"]`.
+- Candidates are possibilities, not facts. Nothing in the list is claimed to happen: `x` holds one of them, and two entries do not mean two deletions. A caller deciding on facts keeps using `target` plus `vars`.
+- The list is exhaustive or absent. A `while` body may run any number of times, so a value it sets is an unknown rather than a set; a set that grew past eight paths is left out rather than truncated; and a possibility that names no path (an unset name, an empty value) is not listed at all.
+- What is certain stays certain: `x=a; rm $x` is one path with no candidates, and `if c; then x=a; else x=a; fi; rm $x` is the same, because both ways out set the same value.
+- A loop over a spelled-out list contributes the values its body left, and a condition that may not run contributes the value from before it: `x=old; if c; then x=new; fi; rm $x` reports `old` and `new`.
 
 ## Stream mode
 

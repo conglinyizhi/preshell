@@ -74,9 +74,75 @@ Two kinds of path cannot be made absolute, and both stay as written with \fBimpa
   - a path after a \fBcd\fR whose destination cannot be modelled, such as \fBcd $DIR\fR;
   - a path whose first segment is expanded at run time, such as \fB$HOME/x\fR or \fB~/x\fR. The value of a parameter is used as it stands, so whether the result is absolute is a run-time fact, and the base cannot be applied on top of it. The caller knows the value and finishes the job.
 .IP "\(bu" 4
-A path that reads a variable says which one: every effect carries \fBvars\fR for the names its own target reads, and \fBimpact.vars\fR is the deduplicated union. PreShell never reads the environment, so the name is what it hands over — substitute \fBHOME\fR and \fB$HOME/x\fR becomes the real path. Substitute only the names that were reported: in a path that is not \fBdynamic\fR the \fB$\fR is literal text (\fB'$X/y'\fR), and it is already anchored as one.
+A path that reads a variable says which one: every effect carries \fBvars\fR for the names its own target reads, and \fBimpact.vars\fR is the deduplicated union. PreShell never reads the environment, so the name is what it hands over — substitute \fBHOME\fR and \fB$HOME/x\fR becomes the real path. Substitute only the names that were reported: in a path that is not \fBdynamic\fR the \fB$\fR is literal text (\fB'$X/y'\fR), and it is already anchored as one. A name the command line itself set is resolved here instead, so it is not reported at all.
 .IP "\(bu" 4
 The tilde cases follow the same rule. \fB~\fR is \fBHOME\fR, \fB~+\fR is \fBPWD\fR, \fB~-\fR is \fBOLDPWD\fR. \fB~user\fR goes to the password database and \fB~N\fR to the shell's own directory stack, so neither has a name a caller could look up, and both are reported as holes; when the login name is invalid bash leaves the prefix exactly as written. Quoted (\fB\"~\"\fR) it is literal text and is anchored like any other relative path.
+.PP
+.SH VALUES THE COMMAND LINE SETS
+.PP
+A parameter is resolved only when the input itself says what it holds, and only when the shell would do nothing else to the value. Nothing is read from the environment, and nothing is guessed.
+.PP
+.IP "\(bu" 4
+\fBx=dist; rm -rf $x\fR reports \fBDelete: /a/b/dist\fR, and \fBx\fR is not listed in \fBvars\fR: the name is resolved, so the caller has nothing left to substitute.
+.IP "\(bu" 4
+A value the shell would expand further stays a hole: \fBx='*.log'\fR would fan out against the file system at the use site, and \fBx=$(date)\fR is a run-time value. A blank is not in this list any more — it splits, which is the next section.
+.IP "\(bu" 4
+A \fBfor\fR list the input spells out is a closed set: \fBfor f in a b; do rm \"$f\"; done\fR reports both deletions, and the body is walked once per word, so its effects repeat. A list the shell has to work out (\fBfor f in *.ts\fR) stays a hole.
+.IP "\(bu" 4
+A value that holds on one path only is dropped rather than kept: after \fBif c; then x=a; fi\fR, \fBrm $x\fR is a hole, because that branch may not have run. The same goes for a value set inside a subshell or a command substitution, which cannot reach the rest of the command line.
+.IP "\(bu" 4
+The loop name does not outlive the loop: after \fBfor f in a b; do :; done\fR, \fBrm $f\fR is a hole, because a caller reading the report cannot see that the loop ran at all.
+.PP
+.SH WORD SPLITTING
+.PP
+A value with a blank in it is two paths in one place and one path in another, and where it lands decides which. This is the manual's word splitting, and the report follows it:
+.PP
+.IP "\(bu" 4
+\fBx=\"a b\"; rm $x\fR reports two deletions, and \fBrm \"$x\"\fR reports one path whose name has a space in it. Whitespace at either end of a value is padding and runs in the middle delimit, so \fBx=\"  a  b  \"\fR is \fBa\fR and \fBb\fR.
+.IP "\(bu" 4
+The text around the value stays on the outer fields: \fBx=\"a b\"; rm pre$x\fR is \fBprea\fR and \fBb\fR, and \fBrm $x/post\fR is \fBa\fR and \fBb/post\fR.
+.IP "\(bu" 4
+\fBIFS\fR is read from the values the command line set. An empty \fBIFS\fR turns splitting off, and with the default one only space, tab and newline separate.
+.IP "\(bu" 4
+An assignment is not split, the use site is: \fBx=\"a b\"; y=$x\fR puts the whole value in \fBy\fR.
+.IP "\(bu" 4
+A value that comes out empty makes no argument at all: \fBx=\"\"; rm $x\fR reports no deletion, and neither does \fBrm \"$x\"\fR, which names one empty path.
+.IP "\(bu" 4
+An unquoted redirect target that splits is an ambiguous redirect: bash refuses the command rather than opening anything, so the target is a hole and not a path.
+.IP "\(bu" 4
+Two names that both need splitting are left as a hole: the shell splits the whole expanded word, and gluing one name's fields onto another's is not modelled.
+.PP
+.SH BRACES
+.PP
+Brace expansion is textual and runs before parameter expansion, so the two cases
+differ: \fBrm -rf {a,b}\fR names two files, and \fBx='{a,b}'; rm $x\fR names one file whose
+name has braces in it.
+.PP
+.IP "\(bu" 4
+\fBrm -rf {a,b}\fR reports both deletions, in order. \fB{1..3}\fR counts, \fB{01..03}\fR pads with zeros, \fB{3..1}\fR counts down, and \fB{a..c}\fR walks letters. The words are spliced into the argument list exactly where bash puts them, so \fB{echo,true} hi\fR runs \fBecho\fR with two arguments rather than two commands.
+.IP "\(bu" 4
+A brace with no comma and no range is literal (\fB{a}\fR, \fB{a,b\fR), and so is one that is escaped (\fB\\{a,b\\}\fR) or quoted (\fB\"{a,b}\"\fR).
+.IP "\(bu" 4
+A list the report cannot carry — \fB{1..1000}\fR — becomes a hole rather than a word list or a literal name, and the same goes for the shapes that are not modelled, such as a brace glued to a parameter (\fB$x{a,b}\fR).
+.IP "\(bu" 4
+The two shells disagree about ranges and the report follows the dialect it was asked for: \fB{1..a}\fR is literal in bash and walks the ASCII table in zsh, and a step on a character range (\fB{a..f..3}\fR) works in bash while zsh leaves it literal.
+.PP
+.SH CANDIDATE PATHS
+.PP
+A name the command line left with more than one possible value makes a hole that
+is not a mystery: \fBif c; then x=a; else x=b; fi; rm $x\fR deletes one of two paths,
+and the effect says which ones.
+.PP
+.IP "\(bu" 4
+The effect keeps its hole (\fBtarget: \"$x\"\fR, \fBdynamic: true\fR, \fBvars: [\"x\"]\fR) and gains \fBcandidates: [\"/a/b/a\", \"/a/b/b\"]\fR.
+.IP "\(bu" 4
+Candidates are possibilities, not facts. Nothing in the list is claimed to happen: \fBx\fR holds one of them, and two entries do not mean two deletions. A caller deciding on facts keeps using \fBtarget\fR plus \fBvars\fR.
+.IP "\(bu" 4
+The list is exhaustive or absent. A \fBwhile\fR body may run any number of times, so a value it sets is an unknown rather than a set; a set that grew past eight paths is left out rather than truncated; and a possibility that names no path (an unset name, an empty value) is not listed at all.
+.IP "\(bu" 4
+What is certain stays certain: \fBx=a; rm $x\fR is one path with no candidates, and \fBif c; then x=a; else x=a; fi; rm $x\fR is the same, because both ways out set the same value.
+.IP "\(bu" 4
+A loop over a spelled-out list contributes the values its body left, and a condition that may not run contributes the value from before it: \fBx=old; if c; then x=new; fi; rm $x\fR reports \fBold\fR and \fBnew\fR.
 .PP
 .SH STREAM MODE
 .PP
