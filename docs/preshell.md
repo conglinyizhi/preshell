@@ -66,7 +66,7 @@ A parameter is resolved only when the input itself says what it holds, and only 
 
 - `x=dist; rm -rf $x` reports `Delete: /a/b/dist`, and `x` is not listed in `vars`: the name is resolved, so the caller has nothing left to substitute.
 - A value the shell would expand further stays a hole: `x='*.log'` would fan out against the file system at the use site, and `x=$(date)` is a run-time value. A blank is not in this list any more — it splits, which is the next section.
-- A `for` list the input spells out is a closed set: `for f in a b; do rm "$f"; done` reports both deletions, and the body is walked once per word, so its effects repeat. A list the shell has to work out (`for f in *.ts`) stays a hole.
+- A `for` list the input spells out is a closed set: `for f in a b; do rm "$f"; done` reports both deletions, and the body is walked once per word. The same fact found twice on the same line is reported once, so `for f in a b; do rm x; done` is one deletion: the second run told the caller nothing the first one did not, and it is the line the statement came from that makes them the same statement. A list the shell has to work out (`for f in *.ts`) stays a hole.
 - A value that holds on one path only is dropped rather than kept: after `if c; then x=a; fi`, `rm $x` is a hole, because that branch may not have run. The same goes for a value set inside a subshell or a command substitution, which cannot reach the rest of the command line.
 - The loop name does not outlive the loop: after `for f in a b; do :; done`, `rm $f` is a hole, because a caller reading the report cannot see that the loop ran at all.
 

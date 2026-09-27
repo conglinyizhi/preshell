@@ -87,7 +87,7 @@ A parameter is resolved only when the input itself says what it holds, and only 
 .IP "\(bu" 4
 A value the shell would expand further stays a hole: \fBx='*.log'\fR would fan out against the file system at the use site, and \fBx=$(date)\fR is a run-time value. A blank is not in this list any more — it splits, which is the next section.
 .IP "\(bu" 4
-A \fBfor\fR list the input spells out is a closed set: \fBfor f in a b; do rm \"$f\"; done\fR reports both deletions, and the body is walked once per word, so its effects repeat. A list the shell has to work out (\fBfor f in *.ts\fR) stays a hole.
+A \fBfor\fR list the input spells out is a closed set: \fBfor f in a b; do rm \"$f\"; done\fR reports both deletions, and the body is walked once per word. The same fact found twice on the same line is reported once, so \fBfor f in a b; do rm x; done\fR is one deletion: the second run told the caller nothing the first one did not, and it is the line the statement came from that makes them the same statement. A list the shell has to work out (\fBfor f in *.ts\fR) stays a hole.
 .IP "\(bu" 4
 A value that holds on one path only is dropped rather than kept: after \fBif c; then x=a; fi\fR, \fBrm $x\fR is a hole, because that branch may not have run. The same goes for a value set inside a subshell or a command substitution, which cannot reach the rest of the command line.
 .IP "\(bu" 4
