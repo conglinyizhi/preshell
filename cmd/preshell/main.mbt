@@ -61,6 +61,10 @@ async fn main {
   let mut base_cwd : String? = None
   let mut evidence = false
   let mut stream = false
+  // How much of a program's own source text to carry, None when the caller did
+  // not ask. Off by default: the text can be kilobytes, and a report that grows
+  // unasked is one a caller cannot budget for.
+  let mut payload_max : Int? = None
   let mut operands_started = false
   let rest : Array[String] = []
   let mut i = 0
@@ -114,6 +118,21 @@ async fn main {
     }
     if a == "--stream" {
       stream = true
+      continue
+    }
+    if a == "--payload" {
+      payload_max = Some(default_payload_max())
+      continue
+    }
+    if a.has_prefix("--payload-max=") {
+      let size = a.unsafe_substring(start=14, end=a.length())
+      match parse_byte_count(size) {
+        Some(n) => payload_max = Some(n)
+        None => {
+          usage_error("--payload-max needs a positive number of bytes: \{size}")
+          return
+        }
+      }
       continue
     }
     if a == "--" && !operands_started {
@@ -220,7 +239,7 @@ async fn main {
       }
   }
   if stream {
-    stream_reports(shell, probe, base, base_note)
+    stream_reports(shell, probe, base, base_note, payload_max)
     return
   }
   let from_argv = rest.length() > 0
@@ -261,16 +280,25 @@ async fn main {
   }
   let report = if probe {
     if from_argv {
-      @lib.analyze_probe(src, base_cwd=base)
+      @lib.analyze_probe(src, base_cwd=base, payload_max~)
     } else {
-      @lib.analyze_bytes_probe(stdin_bytes.unwrap(), base_cwd=base)
+      @lib.analyze_bytes_probe(
+        stdin_bytes.unwrap(),
+        base_cwd=base,
+        payload_max~,
+      )
     }
   } else {
     let dialect = dialect_for(src, shell)
     if from_argv {
-      @lib.analyze_dialect(src, dialect, base_cwd=base)
+      @lib.analyze_dialect(src, dialect, base_cwd=base, payload_max~)
     } else {
-      @lib.analyze_bytes_dialect(stdin_bytes.unwrap(), dialect, base_cwd=base)
+      @lib.analyze_bytes_dialect(
+        stdin_bytes.unwrap(),
+        dialect,
+        base_cwd=base,
+        payload_max~,
+      )
     }
   }
   if scan {
@@ -380,6 +408,12 @@ async fn usage() -> Unit {
     #|              cd: it adds no effect, and a cd in the command overrides it.
     #|              Required by the caller contract: without it the tool falls
     #|              back to its own current directory and says so in a note
+    #|  --payload   carry the text a program reads as its own source, when the
+    #|              command line has it: python3 -c '<code>', python3 - <<'PY'.
+    #|              Off by default. Only for programs that take their source as
+    #|              an argument or on stdin; each text is capped at 4096 bytes
+    #|  --payload-max=N
+    #|              turn payloads on and keep at most N bytes of each text
     #|  --pretty    indent the JSON for humans (single-shot mode only)
     #|  --stream    many commands: one request per line on stdin, one answer per
     #|              line on stdout, in the same order. A request is a JSON string,
@@ -449,6 +483,38 @@ async fn usage() -> Unit {
 }
 
 ///|
+/// How many bytes of a payload come back when `--payload` is given without a
+/// size. Enough for the command-shaped texts that are the point of the flag,
+/// small enough that a report stays a report.
+fn default_payload_max() -> Int {
+  4096
+}
+
+///|
+/// A positive byte count, digits only. A caller who typed `--payload-max=1e6` or
+/// `--payload-max=-1` gets a refusal rather than a silent 1 or an unlimited
+/// text: a cap that is not what was asked for is worse than none.
+fn parse_byte_count(s : String) -> Int? {
+  if s.length() == 0 {
+    return None
+  }
+  let mut v = 0
+  for c in s {
+    if !c.is_ascii_digit() {
+      return None
+    }
+    v = v * 10 + (c.to_int() - '0'.to_int())
+    if v > 1000000000 {
+      return None
+    }
+  }
+  if v == 0 {
+    return None
+  }
+  Some(v)
+}
+
+///|
 fn digits_of(s : String) -> Int {
   let mut v = 0
   for c in s {
@@ -512,12 +578,13 @@ async fn answer_stream_line(
   counts : Counts,
   base_cwd : String?,
   base_note : String?,
+  payload_max : Int?,
 ) -> Unit {
   match @lib.decode_stream_line(line) {
     Ok(request) => {
       let bytes = request.command
       let raw = if probe {
-        @lib.analyze_bytes_probe(bytes, base_cwd~)
+        @lib.analyze_bytes_probe(bytes, base_cwd~, payload_max~)
       } else {
         // The same two steps as the single-shot path: the dialect is chosen
         // from the text, so a shebang still decides under `auto`, and the
@@ -525,7 +592,12 @@ async fn answer_stream_line(
         // treated the way the shell treats them. Anything else would make the
         // two modes disagree about the same command.
         let (text, _) = @lib.decode_command(bytes)
-        @lib.analyze_bytes_dialect(bytes, dialect_for(text, shell), base_cwd~)
+        @lib.analyze_bytes_dialect(
+          bytes,
+          dialect_for(text, shell),
+          base_cwd~,
+          payload_max~,
+        )
       }
       // Every line stands alone, so the caveat about the base is repeated here
       // rather than announced once at the start of the stream.
@@ -577,6 +649,7 @@ async fn stream_reports(
   probe : Bool,
   base_cwd : String?,
   base_note : String?,
+  payload_max : Int?,
 ) -> Unit {
   let framer = @lib.LineFramer::new()
   let counts : Counts = { reports: 0, errors: 0, }
@@ -597,7 +670,7 @@ async fn stream_reports(
         @lib.FramedLine::Line(line) => {
           number += 1
           answer_stream_line(
-            line, number, shell, probe, counts, base_cwd, base_note,
+            line, number, shell, probe, counts, base_cwd, base_note, payload_max,
           )
         }
         @lib.FramedLine::TooLong => {
@@ -620,7 +693,7 @@ async fn stream_reports(
     Some(@lib.FramedLine::Line(line)) => {
       number += 1
       answer_stream_line(
-        line, number, shell, probe, counts, base_cwd, base_note,
+        line, number, shell, probe, counts, base_cwd, base_note, payload_max,
       )
     }
     _ => ()
@@ -723,6 +796,9 @@ fn contract_json() -> Json {
       ),
       "origin": Json::string(
         "an effect whose target came from a value the command line set carries origin: the reference as written, as in x=/usr/bin/jq; $x -n 1 where the Exec names /usr/bin/jq and origin is $x. Absent when the target is what the word says. It is rendered the way a hole is, so a caller can match it against the command text",
+      ),
+      "payload": Json::string(
+        "an Exec/Spawn may carry payload: the text this program reads as its own source, when the command line has it (python3 -c '<code>', python3 - <<'PY'). Off by default; turn it on with --payload, or --payload-max=N to cap each text at N bytes (default 4096). {source, flag?, delimiter?, text, bytes, truncated}: source is flag or heredoc, text is as written with expansions left alone, bytes is the whole text's length in UTF-8 bytes and truncated says whether text is a prefix of it. The tool never interprets the text, and modeled keeps its meaning. Only programs whose arguments are their source get one; a pipe carries none, because its text is not in this command line",
       ),
       "candidates": Json::string(
         "an effect may carry candidates: the paths its hole could be, when the input left a name with several possible values (if c; then x=a; else x=b; fi; rm $x). They are possibilities, not facts — target stays the hole and dynamic stays true, so a caller deciding on facts keeps using target plus vars. The list is exhaustive or absent: a value a while body may have set carries none, a set past eight paths is left out rather than truncated, and a possibility that names no path (an unset or empty name) is not listed",
