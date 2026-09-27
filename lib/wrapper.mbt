@@ -52,30 +52,6 @@ fn wrapper_value_opts(n : String) -> Array[String] {
 }
 
 ///|
-/// How many words one option token takes with it: 0 when the value is glued to
-/// the token (`-n1`, `--unset=FOO`) or the option takes none, 1 when the value
-/// is the next word. A short cluster can carry a value letter anywhere, so it
-/// is walked letter by letter.
-fn wrapper_option_extra_words(value_opts : Array[String], t : String) -> Int {
-  if t.has_prefix("--") {
-    match t.find("=") {
-      Some(_) => 0
-      None => if value_opts.contains(t) { 1 } else { 0 }
-    }
-  } else {
-    let mut k = 1
-    while k < t.length() {
-      let name = "-" + t.unsafe_substring(start=k, end=k + 1)
-      if value_opts.contains(name) {
-        return if k + 1 < t.length() { 0 } else { 1 }
-      }
-      k += 1
-    }
-    0
-  }
-}
-
-///|
 /// Whether this word is `NAME=VALUE` before an `env` command name. It is part
 /// of the environment, not the program to run: `env FOO=1 rm x` runs rm.
 fn is_env_assign(t : String) -> Bool {
@@ -134,31 +110,6 @@ fn wrapper_target(n : String, words : Array[Word]) -> Wrapped? {
     return Some(Wrapped::Nothing)
   }
   Some(Wrapped::Command(i))
-}
-
-///|
-/// The value of one of `names` in a raw word list, with its hole flag, for the
-/// three spellings `-a list`, `-alist` and `--arg-file=list`. Wrappers are
-/// scanned from their words rather than from the option table, so the one path
-/// option they have (`xargs -a`) is found here.
-fn option_word_value(words : Array[Word], names : Array[String]) -> PathArg? {
-  for i, w in words {
-    let t = w.literal_text()
-    for n in names {
-      if t == n && i + 1 < words.length() {
-        return Some(PathArg::of(words[i + 1]))
-      }
-      if t.has_prefix(n + "=") {
-        let value = t.unsafe_substring(start=n.length() + 1, end=t.length())
-        return Some(value_arg(PathArg::of(w), value))
-      }
-      if !n.has_prefix("--") && t.has_prefix(n) && t.length() > n.length() {
-        let value = t.unsafe_substring(start=n.length(), end=t.length())
-        return Some(value_arg(PathArg::of(w), value))
-      }
-    }
-  }
-  None
 }
 
 ///|
@@ -283,11 +234,4 @@ fn Collector::wrapper_effects(
       }
     }
   }
-}
-
-///|
-/// Wrapper nesting is bounded like every other recursion here: a command line
-/// of 10000 `env` words must not decide whether this process survives.
-fn max_wrapper_depth() -> Int {
-  16
 }

@@ -51,30 +51,6 @@ fn is_bindable_text(text : String) -> Bool {
 }
 
 ///|
-/// How many words a `for` list may have before its body is no longer walked
-/// once per word. Unrolling is linear in the word count and multiplies the
-/// effects of the body, so a list longer than this keeps the old answer — a
-/// hole — instead of filling the effect list with copies of the same body.
-fn max_unroll() -> Int {
-  64
-}
-
-///|
-/// How many values one name may hold before the tool stops tracking it. A set is
-/// what the value *may* be, so a bigger one is still honest — just not worth
-/// carrying, and the answer falls back to the plain hole.
-fn max_values() -> Int {
-  8
-}
-
-///|
-/// How many paths one hole may name before the list stops being useful. Same
-/// reasoning: past this the hole says everything the list would.
-fn max_candidates() -> Int {
-  8
-}
-
-///|
 /// The values a name may hold, or None when the command line said nothing about
 /// it. One value is a fact; more than one is a set of possibilities, which is
 /// what a branch or a loop leaves behind.

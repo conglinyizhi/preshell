@@ -366,11 +366,6 @@ fn parse_seq_of_cmd(p : Parser) -> Seq {
 }
 
 ///|
-fn max_nesting() -> Int {
-  1024
-}
-
-///|
 /// Any compound command may be followed by its own redirections; the simple
 /// command case handles its redirects inline instead.
 fn Parser::parse_command(self : Parser) -> Cmd {

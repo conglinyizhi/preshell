@@ -75,17 +75,6 @@ pub(all) struct Impact {
 ///|
 
 ///|
-/// How many effects a report carries. Effects are the answer, not diagnostics,
-/// so the cap is generous — but it exists: a 360KB input of nested `if` used to
-/// produce 39k effects and a 2.8MB answer, which is not something to hand a
-/// caller that is going to paste it somewhere. `effects_dropped` says how many
-/// were left out, and dropping any forces `uncertain`, because a partial effect
-/// list is not a smaller answer.
-fn max_effects() -> Int {
-  4096
-}
-
-///|
 struct Collector {
   /// Every effect the report holds, in the order it found them. The same fact is
   /// only in here once (see `Collector::seen`).

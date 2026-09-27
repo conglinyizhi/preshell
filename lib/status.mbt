@@ -167,15 +167,6 @@ pub fn add_note(r : Report, message : String) -> Report {
 }
 
 ///|
-/// How many issues a report carries. Diagnostics scale with the input: a
-/// 5000-level nesting produced 5001 issues and a 280KB answer for a 15KB
-/// question. The count of what was left out is reported instead, so a caller
-/// can tell something is wrong without paying for the whole list.
-fn max_issues() -> Int {
-  64
-}
-
-///|
 /// Parse `src` and report what it touches.
 ///
 /// `Unsupported` and `Invalid` both force `impact.uncertain`, because an

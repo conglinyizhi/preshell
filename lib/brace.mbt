@@ -55,21 +55,6 @@ priv enum Alts {
 }
 
 ///|
-/// How many words one word may expand to. `{1..1000}` is a real command line, but
-/// a thousand paths is not an answer a caller can use, and the cut has to be
-/// visible rather than silent.
-fn max_brace_words() -> Int {
-  256
-}
-
-///|
-/// Nesting depth this tool follows. `{a,{a,{a,...}}}` is depth for free in a
-/// 3-character-per-level input.
-fn max_brace_depth() -> Int {
-  16
-}
-
-///|
 priv struct BraceRun {
   dialect : Dialect
   mut left : Int

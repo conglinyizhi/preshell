@@ -433,58 +433,6 @@ fn Collector::classify(
 }
 
 ///|
-/// The value that follows one of `names` in an argument list, if present.
-fn flag_value(items : Array[PathArg], names : Array[String]) -> String? {
-  for i, it in items {
-    let t = it.text
-    for n in names {
-      if t == n && i + 1 < items.length() {
-        return Some(items[i + 1].text)
-      }
-      if t.has_prefix(n + "=") {
-        return Some(t.unsafe_substring(start=n.length() + 1, end=t.length()))
-      }
-    }
-  }
-  None
-}
-
-///|
-fn has_flag_text(flags : Array[String], f : String) -> Bool {
-  flags.any(fn(x) {
-    x == f || (x.has_prefix("-") && !x.has_prefix("--") && x.contains(f))
-  })
-}
-
-///|
-/// Drop the operand that a known flag already consumed, so a value like the
-/// `-C dir` of tar is not reported twice: once as the write target and once as
-/// a path the command reads.
-fn drop_flag_value(xs : Array[PathArg], value : String?) -> Array[PathArg] {
-  match value {
-    None => xs
-    Some(v) => xs.filter(fn(it) { it.text != v })
-  }
-}
-
-///|
-/// The operands that come before the first flag. For commands like `find`,
-/// whose later arguments are predicates rather than paths (`-name '*.mbt'`),
-/// only the leading ones are files.
-fn leading_operands(items : Array[PathArg]) -> Array[PathArg] {
-  let out : Array[PathArg] = []
-  for it in items {
-    if it.text.has_prefix("-") {
-      break
-    }
-    if it.text != "" {
-      out.push(it)
-    }
-  }
-  out
-}
-
-///|
 /// `eval "..."` and `sh -c "..."` with a static string: the string is a real
 /// command line, so it gets parsed and folded into the same summary.
 fn Collector::recurse_static(
