@@ -102,6 +102,31 @@ test "a ~user prefix names nothing" {
 }
 ```
 
+命令自己写出来的值直接解出来，不再出现在 `vars` 里，这类名字调用方不用管：
+
+```mbt check
+///|
+test "a value the command line set is resolved" {
+  let report = @lib.analyze("x=dist; rm -rf $x")
+  debug_inspect(report.impact.vars, content="[]")
+  inspect(report.impact.effects[1].target, content="dist")
+}
+```
+
+一个名字可能有多个取值时，效果仍是个洞，但会带一份候选集合——那是**可能性，不是事实**，
+`target` 与 `dynamic` 都不变：
+
+```mbt check
+///|
+test "a name with two possible values lists both" {
+  let report = @lib.analyze("if c; then x=a; else x=b; fi; rm $x")
+  let delete = report.impact.effects[2]
+  inspect(delete.target, content="$x")
+  debug_inspect(delete.dynamic, content="true")
+  inspect(delete.candidates.join(" "), content="a b")
+}
+```
+
 ## 运行这份文档
 
 在仓库根目录：
