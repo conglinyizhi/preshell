@@ -68,7 +68,6 @@ preshell --cwd=/srv/app 'rm -rf dist'
 
 ```json
 {
-  "version": 1,
   "status": "Complete",
   "impact": {
     "effects": [
@@ -165,7 +164,7 @@ jq -Rc . commands.txt | preshell --stream > reports.jsonl
 对应的应答会带信封：
 
 ```json
-{"id":"random-value","report":{"version":1,"status":"Complete"}}
+{"id":"random-value","report":{"status":"Complete"}}
 ```
 
 流式调用时，调用方必须：
