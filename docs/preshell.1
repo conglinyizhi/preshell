@@ -32,6 +32,10 @@ preshell --man-markdown
 .IP "\(bu" 4
 \fB--cwd=PATH\fR: the base every relative path in the input is resolved against. It must be absolute. It is a starting point, not a \fBcd\fR, so it adds no effect and a \fBcd\fR in the command overrides it. It is required by the caller contract: without it the tool falls back to its own current directory and says so in a note.
 .IP "\(bu" 4
+\fB--payload\fR: carry the text a program reads as its own source, when the command line has it. Off by default. See \"Payloads\" below.
+.IP "\(bu" 4
+\fB--payload-max=N\fR: turn payloads on and keep at most \fBN\fR bytes of each text. \fBN\fR is a positive whole number of bytes; the default cap is 4096.
+.IP "\(bu" 4
 \fB--pretty\fR: indent the JSON in single-command mode.
 .IP "\(bu" 4
 \fB--stream\fR: read one JSON request per line and write one answer per line.
@@ -206,6 +210,32 @@ resolve it before comparing entries against a policy.
 Read \fBimpact.uncertain\fR before treating the effect list as complete. When it is \fBtrue\fR, an empty effect list does not mean that the command touches nothing.
 .PP
 The effect kinds include \fBExec\fR, \fBRead\fR, \fBWrite\fR, \fBDelete\fR, \fBNet\fR, \fBSpawn\fR, and \fBUnknown\fR. \fBmodeled: false\fR means control was handed to a program whose internal behavior is not modeled. \fBdynamic: true\fR means the target is not a closed set, for example because it contains a variable or glob.
+.PP
+.SH PAYLOADS
+.PP
+Some programs read their own source from the command line: \fBpython3 -c 'code'\fR, \fBnode -e 'code'\fR, \fBpython3 - <<'PY' … PY\fR. That text is the one part of a command line where paths appear in a form the shell never tokenizes, so a caller has to look inside it to know what the command would touch. With \fB--payload\fR, the effect carrying the program also carries the text:
+.PP
+.nf
+printf \"python3 -c 'import os\\\\nprint(os.getcwd())'\\n\" | preshell --cwd=/tmp --payload
+.fi
+.PP
+.nf
+{\"kind\":\"Exec\",\"target\":\"python3\",\"modeled\":false,\"line\":1,
+ \"payload\":{\"source\":\"flag\",\"flag\":\"-c\",\"text\":\"import os\\nprint(os.getcwd())\",\"bytes\":29,\"truncated\":false}}
+.fi
+.PP
+.IP "\(bu" 4
+\fBsource\fR is \fBflag\fR when the text was an option's value, and \fBheredoc\fR when it was a here-document body; a here-document payload carries \fBdelimiter\fR (the word that ends it) instead of \fBflag\fR.
+.IP "\(bu" 4
+\fBtext\fR is the text as written: quotes and escapes resolved, expansions left alone (\fB$HOME\fR stays \fB$HOME\fR). Nothing is interpreted, and \fBmodeled\fR keeps its meaning: the report still says nothing about what the text does.
+.IP "\(bu" 4
+\fBbytes\fR is the whole text's length in UTF-8 bytes even when \fBtext\fR is a prefix of it, and \fBtruncated\fR says which of the two \fBtext\fR is. The cut lands on a character boundary.
+.IP "\(bu" 4
+The payload belongs to the program that runs, wherever it was found: inside a loop body, behind a wrapper (\fBenv python3 -c …\fR), behind a runner (\fBuv run --with X python3 -c …\fR) or behind a container runtime (\fBdocker run --rm node -e …\fR).
+.IP "\(bu" 4
+Only programs whose arguments *are* their source get one. The table is short on purpose: \fBawk\fR and \fBsed\fR are not in it, because what they take is a language of their own rather than the program's source.
+.IP "\(bu" 4
+It is off by default and capped when on: a here-document body can be kilobytes, and a command line can hold several.
 .PP
 .SH WHAT PRESHELL DOES NOT DECIDE
 .PP

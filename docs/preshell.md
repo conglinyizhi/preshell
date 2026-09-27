@@ -27,6 +27,8 @@ preshell --man-markdown
 
 - `--shell=S`: read the input as `auto` (default), `bash`, `zsh`, or `probe`. `auto` follows the shebang and otherwise uses bash. `probe` tries the declared dialect first and then the other supported dialect.
 - `--cwd=PATH`: the base every relative path in the input is resolved against. It must be absolute. It is a starting point, not a `cd`, so it adds no effect and a `cd` in the command overrides it. It is required by the caller contract: without it the tool falls back to its own current directory and says so in a note.
+- `--payload`: carry the text a program reads as its own source, when the command line has it. Off by default. See "Payloads" below.
+- `--payload-max=N`: turn payloads on and keep at most `N` bytes of each text. `N` is a positive whole number of bytes; the default cap is 4096.
 - `--pretty`: indent the JSON in single-command mode.
 - `--stream`: read one JSON request per line and write one answer per line.
 - `--spec`: print the machine-readable protocol contract as JSON.
@@ -163,6 +165,26 @@ resolve it before comparing entries against a policy.
 Read `impact.uncertain` before treating the effect list as complete. When it is `true`, an empty effect list does not mean that the command touches nothing.
 
 The effect kinds include `Exec`, `Read`, `Write`, `Delete`, `Net`, `Spawn`, and `Unknown`. `modeled: false` means control was handed to a program whose internal behavior is not modeled. `dynamic: true` means the target is not a closed set, for example because it contains a variable or glob.
+
+## Payloads
+
+Some programs read their own source from the command line: `python3 -c '<code>'`, `node -e '<code>'`, `python3 - <<'PY' … PY`. That text is the one part of a command line where paths appear in a form the shell never tokenizes, so a caller has to look inside it to know what the command would touch. With `--payload`, the effect carrying the program also carries the text:
+
+```bash
+printf "python3 -c 'import os\\nprint(os.getcwd())'\n" | preshell --cwd=/tmp --payload
+```
+
+```json
+{"kind":"Exec","target":"python3","modeled":false,"line":1,
+ "payload":{"source":"flag","flag":"-c","text":"import os\nprint(os.getcwd())","bytes":29,"truncated":false}}
+```
+
+- `source` is `flag` when the text was an option's value, and `heredoc` when it was a here-document body; a here-document payload carries `delimiter` (the word that ends it) instead of `flag`.
+- `text` is the text as written: quotes and escapes resolved, expansions left alone (`$HOME` stays `$HOME`). Nothing is interpreted, and `modeled` keeps its meaning: the report still says nothing about what the text does.
+- `bytes` is the whole text's length in UTF-8 bytes even when `text` is a prefix of it, and `truncated` says which of the two `text` is. The cut lands on a character boundary.
+- The payload belongs to the program that runs, wherever it was found: inside a loop body, behind a wrapper (`env python3 -c …`), behind a runner (`uv run --with X python3 -c …`) or behind a container runtime (`docker run --rm node -e …`).
+- Only programs whose arguments *are* their source get one. The table is short on purpose: `awk` and `sed` are not in it, because what they take is a language of their own rather than the program's source.
+- It is off by default and capped when on: a here-document body can be kilobytes, and a command line can hold several.
 
 ## What PreShell does not decide
 
