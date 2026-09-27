@@ -408,7 +408,11 @@ async fn usage() -> Unit {
     #|  impact.vars      the variables those targets read. Each effect carries its
     #|                   own vars. The tool never reads the environment, so the
     #|                   name is what it hands over: substitute HOME and $HOME/x
-    #|                   resolves. Substitute only the names it reports
+    #|                   resolves. Substitute only the names it reports; a name
+    #|                   the command line itself set is resolved here
+    #|  effect.candidates the paths a hole could be, when the input left a name
+    #|                   with several possible values. Possibilities, not facts:
+    #|                   the target stays a hole and vars stays the name to look up
     #|  impact.uncertain read this first. true means the effect list is not a
     #|                   closed set, and an empty list must not be read as
     #|                   "touches nothing"
@@ -705,7 +709,7 @@ fn contract_json() -> Json {
         "pass --cwd=PATH (absolute): every relative path in the input is resolved against it and reported as an absolute path",
       ),
       "vars": Json::string(
-        "every effect carries vars, the names its own target reads; impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute it and $HOME/x resolves. Substitute only the reported names, because in a target that is not dynamic the $ is literal text. ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N have no name a caller could look up. write_roots can contain a name too",
+        "every effect carries vars, the names its own target reads; impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute it and $HOME/x resolves. Substitute only the reported names, because in a target that is not dynamic the $ is literal text. A name the command line itself set (x=dist; rm -rf $x, or a for list spelled out in the input) is resolved here and not reported, and a for body is walked once per word, so its effects repeat. ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N have no name a caller could look up. write_roots can contain a name too",
       ),
       "required": Json::string(
         "--cwd is required by this contract. Without it the tool uses its own current directory as the base and attaches a Note saying so, which also marks the impact uncertain",
@@ -718,6 +722,9 @@ fn contract_json() -> Json {
       ),
       "no_base": Json::string(
         "after a cd whose destination cannot be modelled (cd $DIR), the base is unknown: those paths stay as written and impact.uncertain is set, so a missing base never passes as no change",
+      ),
+      "candidates": Json::string(
+        "an effect may carry candidates: the paths its hole could be, when the input left a name with several possible values (if c; then x=a; else x=b; fi; rm $x). They are possibilities, not facts — target stays the hole and dynamic stays true, so a caller deciding on facts keeps using target plus vars. The list is exhaustive or absent: a value a while body may have set carries none, a set past eight paths is left out rather than truncated, and a possibility that names no path (an unset or empty name) is not listed",
       ),
     }),
     "how_to_read": Json::string(
