@@ -863,7 +863,11 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   }
   // zsh takes more than one loop name: `for a b in x y` splits the list two at
   // a time, and `for a b` splits "$@" that way. bash refuses both, so this is
-  // the zsh dialect only (measured against both shells).
+  // the zsh dialect only (measured against both shells). A second name makes
+  // the loop name list a rotation rather than a value, so the first name is
+  // dropped: keeping it would say `a` holds each word of the list in turn, and
+  // it holds every other word.
+  let mut extra_names = false
   if self.lex.dialect is Zsh {
     for ;; {
       match self.cur {
@@ -871,6 +875,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
           match w.plain() {
             Some(s) =>
               if s.length() > 0 && !is_command_word(s) {
+                extra_names = true
                 self.advance()
               } else {
                 break
@@ -880,6 +885,9 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
         _ => break
       }
     }
+  }
+  if extra_names {
+    name = ""
   }
   let words : Array[Word] = []
   // Whether the loop named an explicit word list (`in ...` or `( ... )`). That
