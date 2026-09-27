@@ -49,9 +49,6 @@ pub(all) struct Issue {
 /// and `issues` say how much of the command we actually understood, and
 /// nothing here says what anyone should do about it.
 pub(all) struct Report {
-  /// Shape version for callers that parse this JSON. Bumped when a field
-  /// changes meaning, never for added optional fields.
-  version : Int
   status : ParseStatus
   impact : Impact
   /// The first issues found, capped at `max_issues()`. Empty when the command
@@ -62,11 +59,6 @@ pub(all) struct Report {
   /// know the list it got is partial.
   issues_dropped : Int
 } derive(Debug, Eq, ToJson)
-
-///|
-pub fn report_version() -> Int {
-  1
-}
 
 ///|
 /// Analyse a command given as raw bytes: normalise the input the way the shell
@@ -144,7 +136,6 @@ fn attach(r : Report, added : Array[Issue], escalate? : Bool = false) -> Report 
     issues
   }
   {
-    version: r.version,
     status: if escalate {
       Unsupported
     } else {
@@ -460,7 +451,6 @@ fn analyze_clean(
     base.mark_uncertain()
   }
   {
-    version: report_version(),
     status,
     impact: impact_,
     issues,

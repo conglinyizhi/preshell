@@ -36,7 +36,7 @@ let usage_exit_code : Int = 2
 ///   preshell --shell=probe < cmd      try each grammar, keep the first hit
 ///   preshell --stream < cmds.jsonl    many commands, one JSON string per line,
 ///                                     one report per line, in the same order
-///   preshell --version                tool and schema version, as JSON
+///   preshell --version                the tool version, as JSON
 ///   preshell --help                   this text, on stderr
 ///
 /// In --stream, a line that is not a JSON string is refused with its own line
@@ -92,7 +92,6 @@ async fn main {
         Json::object({
           "tool": Json::string("preshell"),
           "version": Json::string(tool_version()),
-          "schema": Json::number(@lib.report_version().to_double()),
         }).stringify(),
       )
       return
@@ -391,7 +390,7 @@ async fn usage() -> Unit {
     #|  --man       the full human manual, as plain text
     #|  --man-markdown
     #|              the full manual as Markdown, for agents and document tools
-    #|  --version   tool and schema version, as JSON
+    #|  --version   the tool version, as JSON
     #|  --help      this text, on stderr
     #|
     #|the contract:
@@ -648,7 +647,6 @@ fn contract_json() -> Json {
   Json::object({
     "tool": Json::string("preshell"),
     "version": Json::string(tool_version()),
-    "schema": Json::number(@lib.report_version().to_double()),
     "doc": Json::string(doc),
     "one_line": Json::string(
       "Reports what a shell command touches. Facts, not a verdict: no policy, no allow/deny.",

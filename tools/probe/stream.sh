@@ -132,7 +132,7 @@ check "空行被明确拒绝且带行号" "$(printf '%s\n' "$out" | sed -n '2p' 
 check "坏行拒绝且带行号" "$(printf '%s\n' "$out" | sed -n '3p' | grep -c '"line":3')" "1"
 check "坏行之后的报告仍在原位" "$(printf '%s\n' "$out" | sed -n '4p' | grep -c '"target":"echo"')" "1"
 # 拒绝对象里不许出现报告字段，否则调用方会把「你第 3 行不是 JSON」读成「这条命令有问题」
-check "拒绝对象不带 version" "$(printf '%s\n' "$out" | sed -n '2p' | grep -c '"version"')" "0"
+check "拒绝对象不带 impact" "$(printf '%s\n' "$out" | sed -n '2p' | grep -c '"impact"')" "0"
 check "拒绝对象不带 status" "$(printf '%s\n' "$out" | sed -n '2p' | grep -c '"status"')" "0"
 
 # --- 4) CRLF 与无尾随换行 -------------------------------------------------
