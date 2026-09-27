@@ -1106,7 +1106,7 @@ fn Collector::classify(
       return
     }
     "docker" | "podman" => {
-      self.container_effects(s, line)
+      self.container_effects(n, s, line)
       return
     }
     // A delegation (`uv run CMD`, `npx CMD`, `cargo run`) is its own fact:
@@ -1131,7 +1131,8 @@ fn Collector::classify(
     | "go"
     | "cargo"
     | "dotnet"
-    | "deno" => if self.runner_effects(n, s, line) { return }
+    | "deno"
+    | "conda" => if self.runner_effects(n, s, line) { return }
     _ => ()
   }
   // git gets its own table (lib/git.mbt): which paths a subcommand touches is

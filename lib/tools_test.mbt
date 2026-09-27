@@ -57,16 +57,16 @@ test "make reports the directory it builds in" {
 test "a container mount hands over the host path" {
   inspect(
     touched("docker run -v /host/data:/data img"),
-    content="W:/host/data N:container registry",
+    content="S:img W:/host/data N:container registry",
   )
   // A read-only mount says so, and then there is nothing to write.
   inspect(
     touched("docker run -v /host/data:/data:ro img"),
-    content="R:/host/data N:container registry",
+    content="S:img R:/host/data N:container registry",
   )
   inspect(
     touched("docker run --mount type=bind,source=/srv/x,target=/x img"),
-    content="W:/srv/x N:container registry",
+    content="S:img W:/srv/x N:container registry",
   )
   // The build context is the last argument, not the subcommand.
   inspect(touched("docker build -t x ."), content="R:. N:container registry")
@@ -97,4 +97,52 @@ test "package managers read what they can and say the rest is a hole" {
     touched("uv pip install ./dist/x.whl"),
     content="R:./dist/x.whl U:python environment N:package index",
   )
+}
+
+///|
+/// The `Spawn` targets of a command line, in order.
+fn spawned(src : String) -> String {
+  let r = @lib.analyze(src)
+  let parts : Array[String] = []
+  for e in r.impact.effects {
+    if e.kind == Spawn {
+      parts.push(e.target)
+    }
+  }
+  parts.join(" ")
+}
+
+///|
+/// A runner's own options are not the program it hands control to (issue #5).
+/// Reading an option's value as the delegate is what made `uv run --with plyvel
+/// python` report `plyvel`, which in turn hides which interpreter the words
+/// after it belong to.
+test "a runner's options do not become the program it runs" {
+  inspect(spawned("uv run python -c 1"), content="python")
+  inspect(spawned("uv run --with plyvel python -c 1"), content="python")
+  inspect(spawned("uv run --with=plyvel python -c 1"), content="python")
+  inspect(
+    spawned("uv run --with websockets --with pypinyin python -c 1"),
+    content="python",
+  )
+  inspect(spawned("uv run --cache-dir /tmp/c python -c 1"), content="python")
+  // npm's global options count too: `--cache DIR` is not the program.
+  inspect(spawned("npm exec --cache /tmp/c foo"), content="foo")
+  // `cargo --bin` names what runs, so its value *is* the delegate: the search
+  // stops there on purpose.
+  inspect(spawned("cargo run --bin myapp"), content="myapp")
+  inspect(spawned("cargo run --target-dir /tmp/t --bin myapp"), content="myapp")
+  // The package a `dlx` runs is the delegate, not the words after it.
+  inspect(spawned("pnpm dlx foo node -e 1"), content="foo")
+  // conda and the container runtimes hand over too: the image is what the
+  // container starts, which is what makes the words after it legible.
+  inspect(spawned("conda run python -c 1"), content="python")
+  inspect(spawned("conda run -n myenv python -c 1"), content="python")
+  inspect(spawned("docker run --rm node -e 1"), content="node")
+  inspect(spawned("docker run -v /host:/c -w /app node -e 1"), content="node")
+  inspect(spawned("docker run --rm alpine sh -c x"), content="alpine")
+  inspect(spawned("podman run --rm node -e 1"), content="node")
+  // Not a delegation: nothing is handed over.
+  inspect(spawned("docker build -t x ."), content="")
+  inspect(spawned("uv pip install foo"), content="")
 }

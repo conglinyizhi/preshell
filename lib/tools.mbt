@@ -186,6 +186,7 @@ fn join_path(dir : String, name : String) -> String {
 /// it is pulled depends on the local cache, so the network contact is a hole.
 fn Collector::container_effects(
   self : Collector,
+  name : String,
   s : SimpleCmd,
   line : Int,
 ) -> Unit {
@@ -193,6 +194,7 @@ fn Collector::container_effects(
   // The subcommand decides everything: `run` mounts host paths, `build` reads a
   // build context, `pull` only leaves the machine.
   let mut sub = ""
+  let mut sub_at = 0
   let mut i = 1
   for ;; {
     if i >= words.length() {
@@ -203,12 +205,33 @@ fn Collector::container_effects(
       i += 1
     } else {
       sub = t
+      sub_at = i
       break
     }
   }
   match sub {
     "run" | "create" => {
-      self.push(Exec, "docker", false, line)
+      self.push(Exec, name, false, line)
+      // The image is the first word that is not one of docker's own options, and
+      // it is what the container starts: `docker run --rm node -e 'x'` starts
+      // node, which is what makes the words after it legible to a caller (issue
+      // #5). The value of an option is skipped the same way the runners skip
+      // theirs, so `-v /host:/c node` names node.
+      let mut j = sub_at + 1
+      let image_opts = runner_value_opts("docker")
+      while j < words.length() {
+        let t = words[j].literal_text()
+        if t == "" {
+          j += 1
+          continue
+        }
+        if t.has_prefix("-") {
+          j += 1 + wrapper_option_extra_words(image_opts, t)
+          continue
+        }
+        self.push(Spawn, t, true, line)
+        break
+      }
       let mut k = 1
       for ;; {
         if k >= words.length() {
@@ -255,7 +278,7 @@ fn Collector::container_effects(
     "build" | "buildx" => {
       // The build context is the last non-option argument, and the subcommand
       // word itself is not it: `docker build -t x .` reads `.`.
-      self.push(Exec, "docker", false, line)
+      self.push(Exec, name, false, line)
       let mut ctx = ""
       let mut k = 2
       for ;; {
@@ -275,12 +298,12 @@ fn Collector::container_effects(
       self.push(Net, "container registry", true, line)
     }
     "pull" | "push" | "login" | "search" => {
-      self.push(Exec, "docker", false, line)
+      self.push(Exec, name, false, line)
       self.push(Net, "container registry", true, line)
     }
     _ =>
       // Anything else: say the tool does not model it instead of guessing.
-      self.push(Exec, "docker", false, line, modeled=false)
+      self.push(Exec, name, false, line, modeled=false)
   }
 }
 
@@ -335,6 +358,65 @@ fn Collector::mount_effects(
 /// directory gets rewritten. Where the download comes from is a hole.
 
 ///|
+/// The runner's own options that take the next word as their value, so that
+/// `uv run --with plyvel python` hands control to `python` and not to `plyvel`.
+///
+/// Reading such a value as the program is not cosmetic: a caller uses `Spawn`'s
+/// target to decide which words after it belong to an interpreter, and to match
+/// a name against its own lists (issue #5).
+///
+/// An option whose value *is* what runs is deliberately absent (`cargo --bin`,
+/// `cargo --example`, `uv --module`): the delegate search stops on that word
+/// because it is the answer, so skipping over it would skip the answer. The
+/// lists are read off each tool's own `--help` where the tool is here to ask
+/// (`uv`, `docker`, `deno`, `cargo`); the rest are the documented common ones,
+/// kept short on purpose, because a wrong entry skips a word the search needed.
+fn runner_value_opts(name : String) -> Array[String] {
+  match name {
+    "uv" =>
+      [
+        "--extra", "--no-extra", "--group", "--no-group", "--only-group", "--no-editable-package",
+        "--env-file", "-w", "--with", "--with-editable", "--with-requirements", "--package",
+        "--python-platform", "--index", "--default-index", "-i", "--index-url", "--extra-index-url",
+        "-f", "--find-links", "--index-strategy", "--keyring-provider", "-P", "--upgrade-package",
+        "--upgrade-group", "--resolution", "--prerelease", "--prerelease-package",
+        "--fork-strategy", "--exclude-newer", "--exclude-newer-package", "--no-sources-package",
+        "--reinstall-package", "--link-mode", "-C", "--config-setting", "--config-settings-package",
+        "--no-build-isolation-package", "--no-build-package", "--no-binary-package",
+        "--cache-dir", "--refresh-package", "-p", "--python", "--color", "--allow-insecure-host",
+      ]
+    "npm" | "npx" | "pnpm" | "yarn" | "bun" | "bunx" =>
+      [
+        "--package", "-c", "--call", "-w", "--workspace", "--allow-scripts", "--cache",
+        "--prefix", "--registry", "--userconfig", "--globalconfig", "--loglevel",
+        "--cache-dir", "--store-dir", "-C", "--dir", "--filter",
+      ]
+    "cargo" =>
+      [
+        "--message-format", "--color", "-F", "--features", "-j", "--jobs", "--target-dir",
+        "-m", "--manifest-path", "--target", "--profile", "--config", "-Z",
+      ]
+    "deno" =>
+      [
+        "--cert", "--config", "-c", "--conditions", "--env-file", "--ext", "--import-map",
+        "--location", "--preload", "--seed", "--v8-flags", "--log-level", "-L",
+      ]
+    "docker" | "podman" =>
+      [
+        "-a", "--attach", "-c", "--cpu-shares", "-e", "--env", "-h", "--hostname",
+        "-l", "--label", "-m", "--memory", "-p", "--publish", "-u", "--user", "-v",
+        "--volume", "-w", "--workdir", "--name", "--network", "--mount", "--env-file",
+        "--entrypoint", "--platform", "--restart", "--add-host", "--network-alias",
+        "--label-file",
+      ]
+    // conda is not installed here, so this is the documented pair that shows up
+    // in real command lines and nothing more.
+    "conda" => ["-n", "--name", "-p", "--prefix"]
+    _ => []
+  }
+}
+
+///|
 /// Runners: commands whose whole job is to hand control to another program.
 /// What that program touches is decided inside it and by its own language's
 /// conventions, which is not something this tool tries to model -- chasing it
@@ -362,10 +444,10 @@ fn runner_delegate(name : String, s : SimpleCmd) -> String? {
       continue
     }
     if t.has_prefix("-") {
-      // An option may swallow the next word; skipping just one is the
-      // conservative reading, because a missed delegate is worse than an
-      // extra candidate.
-      i += 1
+      // The runner's own options, with the values they swallow: `--with X`,
+      // `--cache DIR`. Skipping the flag alone is how `uv run --with plyvel
+      // python` came to name `plyvel` as the program (issue #5).
+      i += 1 + wrapper_option_extra_words(runner_value_opts(name), t)
       continue
     }
     if takes_subcommand && !seen_subcommand {
@@ -401,7 +483,8 @@ fn is_runner(name : String) -> Bool {
     | "npm"
     | "pnpm"
     | "yarn"
-    | "bun" => true
+    | "bun"
+    | "conda" => true
     _ => false
   }
 }
