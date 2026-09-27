@@ -178,6 +178,12 @@ zsh 语料（Completion + Functions 共 1308 个文件）：**1301 通过 / 0 �
 - **运行器（`uv run`、`npx`、`poetry run`、`cargo run` 之类）按交接单列**：报 `Spawn`
   并指出交接对象，`uncertain` 置真。追下去等于把每门语言的生态实现一遍，所以这是
   刻意划的边界：它们是「你需要另想办法」，而不是「什么都没发生」
+  交接对象靠 `runner_delegate`（tools.mbt）找，找的时候要**消费运行器自己的带值选项**：
+  `runner_value_opts` 是每个运行器的这类选项表（能实测的都照 `--help` 抄：uv、docker、
+  deno、cargo），漏一个就会把选项的值当成程序名（issue #5：`uv run --with plyvel python`
+  曾报成 `plyvel`）。**值就是程序的那种选项故意不在表里**（`cargo --bin`、`uv --module`）：
+  搜索停在那词上本来就是答案。`docker`/`podman` 的 `run`/`create` 也报 `Spawn`，目标是
+  镜像名（`docker run --rm node -e 'x'` 起的是 node）
 - **`[[ ... ]]` 整块不透明**：只找到配对的 `]]`，条件文本留作方言判断，表达式本身
   不解析（里面的命令替换照常审计）。所以语法畸形的条件会读成 Complete，而实现
   条件语法本体不划算
