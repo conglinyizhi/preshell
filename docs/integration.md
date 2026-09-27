@@ -485,6 +485,11 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
     值不是程序名），`docker run --rm node -e 'x'` 报 `Spawn: node`（镜像是容器起的东西）。
     拿它当解释器归属的依据时，注意 `Spawn` 的 `uncertain` 始终为真
   - `Unknown` — 有个洞（动态路径、没建模的程序、here-doc 正文之类）
+  - 载荷不在 `kind` 里：`Exec`/`Spawn` 可以带一个 `payload` 字段，那是这个程序当成
+    自己源码来读的文本（`python3 -c '<代码>'`、`python3 - <<'PY'`）。**默认不出现**，
+    用 `--payload` / `--payload-max=N` 打开；`source` 区分 `flag` 与 `heredoc`，`text`
+    是照写的文本（引号与转义已解开，`$HOME` 这类展开原样保留），`bytes`/`truncated`
+    说明回来的是不是全文。工具不解释这段文本，`modeled` 的含义不变
 - `impact.write_roots` — 会被改到的目录。目录名本身可能带变量（`rm -rf $HOME/x` 的父目录
   就是 `$HOME`），判断前先按 `vars` 替换，或者干脆当洞
 - `impact.vars` — 这份报告里所有效果读到的变量名，去重后的并集；每条效果另有自己的
