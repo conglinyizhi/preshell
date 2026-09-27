@@ -438,11 +438,9 @@ test "a brace body belongs to an if, a while or an until" {
   inspect(ztouched("if x=1 { rm -rf /tmp/asx }"), content="D:/tmp/asx")
   inspect(ztouched("while { true } { rm -f /tmp/whx }"), content="D:/tmp/whx")
   inspect(ztouched("for i in a; { rm -f /tmp/forx }"), content="D:/tmp/forx")
-  // Twice, because the list has two words and the body runs once per word.
-  inspect(
-    ztouched("for x (a b) { rm -f /tmp/forf }"),
-    content="D:/tmp/forf D:/tmp/forf",
-  )
+  // The body runs once per word, and both runs say the same thing on the same
+  // line, so the report holds that fact once.
+  inspect(ztouched("for x (a b) { rm -f /tmp/forf }"), content="D:/tmp/forf")
   inspect(
     ztouched("if [[ x ]] { : } else { rm -f /tmp/elx }"),
     content="D:/tmp/elx",

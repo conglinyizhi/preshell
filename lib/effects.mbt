@@ -271,7 +271,12 @@ fn max_effects() -> Int {
 
 ///|
 struct Collector {
+  /// Every effect the report holds, in the order it found them. The same fact is
+  /// only in here once (see `Collector::seen`).
   items : Array[Effect]
+  /// One hash per item, parallel to it, so the duplicate check is a comparison of
+  /// integers most of the time.
+  hashes : Array[Int]
   roots : Array[String]
   mut dropped : Int
   mut uncertain : Bool
@@ -299,6 +304,7 @@ pub fn impact(
 ) -> Impact {
   let c : Collector = {
     items: [],
+    hashes: [],
     roots: [],
     dropped: 0,
     uncertain: false,
@@ -326,6 +332,77 @@ pub fn impact(
 }
 
 ///|
+
+///|
+/// Whether this exact effect is already in the report.
+///
+/// The hash is a prefilter only: equality is decided on the fields, so a
+/// collision costs one comparison and nothing else.
+fn Collector::seen(self : Collector, e : Effect) -> Bool {
+  let h = effect_hash(e)
+  for i, hh in self.hashes {
+    if hh == h && same_effect(self.items[i], e) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+fn effect_hash(e : Effect) -> Int {
+  let mut h = 16777619
+  h = (h ^ e.line) * 16777619
+  h = (h ^ kind_code(e.kind)) * 16777619
+  h = (h ^ (if e.dynamic { 1 } else { 0 })) * 16777619
+  h = (h ^ (if e.modeled { 1 } else { 0 })) * 16777619
+  h = (h ^ e.vars.length()) * 16777619
+  h = (h ^ e.candidates.length()) * 16777619
+  for c in e.target {
+    h = (h ^ c.to_int()) * 16777619
+  }
+  h
+}
+
+///|
+fn kind_code(k : EffectKind) -> Int {
+  match k {
+    Exec => 1
+    Read => 2
+    Write => 3
+    Delete => 4
+    Net => 5
+    Spawn => 6
+    Unknown => 7
+  }
+}
+
+///|
+/// The same fact: every field a caller could read, so nothing distinct is
+/// collapsed by accident.
+fn same_effect(a : Effect, b : Effect) -> Bool {
+  a.kind == b.kind &&
+  a.target == b.target &&
+  a.line == b.line &&
+  a.dynamic == b.dynamic &&
+  a.modeled == b.modeled &&
+  same_strings(a.vars, b.vars) &&
+  same_strings(a.candidates, b.candidates)
+}
+
+///|
+fn same_strings(a : Array[String], b : Array[String]) -> Bool {
+  if a.length() != b.length() {
+    return false
+  }
+  let mut i = 0
+  while i < a.length() {
+    if a[i] != b[i] {
+      return false
+    }
+    i += 1
+  }
+  true
+}
 
 ///|
 /// Resolve path-shaped targets through the directories the command line itself
@@ -361,31 +438,42 @@ fn Collector::push(
       self.vars.push(v)
     }
   }
+  let effect : Effect = {
+    kind,
+    target: resolved,
+    vars,
+    // The candidates are paths like the target, so they are anchored the same
+    // way: an unrooted target (`$HOME/x`) leaves them as written too.
+    candidates: if unrooted {
+      candidates
+    } else {
+      let out : Array[String] = []
+      for c in candidates {
+        out.push(self.resolve(c))
+      }
+      out
+    },
+    dynamic,
+    modeled,
+    line,
+  }
+  // The same fact twice is one fact: a loop body is walked once per word, so
+  // `for f in a b; do rm x; done` reaches here with `Delete x` on the same line
+  // twice, and a caller reading two identical lines learns nothing the first
+  // one did not say. Collapsing it here rather than at the end also keeps the
+  // duplicates from eating the effect budget. Two effects that differ in any
+  // way, including the line they came from, are both kept.
+  if self.seen(effect) {
+    return
+  }
   if self.items.length() >= max_effects() {
     self.dropped = self.dropped + 1
     self.uncertain = true
     // Roots still accumulate: they are cheap, deduplicated, and they are the
     // part a caller most often acts on.
   } else {
-    self.items.push({
-      kind,
-      target: resolved,
-      vars,
-      // The candidates are paths like the target, so they are anchored the same
-      // way: an unrooted target (`$HOME/x`) leaves them as written too.
-      candidates: if unrooted {
-        candidates
-      } else {
-        let out : Array[String] = []
-        for c in candidates {
-          out.push(self.resolve(c))
-        }
-        out
-      },
-      dynamic,
-      modeled,
-      line,
-    })
+    self.hashes.push(effect_hash(effect))
+    self.items.push(effect)
   }
   if dynamic &&
     (
