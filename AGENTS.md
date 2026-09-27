@@ -16,15 +16,30 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 ## 目录
 
 - `lib/` — 核心库（纯函数：不读文件系统、不起子进程、不发网络请求）
-  - `ast.mbt` 语法树；`word.mbt` word 分类；`lexer.mbt` 词法；`parser.mbt` 递归下降
-  - `subscript.mbt` 数组下标；`cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化
-  - `effects.mbt` 影响面提取（对外的核心答案）；`facts.mbt` 命令分类等事实
-  - `opts.mbt` 选项值语义表；`git.mbt` git 子命令实测表；`shell.mbt`/`bashism.mbt` 方言边界
-  - `bind.mbt` 命令自己写出来的变量值；`brace.mbt` 花括号展开；`fields.mbt` 分词
-  - `status.mbt` 解析状态与 Report
+  - 语法层：`lexer.mbt` 词法主体（token 化）；`lexer_parts.mbt` 词部件（引号、glob、反引号、转义）；
+    `lexer_expand.mbt` 展开与词形状（波浪号、`$`、算术、数字范围 glob）；`lexer_heredoc.mbt`
+    立即文档正文；`parser.mbt` 门面与序列；`parser_compound.mbt` 复合命令（if/for/case/函数）；
+    `parser_redirect.mbt` 重定向；`parser_simple.mbt` 简单命令与赋值
+  - 语法树与基础：`ast.mbt` 语法树；`word.mbt` word 分类与 `PathArg`；`subscript.mbt` 数组下标；
+    `cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化；`dialect.mbt` 两个方言
+  - 影响层：`effects.mbt` 效果模型与去重（对外的核心答案）；`walk.mbt` 走语法树；`classify.mbt`
+    命令分派；`archive.mbt` tar 与压缩器；`wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序
+    （find/sqlite3/make/容器/运行器/包管理器）；`facts.mbt` 程序分类表；`opts.mbt` 选项值语义表；
+    `git.mbt` git 子命令实测表；`bind.mbt` 命令自己写出来的变量值；`brace.mbt` 花括号展开；
+    `fields.mbt` 分词；`payload.mbt` 解释器的源码文本；`shell.mbt`/`bashism.mbt` 方言边界
+  - 共用与状态：`text.mbt` 文本与字节助手；`names.mbt` 名字判定；`options.mbt` 选项扫描助手；
+    `limits.mbt` 全部上限；`status.mbt` 解析状态与 Report；`stream.mbt` 流式分帧；
+    `input.mbt` 输入规范化；`extends.mbt` derive 方法的显式实现
 - `cmd/preshell/` — CLI：argv 或 stdin 进，JSON 出
+  - `main.mbt` 选项与流程；`usage.mbt` 用法文本与 `--spec` 契约；`stream_cli.mbt` 流式逐行应答；
+    `bench.mbt` 计时模式；`*_generated.mbt` 是生成物，不要手改
 - `tools/corpus/` — 与 `bash -n` 的差分证据生成器
 - `docs/example-policy.md` — 调用方怎么用这份 JSON（不是本工具的一部分）
+
+新函数该放哪：共用的小工具进 `text.mbt`/`names.mbt`/`options.mbt`；对一个程序的行为下断言进
+`facts.mbt`（分类表）或 `classify.mbt`（分派），有专用扫描的进 `tools.mbt`；上限进 `limits.mbt`；
+效果本身的字段与去重进 `effects.mbt`。拆分的目的是让「同一件事」只有一处定义：两份实现迟早
+给出两个答案，而两个答案就是对一个命令的含义有分歧。
 
 ## 不可退让的约束
 
