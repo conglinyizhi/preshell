@@ -409,20 +409,6 @@ fn Collector::scan_assign_part(
 }
 
 ///|
-/// Whether a dup target names a descriptor rather than a file: `2`, `1-`, `-`.
-fn is_fd_word(t : String) -> Bool {
-  if t == "-" {
-    return true
-  }
-  let trimmed = if t.has_suffix("-") {
-    t.unsafe_substring(start=0, end=t.length() - 1)
-  } else {
-    t
-  }
-  trimmed.length() > 0 && all_digits(trimmed)
-}
-
-///|
 fn Collector::redirect_effects(self : Collector, r : Redirect) -> Unit {
   let line = r.target.line
   // The target is a word like any other, so it carries the same facts: `>~/x`
