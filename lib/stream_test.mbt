@@ -136,21 +136,21 @@ test "the id goes in an envelope, never into the report" {
   inspect(s.contains("\"line\":7"), content="true")
   // No report keys: a caller must not be able to mistake this for an analysis.
   inspect(s.contains("status"), content="false")
-  inspect(s.contains("version"), content="false")
+  inspect(s.contains("impact"), content="false")
 
   let tagged = @lib.stream_error("nope", 7, Some(Json::number(3))).stringify()
   inspect(tagged.contains("\"id\":3"), content="true")
   inspect(tagged.contains("\"line\":7"), content="true")
 
-  let report = Json::object({ "version": Json::number(1) })
-  inspect(report.stringify(), content="{\"version\":1}")
+  let report = Json::object({ "status": Json::string("Complete") })
+  inspect(report.stringify(), content="{\"status\":\"Complete\"}")
   inspect(
     @lib.stream_report_json(report, None).stringify(),
-    content="{\"version\":1}",
+    content="{\"status\":\"Complete\"}",
   )
   inspect(
     @lib.stream_report_json(report, Some(Json::string("a"))).stringify(),
-    content="{\"id\":\"a\",\"report\":{\"version\":1}}",
+    content="{\"id\":\"a\",\"report\":{\"status\":\"Complete\"}}",
   )
 }
 
