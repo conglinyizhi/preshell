@@ -709,7 +709,7 @@ fn contract_json() -> Json {
         "pass --cwd=PATH (absolute): every relative path in the input is resolved against it and reported as an absolute path",
       ),
       "vars": Json::string(
-        "every effect carries vars, the names its own target reads; impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute it and $HOME/x resolves. Substitute only the reported names, because in a target that is not dynamic the $ is literal text. A name the command line itself set (x=dist; rm -rf $x, or a for list spelled out in the input) is resolved here and not reported, and a for body is walked once per word, so its effects repeat. ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N have no name a caller could look up. write_roots can contain a name too",
+        "every effect carries vars, the names its own target reads; impact.vars is the deduplicated union. The tool never reads the environment, so the name is what it hands over: substitute it and $HOME/x resolves. Substitute only the reported names, because in a target that is not dynamic the $ is literal text. A name the command line itself set (x=dist; rm -rf $x, or a for list spelled out in the input) is resolved here and not reported, and a for body is walked once per word while the same fact on the same line is reported once. ~ is HOME, ~+ is PWD, ~- is OLDPWD; ~user and ~N have no name a caller could look up. write_roots can contain a name too",
       ),
       "required": Json::string(
         "--cwd is required by this contract. Without it the tool uses its own current directory as the base and attaches a Note saying so, which also marks the impact uncertain",
