@@ -2026,24 +2026,9 @@ fn is_env_assign(t : String) -> Bool {
     Some(eq) =>
       eq > 0 &&
       !t.unsafe_substring(start=0, end=eq).contains("/") &&
-      is_name_text(t.unsafe_substring(start=0, end=eq))
+      is_valid_name(t.unsafe_substring(start=0, end=eq))
     None => false
   }
-}
-
-///|
-fn is_name_text(t : String) -> Bool {
-  if t.length() == 0 {
-    return false
-  }
-  let first = match t.get_char(0) {
-    Some(c) => c.is_ascii_alphabetic() || c == '_'
-    None => false
-  }
-  first &&
-  t
-  .to_string()
-  .all(fn(c) { c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '_' })
 }
 
 ///|

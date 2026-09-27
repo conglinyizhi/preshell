@@ -17,14 +17,6 @@ fn is_meta(c : Char) -> Bool {
 }
 
 ///|
-fn is_name_start(c : Char) -> Bool {
-  c.is_ascii_alphabetic() || c == '_'
-}
-
-///|
-fn is_name_char(c : Char) -> Bool {
-  is_name_start(c) || c.is_ascii_digit()
-}
 
 ///|
 pub(all) struct Lexer {

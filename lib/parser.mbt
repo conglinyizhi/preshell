@@ -1637,23 +1637,6 @@ fn Parser::count_heredoc(self : Parser) -> Unit {
 }
 
 ///|
-fn is_valid_name(s : String) -> Bool {
-  if s.length() == 0 {
-    return false
-  }
-  for i, c in s {
-    if i == 0 {
-      if !is_name_start(c) {
-        return false
-      }
-    } else if !is_name_char(c) {
-      return false
-    }
-  }
-  true
-}
-
-///|
 /// `NAME=value` and `NAME+=value` are assignments only at the head of a
 /// simple command; `echo a=1` is just two words.
 
@@ -1738,19 +1721,7 @@ fn is_named_fd(text : String) -> Bool {
   if text.length() < 3 || !text.has_prefix("{") || !text.has_suffix("}") {
     return false
   }
-  let name = text.unsafe_substring(start=1, end=text.length() - 1)
-  let mut i = 0
-  for c in name {
-    if i == 0 {
-      if !is_name_start(c) {
-        return false
-      }
-    } else if !is_name_char(c) {
-      return false
-    }
-    i += 1
-  }
-  i > 0
+  is_valid_name(text.unsafe_substring(start=1, end=text.length() - 1))
 }
 
 ///|
