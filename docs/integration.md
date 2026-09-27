@@ -313,7 +313,7 @@ stdin 没有这些问题：命令原样进去，原样分析。
 ### 直接用发布版（不想装工具链）
 
 ```bash
-TAG=v0.3.0
+TAG=v0.4.0
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell && sha256sum -c SHA256SUMS
 install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell
