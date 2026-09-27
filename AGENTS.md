@@ -133,6 +133,9 @@ Splitting" 与 subst.c 的 `list_string`（`word_split`，subst.c:12362），逐
   走 `drop_changed`——只留一个洞，不给集合，因为一轮的集合不是穷尽的
 - 名字缺失的一侧用空串代表「可能未设」：空值命不中路径，与未设在路径语义上等价
 - 上限 `max_values` / `max_candidates` 都是 8：超了就整个丢掉，宁可回到老答案，不报半截集合
+- 「写过、值不可命名」与「没写过」是两种状态：前者在表里存成空值集（`poison_value`），后者
+  是没条目。join 时任何一侧不可命名 → 整个名字不可命名；`candidates_for` 见到不可命名的
+  名字直接返回空列表。这就是 candidates「穷尽或缺席」的实现方式（issue #2）
 
 ### 花括号（`lib/brace.mbt`）
 
