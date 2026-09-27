@@ -441,6 +441,8 @@ pub(all) struct OptValue {
   /// a value that is its own word (`-o f.txt`) inherits the word's answer.
   unrooted : Bool
   vars : Array[String]
+  /// The reference this value was written as, when a value went into it.
+  origin : String?
 } derive(Debug, Eq)
 
 ///|
@@ -472,6 +474,7 @@ pub fn OptValue::to_path_arg(self : OptValue) -> PathArg {
     dynamic: self.dynamic,
     unrooted: self.unrooted,
     vars: self.vars,
+    origin: self.origin,
   }
 }
 
@@ -539,6 +542,7 @@ fn note_value(
           dynamic: arg.dynamic,
           unrooted: arg.unrooted,
           vars: arg.vars,
+          origin: arg.origin,
         })
       }
   }
@@ -559,6 +563,7 @@ pub fn value_arg(source : PathArg, text : String) -> PathArg {
     dynamic: source.dynamic,
     unrooted: value_head_unresolved(text, source.dynamic),
     vars: source.vars,
+    origin: source.origin,
   }
 }
 

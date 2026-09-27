@@ -46,7 +46,7 @@ test "words keep their holes" {
 test "quoted words are static" {
   let w = match first_cmd("echo \"a b\" 'c d'") {
     @lib.Cmd::Simple(s) => s.words[1]
-    _ => { parts: [], raw: "", line: 0, }
+    _ => { parts: [], raw: "", line: 0, origin: None, }
   }
   debug_inspect(w.static_text(), content="Some(\"a b\")")
 }

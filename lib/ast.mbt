@@ -21,6 +21,12 @@ pub(all) struct Word {
   parts : Array[WordPart]
   raw : String
   line : Int
+  /// The word as it was written, when a value the command line set was put in
+  /// its place: `x=/usr/bin/jq; $x -n 1` has `parts` spelling `/usr/bin/jq` (that
+  /// is what runs) and `origin` spelling `$x` (that is what the caller wrote, and
+  /// the only thing it can match this effect against by text). Set by the auditor
+  /// in bind.mbt; the parser leaves it None.
+  origin : String?
 } derive(Debug, Eq, ToJson)
 
 ///|

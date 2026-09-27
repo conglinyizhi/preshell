@@ -372,10 +372,11 @@ fn head_state(parts : Array[WordPart]) -> Bool? {
 
 ///|
 /// A command word in the position of a path: the text as written, whether it is
-/// a closed set, whether it can be anchored, and what the caller would have to
-/// substitute to finish it.
+/// a closed set, whether it can be anchored, what the caller would have to
+/// substitute to finish it, and the reference it was written as when a value the
+/// command line set went into it.
 ///
-/// The four travel together because they are all read off the same word. Deriving
+/// They travel together because they are all read off the same word. Deriving
 /// any of them from the rendered text afterwards would lose the difference
 /// between `${X}y` and `$Xy`, and between an expanding `~` and a quoted one.
 pub(all) struct PathArg {
@@ -385,6 +386,10 @@ pub(all) struct PathArg {
   /// The first segment is expanded at run time, so the base cannot be applied.
   unrooted : Bool
   vars : Array[String]
+  /// The reference the path was written as, when a value went into it: `$x`
+  /// for a target of `/usr/bin/jq` that came from `x=/usr/bin/jq; $x`. None
+  /// when the target is what the word says.
+  origin : String?
 } derive(Debug, Eq)
 
 ///|
@@ -394,6 +399,7 @@ pub fn PathArg::of(w : Word) -> PathArg {
     dynamic: w.has_hole() || w.has_glob(),
     unrooted: w.head_unresolved(),
     vars: w.vars(),
+    origin: w.origin,
   }
 }
 
@@ -406,6 +412,8 @@ pub fn PathArg::plus_suffix(self : PathArg, suffix : String) -> PathArg {
     dynamic: self.dynamic,
     unrooted: false,
     vars: self.vars,
+    // `f.txt` became `f.txt.gz`: still the word that was written.
+    origin: self.origin,
   }
 }
 
@@ -429,6 +437,12 @@ pub fn PathArg::in_dir(self : PathArg, dir : PathArg) -> PathArg {
     dynamic: dir.dynamic || self.dynamic,
     unrooted: dir.unrooted,
     vars,
+    // Whichever half was a reference: `cp -t $d f` wrote `$d`, and that is what
+    // a caller can find in the command text.
+    origin: match self.origin {
+      Some(o) => Some(o)
+      None => dir.origin
+    },
   }
 }
 
@@ -436,7 +450,7 @@ pub fn PathArg::in_dir(self : PathArg, dir : PathArg) -> PathArg {
 /// A path that did not come from a word: a literal the table knows, like tar's
 /// `-` or zsh's temporary file name.
 pub fn PathArg::lit(text : String, dynamic? : Bool = false) -> PathArg {
-  { text, dynamic, unrooted: false, vars: [], }
+  { text, dynamic, unrooted: false, vars: [], origin: None, }
 }
 
 ///|

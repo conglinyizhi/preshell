@@ -327,7 +327,20 @@ fn Word::substituted(
   // `raw` is what decides whether a word is a reserved word or `NAME=VALUE`, so
   // it is rebuilt only when the parts actually moved: for an untouched word the
   // spelling has to stay exactly as the caller wrote it.
-  { parts, raw: parts_text(parts), line: self.line, }
+  //
+  // `origin` is that spelling: the reference the value replaced. A word that was
+  // already substituted keeps the reference it had first (`y=$x; rm $y` reports
+  // `$y`, the thing in the command text), so a chain of assignments still points
+  // at something the caller can find.
+  {
+    parts,
+    raw: parts_text(parts),
+    line: self.line,
+    origin: match self.origin {
+      Some(o) => Some(o)
+      None => Some(parts_text(self.parts))
+    },
+  }
 }
 
 ///|

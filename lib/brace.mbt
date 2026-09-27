@@ -529,7 +529,7 @@ fn Word::as_hole(self : Word) -> Word {
   if parts.length() == 0 {
     parts.push(Glob(self.raw))
   }
-  { parts, raw: self.raw, line: self.line, }
+  { parts, raw: self.raw, line: self.line, origin: self.origin, }
 }
 
 ///|
@@ -565,7 +565,12 @@ fn Word::brace_words(self : Word, dialect : Dialect) -> Array[Word] {
     Words(lists) => {
       let out : Array[Word] = []
       for parts in lists {
-        out.push({ parts, raw: parts_text(parts), line: self.line, })
+        out.push({
+          parts,
+          raw: parts_text(parts),
+          line: self.line,
+          origin: None,
+        })
       }
       out
     }

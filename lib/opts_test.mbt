@@ -168,12 +168,22 @@ test "the -t destination joins the operand basename" {
   // target nobody can name yet.
   let scan = @lib.scan_args(@lib.opts_of("cp"), [
     @lib.PathArg::lit("-t"),
-    { text: "$D", dynamic: true, unrooted: true, vars: ["D"], },
+    { text: "$D", dynamic: true, unrooted: true, vars: ["D"], origin: None, },
     @lib.PathArg::lit("a.txt"),
   ])
   debug_inspect(
     scan.target_dir,
-    content="Some({ text: \"$D\", dynamic: true, unrooted: true, vars: [\"D\"] })",
+    content=(
+      #|Some(
+      #|  {
+      #|    text: "$D",
+      #|    dynamic: true,
+      #|    unrooted: true,
+      #|    vars: ["D"],
+      #|    origin: None,
+      #|  },
+      #|)
+    ),
   )
   // An empty -t value must not turn into the absolute path `/a.txt`.
   inspect(
@@ -222,7 +232,7 @@ test "tar's archive and directory values leave the operand side" {
   // a name nobody can write down yet.
   let scan = @lib.scan_args(@lib.opts_of("tar"), [
     @lib.PathArg::lit("-czf"),
-    { text: "$A", dynamic: true, unrooted: true, vars: ["A"], },
+    { text: "$A", dynamic: true, unrooted: true, vars: ["A"], origin: None, },
     @lib.PathArg::lit("dir"),
   ])
   debug_inspect(
@@ -236,6 +246,7 @@ test "tar's archive and directory values leave the operand side" {
       #|    dynamic: true,
       #|    unrooted: true,
       #|    vars: ["A"],
+      #|    origin: None,
       #|  },
       #|)
     ),

@@ -67,7 +67,12 @@ fn Collector::find_effects(self : Collector, s : SimpleCmd, line : Int) -> Unit 
         }
         if a == "{}" {
           // The placeholder is a hole: a real path, but not this text.
-          nested.push({ parts: [Glob("{}")], raw: "{}", line: words[j].line, })
+          nested.push({
+            parts: [Glob("{}")],
+            raw: "{}",
+            line: words[j].line,
+            origin: None,
+          })
         } else {
           nested.push(words[j])
         }

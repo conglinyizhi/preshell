@@ -25,7 +25,7 @@ fn range_nth(spec : String, dialect : Dialect, n : Int) -> String {
 /// What a word's braces do, as one line: `plain` for no expansion, `hole` for an
 /// expansion this tool refuses to spell out, and the words joined by `|`.
 fn brace_of(text : String, dialect : Dialect) -> String {
-  let w : Word = { parts: [Lit(text)], raw: text, line: 1, }
+  let w : Word = { parts: [Lit(text)], raw: text, line: 1, origin: None, }
   match w.braces(dialect) {
     Plain => "plain"
     Unmodelled => "hole"
@@ -110,7 +110,12 @@ fn brace_kind(w : Word, dialect : Dialect) -> String {
 test "brace: what is left alone" {
   // Escaped braces are one file with braces in its name, and by the time a word
   // is in parts the escape is gone, so the raw text decides.
-  let escaped : Word = { parts: [Lit("{a,b}")], raw: "\\{a,b\\}", line: 1, }
+  let escaped : Word = {
+    parts: [Lit("{a,b}")],
+    raw: "\\{a,b\\}",
+    line: 1,
+    origin: None,
+  }
   inspect(brace_kind(escaped, Bash), content="plain")
   // A brace glued to a parameter belongs to the expansion of that name
   // (`$x{a,b}` is `$xa` and `$xb` in bash), which this tool does not model.
@@ -118,6 +123,7 @@ test "brace: what is left alone" {
     parts: [Param("x"), Lit("{a,b}")],
     raw: "$x{a,b}",
     line: 1,
+    origin: None,
   }
   inspect(brace_kind(glued, Bash), content="plain")
   // A list longer than the report can carry becomes a hole, not a word list and

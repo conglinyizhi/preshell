@@ -390,7 +390,7 @@ fn Parser::parse_pipeline(self : Parser) -> Pipeline {
 
 ///|
 fn empty_word(line : Int) -> Word {
-  { parts: [], raw: "", line, }
+  { parts: [], raw: "", line, origin: None, }
 }
 
 ///|

@@ -145,3 +145,53 @@ test "a resolved value is no longer a name the caller has to look up" {
     content="y",
   )
 }
+
+///|
+/// The reference an effect was written as, when a value went into it:
+/// `Delete:$x` for a target of `/tmp/dist` that came from `x=dist`. Effects with
+/// nothing resolved into them are absent, which is what the caller reads as "the
+/// target is what the word says".
+fn origins_of(src : String) -> String {
+  let r = @lib.analyze(src)
+  let parts : Array[String] = []
+  for e in r.impact.effects {
+    match e.origin {
+      Some(o) => parts.push(kind_tag(e.kind) + ":" + o)
+      None => ()
+    }
+  }
+  parts.join(" ")
+}
+
+///|
+test "an effect that came from a value says which reference it was written as" {
+  // The command-name position is why this exists: `/usr/bin/jq` is nowhere in
+  // the command text, `$x` is.
+  inspect(origins_of("x=/usr/bin/jq; $x -n 1"), content="Exec:$x")
+  inspect(
+    origins_of("if c; then x=/usr/bin/jq; else x=/usr/bin/jq; fi; $x -n 1"),
+    content="Exec:$x",
+  )
+  inspect(origins_of("x=dist; rm -rf $x"), content="Delete:$x")
+  // The origin is the word as written, rendered the way a hole is rendered, so
+  // it matches the text a caller reads out of the command.
+  inspect(origins_of("x=dist; rm -rf \"$x\""), content="Delete:$x")
+  inspect(origins_of("x=dist; rm -rf pre$x"), content="Delete:pre$x")
+  // The nearest reference wins, so a chain of assignments still points at
+  // something in the command text.
+  inspect(origins_of("x=/a; y=$x; rm -rf $y"), content="Delete:$y")
+  // A derived path keeps the reference of the half that was one.
+  inspect(origins_of("d=/tmp/a; cp -t $d f"), content="Write:$d")
+}
+
+///|
+test "nothing resolved means no origin" {
+  inspect(origins_of("rm -rf dist"), content="")
+  // A name the tool did not resolve is already in `target`; there is nothing to
+  // map it back from.
+  inspect(origins_of("rm -rf $ENV"), content="")
+  inspect(origins_of("rm -rf $ENV/x"), content="")
+  // Held only as data (a here-document body, an arithmetic value): no path, no
+  // origin.
+  inspect(origins_of("x=1; echo $((x + 1))"), content="")
+}

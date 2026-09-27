@@ -465,7 +465,7 @@ fn Lexer::read_word(self : Lexer) -> Word {
     self.advance(1)
     parts.push(Lit(self.slice(start, self.pos)))
   }
-  { parts, raw: self.slice(start, self.pos), line, }
+  { parts, raw: self.slice(start, self.pos), line, origin: None, }
 }
 
 ///|

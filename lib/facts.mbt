@@ -17,6 +17,19 @@ fn command_name(s : SimpleCmd) -> String? {
 }
 
 ///|
+/// The reference the first of these words was written as, when a value the
+/// command line set went into it. This is what every effect that names a program
+/// carries as its `origin`: `x=/usr/bin/jq; $x -n 1` runs `/usr/bin/jq`, and `$x`
+/// is the only thing in the command text a caller can match that `Exec` against
+/// by text.
+fn words_origin(words : Array[Word]) -> String? {
+  match words {
+    [w, ..] => w.origin
+    _ => None
+  }
+}
+
+///|
 fn arg_texts(s : SimpleCmd) -> Array[String] {
   let out : Array[String] = []
   for w in s.words {

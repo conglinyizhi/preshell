@@ -27,6 +27,12 @@ pub(all) struct Effect {
   /// *possibilities*, not a list of things that happen: nothing here is a fact
   /// on its own, and `target` stays the hole it was.
   candidates : Array[String]
+  /// The reference the target was written as, when a value the command line set
+  /// went into it: `$x` for `/usr/bin/jq` in `x=/usr/bin/jq; $x -n 1`. Absent
+  /// when the target is what the word says, which is why this is an `Option` and
+  /// not an empty string: the caller looks it up in the command text by exact
+  /// match, and an empty one would match every literal path.
+  origin : String?
   /// True when the target is not a closed set: it has a hole or a glob.
   dynamic : Bool
   /// Only meaningful for `Exec`. False means: this program ran, and what it
@@ -418,6 +424,7 @@ fn Collector::push(
   unrooted? : Bool = false,
   vars? : Array[String] = [],
   candidates? : Array[String] = [],
+  origin? : String? = None,
 ) -> Unit {
   let resolved = match kind {
     Read | Write | Delete =>
@@ -456,6 +463,7 @@ fn Collector::push(
     dynamic,
     modeled,
     line,
+    origin,
   }
   // The same fact twice is one fact: a loop body is walked once per word, so
   // `for f in a b; do rm x; done` reaches here with `Delete x` on the same line
@@ -753,6 +761,7 @@ fn Collector::push_path(
     unrooted=arg.unrooted,
     vars=arg.vars,
     candidates=self.candidates_for(arg),
+    origin=arg.origin,
   )
 }
 
@@ -1070,8 +1079,7 @@ fn Collector::classify(
   n : String,
   s : SimpleCmd,
   line : Int,
-) -> Unit {
-  // A wrapper runs the program it is handed, so that program is the real
+) -> Unit { // A wrapper runs the program it is handed, so that program is the real
   // subject of the report: `env rm -rf x` deletes x, and reporting only "env
   // ran, unmodelled" says nothing about it.
   match wrapper_target(n, s.words) {
@@ -1178,7 +1186,7 @@ fn Collector::classify(
       recurses ||
       n == "cd"
     )
-  self.push(Exec, n, false, line, modeled~)
+  self.push(Exec, n, false, line, modeled~, origin=words_origin(s.words))
   if !modeled {
     // Nothing else can be said about it, and saying nothing would read as
     // "touches nothing".
@@ -1815,6 +1823,7 @@ fn Collector::compressor_effects(
             dynamic: it.dynamic || any_dynamic(suffixes),
             unrooted: it.unrooted,
             vars: it.vars,
+            origin: it.origin,
           }
           self.push_path(Write, product, line)
           if removes_source {
@@ -1839,6 +1848,7 @@ fn Collector::compressor_effects(
             dynamic: it.dynamic || sd,
             unrooted: it.unrooted,
             vars: it.vars,
+            origin: it.origin,
           },
           line,
         )
@@ -2113,7 +2123,7 @@ fn Collector::wrapper_effects(
   line : Int,
 ) -> Unit {
   // The wrapper itself runs and touches nothing of its own.
-  self.push(Exec, n, false, line)
+  self.push(Exec, n, false, line, origin=words_origin(s.words))
   match target {
     Wrapped::Nothing => ()
     Wrapped::FromString =>
@@ -2142,7 +2152,14 @@ fn Collector::wrapper_effects(
           // every occurrence of a string in the command. Those words are
           // placeholders, not paths: following `xargs -I{} rm {}` reported
           // `{}` as a file to delete.
-          self.push(Exec, name, false, line, modeled=false)
+          self.push(
+            Exec,
+            name,
+            false,
+            line,
+            modeled=false,
+            origin=words_origin(inner),
+          )
           self.push(
             Unknown,
             "xargs: the replaced arguments come from its input",
@@ -2153,7 +2170,14 @@ fn Collector::wrapper_effects(
         }
       }
       if !wrapper_runs_shell_words(n) && (name == "cd" || name == "eval") {
-        self.push(Exec, name, false, line, modeled=false)
+        self.push(
+          Exec,
+          name,
+          false,
+          line,
+          modeled=false,
+          origin=words_origin(inner),
+        )
       } else {
         let cmd : SimpleCmd = { assigns: [], words: inner, redirects: [], }
         self.depth += 1

@@ -243,7 +243,12 @@ fn Collector::finish(
   parts : Array[WordPart],
   w : Word,
 ) -> Word {
-  let built : Word = { parts, raw: parts_text(parts), line: w.line, }
+  let built : Word = {
+    parts,
+    raw: parts_text(parts),
+    line: w.line,
+    origin: None,
+  }
   built.resolved_by(self)
 }
 
