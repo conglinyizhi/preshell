@@ -773,10 +773,16 @@ fn Collector::candidates_for(self : Collector, arg : PathArg) -> Array[String] {
   for name in arg.vars {
     let values = match lookup_values(self.binds, name) {
       Some(vs) => vs
+      // Nothing is known about it (unset, or the caller's environment). That
+      // does not make the list partial: the enumeration is over the names the
+      // report can speak about, and this is not one of them.
       None => continue
     }
     if values.length() < 2 {
-      continue
+      // Written, but with nothing this tool can list (or with a single value it
+      // refused to put in). A list built over it would miss the outcomes this
+      // tool cannot name, and the promise is exhaustive or absent.
+      return []
     }
     fanned = true
     let out : Array[String] = []
@@ -996,7 +1002,8 @@ fn Collector::walk_simple(self : Collector, s : SimpleCmd) -> Unit {
       }
     OtherValue =>
       for a in s.assigns {
-        self.drop_value(a.name)
+        // `let x=a` and `declare -i x=1+2` leave a value this tool cannot name.
+        self.poison_value(a.name)
       }
     NoVariable =>
       if s.words.length() == 0 {

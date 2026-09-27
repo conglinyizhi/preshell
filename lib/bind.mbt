@@ -106,14 +106,17 @@ fn single_value(
 }
 
 ///|
+/// Record what `name` may hold. An **empty** list means "the command line wrote
+/// this name, with something this tool cannot name" (`x=$HOME/y`, `x=$(date)`,
+/// `read x`), which is not the same as never having touched it: an untouched
+/// name may be unset, while this one holds something. `candidates` depends on
+/// that difference — see `poison_value`.
 fn Collector::bind_set(
   self : Collector,
   name : String,
   values : Array[String],
 ) -> Unit {
-  if name.length() == 0 ||
-    values.length() == 0 ||
-    values.length() > max_values() {
+  if name.length() == 0 || values.length() > max_values() {
     return
   }
   let mut i = 0
@@ -139,9 +142,19 @@ fn Collector::bind_value(
 }
 
 ///|
-/// Forget what `name` held. Everything that can write a parameter goes through
-/// here when the new value is not something this tool can name: an unknown
-/// value is a hole, a stale one would be a lie.
+/// Note that `name` now holds something this tool cannot name. The name stays in
+/// the table with no values rather than disappearing, because "written, value
+/// unknown" and "never written" are different facts: the first one rules out the
+/// candidate list (`the value is one of these` would be a lie), the second one
+/// does not.
+fn Collector::poison_value(self : Collector, name : String) -> Unit {
+  self.bind_set(name, [])
+}
+
+///|
+/// Forget that `name` was ever written: this is what `unset` does. What the name
+/// holds is then up to the caller's environment, which is a different state from
+/// `poison_value`.
 fn Collector::drop_value(self : Collector, name : String) -> Unit {
   let kept : Array[(String, Array[String])] = []
   for pair in self.binds {
@@ -229,7 +242,15 @@ fn Collector::join_with(
     let (name, values) = pair
     let out = copy_strings(values)
     match lookup_values(other, name) {
-      Some(more) => push_unique(out, more)
+      // Either side holding something unnameable makes the whole name
+      // unnameable: `if c; then x=/a; else x=$HOME/s; fi` leaves no set that
+      // could be called exhaustive.
+      Some(more) =>
+        if values.length() == 0 || more.length() == 0 {
+          out.clear()
+        } else {
+          push_unique(out, more)
+        }
       None => push_unique(out, [""])
     }
     if out.length() <= max_values() {
@@ -265,7 +286,9 @@ fn Collector::drop_changed(
     let (name, values) = pair
     match lookup_values(self.binds, name) {
       Some(now) => if sets_equal(now, values) { kept.push(pair) }
-      None => ()
+      // It holds something now, and which something is not modelled: poison it
+      // rather than dropping it, so a candidate list built over it is ruled out.
+      None => kept.push((name, []))
     }
   }
   self.binds = kept
@@ -474,12 +497,12 @@ fn part_texts(
 /// so they leave the name without a value this tool can state.
 fn Collector::note_assign(self : Collector, a : Assign) -> Unit {
   if a.array || a.append || a.index.length() > 0 {
-    self.drop_value(a.name)
+    self.poison_value(a.name)
     return
   }
   let values = value_texts(a.value, self.binds)
   if values.length() == 0 {
-    self.drop_value(a.name)
+    self.poison_value(a.name)
   } else {
     self.bind_set(a.name, values)
   }
@@ -610,7 +633,7 @@ fn Collector::note_command_writes(self : Collector, s : SimpleCmd) -> Unit {
         all.push(n)
       }
       for n in all {
-        self.drop_value(n)
+        self.poison_value(n)
       }
     }
     AfterFlag => {
@@ -619,7 +642,7 @@ fn Collector::note_command_writes(self : Collector, s : SimpleCmd) -> Unit {
         let t = s.words[i].literal_text()
         if t == "-v" && i + 1 < s.words.length() {
           for n in written_names([s.words[i + 1].literal_text()]) {
-            self.drop_value(n)
+            self.poison_value(n)
           }
           i += 2
         } else {
@@ -647,7 +670,14 @@ fn Collector::note_command_writes(self : Collector, s : SimpleCmd) -> Unit {
         i += 1
       }
       for n in written_names(args) {
-        self.drop_value(n)
+        // `unset x` really does leave the name unset; the readers in the same
+        // group (`read`, `getopts`, `mapfile`) leave it holding something this
+        // tool cannot name.
+        if name == "unset" {
+          self.drop_value(n)
+        } else {
+          self.poison_value(n)
+        }
       }
     }
   }

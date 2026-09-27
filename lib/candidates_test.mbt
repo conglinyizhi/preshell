@@ -129,3 +129,50 @@ test "a set that grew past the cap says nothing rather than something partial" {
   inspect(candidate_list(many), content="")
   inspect(touched(many), content="D:$x$y$z U:$x$y$z")
 }
+
+///|
+/// The list is exhaustive or absent, which the table below the section in
+/// `docs/preshell.md` promises and this file has to keep. A branch whose value
+/// **cannot be named at all** (`$HOME/secret`, `$(date)`, a variable the caller
+/// supplies) is not a smaller list, it is no list: enumerating the branches that
+/// happen to be nameable would say "the value is one of these" about a name that
+/// holds something else (issue #2).
+test "an outcome that cannot be named takes the whole list away" {
+  inspect(
+    candidate_list("if c; then x=/a; else x=$HOME/secret; fi; cat $x"),
+    content="",
+  )
+  inspect(
+    candidate_list("if c; then x=/a; else x=$(date); fi; cat $x"),
+    content="",
+  )
+  inspect(
+    candidate_list("if c; then x=/a; else x=$UNSET; fi; cat $x"),
+    content="",
+  )
+  // The target stays the hole it always was, so the caller still sees what it
+  // can finish itself.
+  inspect(
+    touched("if c; then x=/a; else x=$HOME/secret; fi; cat $x"),
+    content="U:${x} R:$x U:$x",
+  )
+  // A `while` body is the same story from a different direction: which value it
+  // left is not modelled, so nothing is claimed about it.
+  inspect(candidate_list("while c; do x=/a; done; cat $x"), content="")
+  // A name a builtin wrote (`read x`) is unnameable too, even when a branch of
+  // the command line names it.
+  inspect(
+    candidate_list("x=/a; read x; if c; then x=/b; fi; cat $x"),
+    content="",
+  )
+  // What is nameable on every path still lists, and an unset branch adds
+  // nothing: it names no path, so the list is still exhaustive.
+  inspect(
+    candidate_list("if c; then x=/a; else x=/b; fi; cat $x"),
+    content="Read:$x[/a|/b] Unknown:$x[/a|/b]",
+  )
+  inspect(
+    candidate_list("if c; then x=/a; fi; cat $x"),
+    content="Read:$x[/a] Unknown:$x[/a]",
+  )
+}
