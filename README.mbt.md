@@ -96,6 +96,16 @@ the name is what it hands over — substitute `HOME` and `$HOME/x` resolves. A `
 is `HOME`, `~+` is `PWD`, `~-` is `OLDPWD`; `~user` and `~N` are holes without a
 name, because no environment can supply them.
 
+Values the command line itself settles are resolved instead of handed over, so
+they are not in `vars` at all: `x=dist; rm -rf $x` reports `/a/b/dist`. That
+covers a plain assignment, a `for` list the input spells out, and the builtins
+that write a parameter (`export`, `read`, `unset`, `printf -v`, ...). A value with
+a blank in it splits where the shell splits it — `x="a b"; rm $x` is two paths
+and `rm "$x"` is one path whose name has a space in it — and a brace list expands,
+so `rm -rf {a,b}` is two paths rather than one file called `{a,b}`. What is not
+settled stays a hole: a glob, a command substitution, an unset name, or a value
+that only holds on one path through the command line.
+
 Two kinds of path stay as written, because an absolute path genuinely does not
 exist for them: a path after a `cd` whose destination cannot be modelled, and a
 path whose first segment is expanded at run time (`$HOME/x`, `~/x`). A
@@ -150,10 +160,22 @@ them will misread the output:
 
 - `dynamic` on an effect means the target is not a closed set (it has a hole or
   a glob). `rm -rf $DIR/*` cannot be reported as one file.
+- `candidates` on an effect lists the paths a hole could be, when the command
+  line left a name with more than one possible value: `if c; then x=a; else
+  x=b; fi; rm $x` deletes one of two paths and says which two. These are
+  **possibilities, not facts** — the target stays the hole it was, `dynamic`
+  stays true, and the list is exhaustive or absent rather than truncated. A
+  caller deciding on facts keeps reading `target` and `vars`.
 - `uncertain` on the impact means the same for the report as a whole, and it is
   forced when the parse was incomplete. **An incomplete trace is not a smaller
   answer, it is a different one**: reading "no writes reported" as "writes
   nothing" is the mistake this field exists to prevent.
+
+A fact found twice is reported once: a loop body walked once per word says the
+same thing each time, and only the first of those is kept. Two effects that
+differ in any way, including the line they came from, are both kept, so the same
+`rm x` written on two lines is still two effects, and the count of how many
+times a duplicate ran is deliberately not in the report.
 
 `cwd` is the directory that relative paths in the report are relative to, when
 the command line itself changed into one (`cd /tmp && rm x` reports `/tmp/x`).
@@ -221,8 +243,8 @@ Measured against the two dialect corpora, as of the latest run:
 
 | corpus | files | parsed | our gaps | we are too permissive | crashes |
 |---|---|---|---|---|---|
-| bash 5.3 syntax tests | 451 | 434 | 0 | 3 | 0 |
-| zsh 5.9.2 Completion and Functions | 1244 | 1237 to 1239 | 0 | 5 to 7 | 0 |
+| bash 5.3 syntax tests | 451 | 434 | 0 | 2 | 0 |
+| zsh 5.9.2 Completion and Functions | 1308 | 1301 | 0 | 5 | 0 |
 
 The zsh row is a range because `zsh -n` is not a pure syntax checker: in a sandbox
 that blocks the temporary file process substitution needs, it also aborts on a
@@ -303,7 +325,7 @@ The differential corpus (bash 5.3's `tests/*.sub`) ships with the repository so
 that CI and local runs use the same input; provenance and licensing are in
 `tools/corpus/bash-tests/README.md`. `tools/corpus/find_scripts.sh` collects real
 scripts from the host for a second, noisier corpus, and `zsh_corpus.sh` collects
-the zsh tree's own `Completion/` and `Functions/` (1244 files) for the zsh side.
+the zsh tree's own `Completion/` and `Functions/` (1308 files) for the zsh side.
 
 Two numbers to watch, because both were zero and should stay there: crashes, and
 inputs where bash rejects a command this tool accepts.
@@ -363,6 +385,13 @@ These are choices, not bugs waiting to be found:
   `modeled: false`, which forces `uncertain`; the effect list below it is a
   lower bound. That is what keeps this from being an unbounded enumeration
   problem.
+- **Some malformed input parses anyway.** Four shapes both shells refuse are
+  accepted here: a `${ ... }` body that is not a valid expansion
+  (`echo ${ x}`), the inside of an array assignment
+  (`arr=(1 arr=(1 2 3)`), junk between a case branch's `;;` and `esac`, and a
+  malformed `[[ ... ]]` condition (above). `tools/fuzz/differential.js`
+  measures exactly this direction; the status is `Complete`, so read the parse
+  as a lower bound on validity rather than a guarantee.
 - **The oracle is not a pure syntax checker.** `zsh -n` evaluates part of what
   it reads (division by zero, file descriptor numbers, process substitution),
   and the corpus files are function bodies that it reads as top-level scripts.
