@@ -184,6 +184,12 @@ zsh 语料（Completion + Functions 共 1308 个文件）：**1301 通过 / 0 �
   曾报成 `plyvel`）。**值就是程序的那种选项故意不在表里**（`cargo --bin`、`uv --module`）：
   搜索停在那词上本来就是答案。`docker`/`podman` 的 `run`/`create` 也报 `Spawn`，目标是
   镜像名（`docker run --rm node -e 'x'` 起的是 node）
+- **载荷只搬运，不解释**：`--payload` / `--payload-max=N` 打开后，解释器的 `Exec`/`Spawn`
+  带一个 `payload`（`source` 是 `flag` 或 `heredoc`，`text` 是照写的文本，`bytes` 是全文
+  长度，超上限时 `truncated` 为真）。它和 `target`、`origin` 同一类事实：命令行上写着什么，
+  由 `lib/payload.mbt` 负责搬运。**永远不去读它的内容**（找路径是调用方的事），默认关闭
+  （here-doc 正文可以上 KB，报告不能自己长大）。表里只放「参数就是它自己源码」的程序，
+  `awk`/`sed` 故意不在（它们收的是自己的小语言）
 - **`[[ ... ]]` 整块不透明**：只找到配对的 `]]`，条件文本留作方言判断，表达式本身
   不解析（里面的命令替换照常审计）。所以语法畸形的条件会读成 Complete，而实现
   条件语法本体不划算
