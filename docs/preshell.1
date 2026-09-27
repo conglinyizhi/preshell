@@ -138,7 +138,7 @@ The effect keeps its hole (\fBtarget: \"$x\"\fR, \fBdynamic: true\fR, \fBvars: [
 .IP "\(bu" 4
 Candidates are possibilities, not facts. Nothing in the list is claimed to happen: \fBx\fR holds one of them, and two entries do not mean two deletions. A caller deciding on facts keeps using \fBtarget\fR plus \fBvars\fR.
 .IP "\(bu" 4
-The list is exhaustive or absent. A \fBwhile\fR body may run any number of times, so a value it sets is an unknown rather than a set; a set that grew past eight paths is left out rather than truncated; and a possibility that names no path (an unset name, an empty value) is not listed at all.
+The list is exhaustive or absent: it never shows a part of what could happen. A \fBwhile\fR body may run any number of times, a name a builtin wrote (\fBread x\fR) or a branch set to something the tool cannot name (\fBx=$HOME/secret\fR, \fBx=$(date)\fR) holds an unnameable value, so a set that would have to include it is left out whole rather than cut down. A set that grew past eight paths is left out too, rather than truncated, and a possibility that names no path (an unset name, an empty value) is not listed at all.
 .IP "\(bu" 4
 What is certain stays certain: \fBx=a; rm $x\fR is one path with no candidates, and \fBif c; then x=a; else x=a; fi; rm $x\fR is the same, because both ways out set the same value.
 .IP "\(bu" 4

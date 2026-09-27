@@ -101,7 +101,7 @@ and the effect says which ones.
 
 - The effect keeps its hole (`target: "$x"`, `dynamic: true`, `vars: ["x"]`) and gains `candidates: ["/a/b/a", "/a/b/b"]`.
 - Candidates are possibilities, not facts. Nothing in the list is claimed to happen: `x` holds one of them, and two entries do not mean two deletions. A caller deciding on facts keeps using `target` plus `vars`.
-- The list is exhaustive or absent. A `while` body may run any number of times, so a value it sets is an unknown rather than a set; a set that grew past eight paths is left out rather than truncated; and a possibility that names no path (an unset name, an empty value) is not listed at all.
+- The list is exhaustive or absent: it never shows a part of what could happen. A `while` body may run any number of times, a name a builtin wrote (`read x`) or a branch set to something the tool cannot name (`x=$HOME/secret`, `x=$(date)`) holds an unnameable value, so a set that would have to include it is left out whole rather than cut down. A set that grew past eight paths is left out too, rather than truncated, and a possibility that names no path (an unset name, an empty value) is not listed at all.
 - What is certain stays certain: `x=a; rm $x` is one path with no candidates, and `if c; then x=a; else x=a; fi; rm $x` is the same, because both ways out set the same value.
 - A loop over a spelled-out list contributes the values its body left, and a condition that may not run contributes the value from before it: `x=old; if c; then x=new; fi; rm $x` reports `old` and `new`.
 
