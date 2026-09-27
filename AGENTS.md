@@ -23,10 +23,12 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   - 语法树与基础：`ast.mbt` 语法树；`word.mbt` word 分类与 `PathArg`；`subscript.mbt` 数组下标；
     `cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化；`dialect.mbt` 两个方言
   - 影响层：`effects.mbt` 效果模型与去重（对外的核心答案）；`walk.mbt` 走语法树；`classify.mbt`
-    命令分派；`archive.mbt` tar 与压缩器；`wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序
-    （find/sqlite3/make/容器/运行器/包管理器）；`facts.mbt` 程序分类表；`opts.mbt` 选项值语义表；
-    `git.mbt` git 子命令实测表；`bind.mbt` 命令自己写出来的变量值；`brace.mbt` 花括号展开；
-    `fields.mbt` 分词；`payload.mbt` 解释器的源码文本；`shell.mbt`/`bashism.mbt` 方言边界
+    命令分派（只分派，不带语义）；`programs.mbt` 每个命令族的语义；`archive.mbt` tar 与压缩器；
+    `wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序（find/sqlite3/make/容器/运行器/包管理器）；
+    `facts.mbt` 程序分类表；`opts.mbt` 选项值语义表；`git.mbt` git 子命令实测表
+  - 变量值：`bind.mbt` 值的表与作用域；`bind_subst.mbt` 把值代回词里；`bind_writes.mbt` 谁写了
+    什么名字；`brace.mbt` 花括号展开；`fields.mbt` 分词；`payload.mbt` 解释器的源码文本；
+    `shell.mbt`/`bashism.mbt` 方言边界
   - 共用与状态：`text.mbt` 文本与字节助手；`names.mbt` 名字判定；`options.mbt` 选项扫描助手；
     `limits.mbt` 全部上限；`status.mbt` 解析状态与 Report；`stream.mbt` 流式分帧；
     `input.mbt` 输入规范化；`extends.mbt` derive 方法的显式实现
@@ -36,9 +38,9 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 - `tools/corpus/` — 与 `bash -n` 的差分证据生成器
 - `docs/example-policy.md` — 调用方怎么用这份 JSON（不是本工具的一部分）
 
-新函数该放哪：共用的小工具进 `text.mbt`/`names.mbt`/`options.mbt`；对一个程序的行为下断言进
-`facts.mbt`（分类表）或 `classify.mbt`（分派），有专用扫描的进 `tools.mbt`；上限进 `limits.mbt`；
-效果本身的字段与去重进 `effects.mbt`。拆分的目的是让「同一件事」只有一处定义：两份实现迟早
+新函数该放哪：共用的小工具进 `text.mbt`/`names.mbt`/`options.mbt`；对一个程序的行为下断言——
+分类表进 `facts.mbt`，某个命令族的语义进 `programs.mbt`，只有它自己一套扫描的进 `tools.mbt`，
+`classify.mbt` 里只加分派那一行；上限进 `limits.mbt`；效果本身的字段与去重进 `effects.mbt`。拆分的目的是让「同一件事」只有一处定义：两份实现迟早
 给出两个答案，而两个答案就是对一个命令的含义有分歧。
 
 ## 不可退让的约束
