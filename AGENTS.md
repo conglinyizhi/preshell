@@ -97,6 +97,9 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   `declare -i x=1+2` 的值是 3），`let` 写的是算术结果（`let x=a` 得 0）而 `alias` 根本不写
   变量
 - 命令前缀赋值不出该命令（实测 `x=old; x=new echo "$x"` 打 `old`），所以那种情况既不记也不丢
+- 代入过的效果带 `origin`：原引用怎么写的（`Word.origin` 由 `Word::substituted` 设，
+  `PathArg` 与 `OptValue` 一路带走，`Effect.origin` 输出）。理由见 issue #3：命令名位置
+  解出程序名之后，文本里根本没有那个串，调用方接不上这一支
 
 ### 分词（`lib/fields.mbt`）
 
