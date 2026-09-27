@@ -132,7 +132,6 @@ See [`docs/integration.md`](docs/integration.md) for the caller contract.
 
 ```json
 {
-  "version": 1,
   "status": "Complete",
   "impact": {
     "effects": [
