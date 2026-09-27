@@ -107,6 +107,12 @@ pub extend OptValue with Eq::{equal}
 pub extend OptValue with Eq::{not_equal}
 
 ///|
+pub extend Payload with Eq::{equal}
+
+///|
+pub extend Payload with Eq::{not_equal}
+
+///|
 pub extend ParseStatus with Eq::{equal}
 
 ///|
@@ -233,6 +239,9 @@ pub extend OptVal with @debug.Debug::{to_repr}
 pub extend OptValue with @debug.Debug::{to_repr}
 
 ///|
+pub extend Payload with @debug.Debug::{to_repr}
+
+///|
 pub extend ParseStatus with @debug.Debug::{to_repr}
 
 ///|
@@ -306,6 +315,9 @@ pub extend ParseStatus with ToJson::{to_json}
 
 ///|
 pub extend Pipeline with ToJson::{to_json}
+
+///|
+pub extend Payload with ToJson::{to_json}
 
 ///|
 pub extend Redirect with ToJson::{to_json}

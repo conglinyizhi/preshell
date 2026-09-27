@@ -64,8 +64,12 @@ pub(all) struct Report {
 /// Analyse a command given as raw bytes: normalise the input the way the shell
 /// does, then report. This is what a subprocess caller should use, since it is
 /// the only path that sees the bytes as sent.
-pub fn analyze_bytes(bytes : Bytes, base_cwd? : String? = None) -> Report {
-  analyze_bytes_dialect(bytes, Bash, base_cwd~)
+pub fn analyze_bytes(
+  bytes : Bytes,
+  base_cwd? : String? = None,
+  payload_max? : Int? = None,
+) -> Report {
+  analyze_bytes_dialect(bytes, Bash, base_cwd~, payload_max~)
 }
 
 ///|
@@ -75,12 +79,17 @@ pub fn analyze_bytes_dialect(
   bytes : Bytes,
   dialect : Dialect,
   base_cwd? : String? = None,
+  payload_max? : Int? = None,
 ) -> Report {
   let (text, decode_notes) = decode_command(bytes)
   // Replaced bytes are a caveat, not a parse failure: the analysis ran.
   // The declared-shell note is not added here: `analyze_dialect` already
   // carries it, and adding it on both paths printed it twice.
-  add_notes(analyze_dialect(text, dialect, base_cwd~), decode_notes, kind=Note)
+  add_notes(
+    analyze_dialect(text, dialect, base_cwd~, payload_max~),
+    decode_notes,
+    kind=Note,
+  )
 }
 
 ///|
@@ -172,8 +181,12 @@ fn max_issues() -> Int {
 /// `Unsupported` and `Invalid` both force `impact.uncertain`, because an
 /// incomplete trace is not a smaller answer, it is a different one: a caller
 /// that ignores this will read "no writes reported" as "writes nothing".
-pub fn analyze(src : String, base_cwd? : String? = None) -> Report {
-  analyze_dialect(src, Bash, base_cwd~)
+pub fn analyze(
+  src : String,
+  base_cwd? : String? = None,
+  payload_max? : Int? = None,
+) -> Report {
+  analyze_dialect(src, Bash, base_cwd~, payload_max~)
 }
 
 ///|
@@ -182,12 +195,13 @@ pub fn analyze_dialect(
   src : String,
   dialect : Dialect,
   base_cwd? : String? = None,
+  payload_max? : Int? = None,
 ) -> Report {
   // argv can carry a NUL too, so this path strips it as well. The bytes path
   // goes through decode_command first and lands here with it already gone.
   let (clean, nul_notes) = strip_nuls(src)
   let r = add_notes(
-    analyze_clean(clean, dialect, base_cwd~),
+    analyze_clean(clean, dialect, base_cwd~, payload_max~),
     nul_notes,
     kind=Note,
   )
@@ -267,22 +281,35 @@ pub fn probe_dialect(src : String) -> Dialect {
 /// When no grammar parses the input, the first result — the primary's — comes
 /// back unchanged, `Unsupported` included. A probe that found nothing is still
 /// a failure.
-pub fn analyze_probe(src : String, base_cwd? : String? = None) -> Report {
+pub fn analyze_probe(
+  src : String,
+  base_cwd? : String? = None,
+  payload_max? : Int? = None,
+) -> Report {
   let primary = probe_primary(src)
   let used = probe_dialect(src)
-  probe_caveat(analyze_dialect(src, used, base_cwd~), src, primary, used)
+  probe_caveat(
+    analyze_dialect(src, used, base_cwd~, payload_max~),
+    src,
+    primary,
+    used,
+  )
 }
 
 ///|
 /// Same as `analyze_probe`, from raw bytes. This is the path a subprocess
 /// caller uses. The dialect is resolved on the decoded text, but the analysis
 /// still runs over the bytes, so the decode caveats survive into the report.
-pub fn analyze_bytes_probe(bytes : Bytes, base_cwd? : String? = None) -> Report {
+pub fn analyze_bytes_probe(
+  bytes : Bytes,
+  base_cwd? : String? = None,
+  payload_max? : Int? = None,
+) -> Report {
   let (text, _) = decode_command(bytes)
   let primary = probe_primary(text)
   let used = probe_dialect(text)
   probe_caveat(
-    analyze_bytes_dialect(bytes, used, base_cwd~),
+    analyze_bytes_dialect(bytes, used, base_cwd~, payload_max~),
     text,
     primary,
     used,
@@ -406,6 +433,7 @@ fn analyze_clean(
   src : String,
   dialect : Dialect,
   base_cwd? : String? = None,
+  payload_max? : Int? = None,
 ) -> Report {
   let (seq, errors, lines) = parse_located_dialect(src, dialect)
   let issues : Array[Issue] = []
@@ -436,7 +464,7 @@ fn analyze_clean(
   } else {
     Complete
   }
-  let base = impact(seq, dialect~, base_cwd~)
+  let base = impact(seq, dialect~, base_cwd~, payload_max~)
   // A POSIX script that uses bash-only syntax gets its analysis called out: the
   // parse succeeded, so the status still says so, but the note and the
   // uncertainty say the answer is not what that shell would do.

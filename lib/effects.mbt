@@ -42,6 +42,11 @@ pub(all) struct Effect {
   /// point.
   modeled : Bool
   line : Int
+  /// The text this program reads as its own source, when the command line
+  /// carries it and the caller asked for payloads (`--payload`). Absent
+  /// otherwise, including for every program that does not interpret its
+  /// arguments. See payload.mbt.
+  payload : Payload?
 } derive(Debug, Eq, ToJson)
 
 ///|
@@ -300,6 +305,9 @@ struct Collector {
   /// name may hold, and the scopes that decide how far that reaches. See
   /// bind.mbt.
   mut binds : Array[(String, Array[String])]
+  /// How many bytes of a program's own source text to carry, or None when the
+  /// caller did not ask for payloads at all. See payload.mbt.
+  payload_max : Int?
 }
 
 ///|
@@ -307,6 +315,7 @@ pub fn impact(
   seq : Seq,
   dialect? : Dialect = Bash,
   base_cwd? : String? = None,
+  payload_max? : Int? = None,
 ) -> Impact {
   let c : Collector = {
     items: [],
@@ -318,6 +327,7 @@ pub fn impact(
     dialect,
     vars: [],
     binds: [],
+    payload_max,
     // The base is where relative paths are resolved from. `--cwd` supplies it
     // for a command line that does not `cd` itself; it is a starting point, not
     // a move, so it never shows up as an effect.
@@ -366,6 +376,16 @@ fn effect_hash(e : Effect) -> Int {
   for c in e.target {
     h = (h ^ c.to_int()) * 16777619
   }
+  // Two commands on one line can name the same program and run different
+  // source: `python3 -c a; python3 -c b`. Without payloads they are the same
+  // fact and collapse (that is what dedupe is for); with them they are two.
+  match e.payload {
+    None => ()
+    Some(p) =>
+      for c in p.text {
+        h = (h ^ c.to_int()) * 16777619
+      }
+  }
   h
 }
 
@@ -391,6 +411,7 @@ fn same_effect(a : Effect, b : Effect) -> Bool {
   a.line == b.line &&
   a.dynamic == b.dynamic &&
   a.modeled == b.modeled &&
+  a.payload == b.payload &&
   same_strings(a.vars, b.vars) &&
   same_strings(a.candidates, b.candidates)
 }
@@ -425,6 +446,7 @@ fn Collector::push(
   vars? : Array[String] = [],
   candidates? : Array[String] = [],
   origin? : String? = None,
+  payload? : Payload? = None,
 ) -> Unit {
   let resolved = match kind {
     Read | Write | Delete =>
@@ -463,6 +485,7 @@ fn Collector::push(
     dynamic,
     modeled,
     line,
+    payload,
     origin,
   }
   // The same fact twice is one fact: a loop body is walked once per word, so
@@ -1187,7 +1210,18 @@ fn Collector::classify(
       recurses ||
       n == "cd"
     )
-  self.push(Exec, n, false, line, modeled~, origin=words_origin(s.words))
+  self.push(
+    Exec,
+    n,
+    false,
+    line,
+    modeled~,
+    origin=words_origin(s.words),
+    // The words after the program are what it reads its source from. A command
+    // word that was substituted in has its args in the same list, so this works
+    // for `x=python3; $x -c …` too.
+    payload=self.payload_for(n, s.words[1:], s.redirects),
+  )
   if !modeled {
     // Nothing else can be said about it, and saying nothing would read as
     // "touches nothing".
@@ -2180,7 +2214,16 @@ fn Collector::wrapper_effects(
           origin=words_origin(inner),
         )
       } else {
-        let cmd : SimpleCmd = { assigns: [], words: inner, redirects: [], }
+        // The outer command's redirections come along, because they are what
+        // the inner program reads: `env python3 - <<'PY'` hands the body to
+        // python3, and a payload search that cannot see it reports nothing.
+        // Walking them twice is harmless: the second visit is the same fact on
+        // the same line, which dedupe already collapses.
+        let cmd : SimpleCmd = {
+          assigns: [],
+          words: inner,
+          redirects: s.redirects,
+        }
         self.depth += 1
         self.classify(name, cmd, line)
         self.depth -= 1
