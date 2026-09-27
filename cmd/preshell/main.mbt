@@ -721,6 +721,9 @@ fn contract_json() -> Json {
       "no_base": Json::string(
         "after a cd whose destination cannot be modelled (cd $DIR), the base is unknown: those paths stay as written and impact.uncertain is set, so a missing base never passes as no change",
       ),
+      "origin": Json::string(
+        "an effect whose target came from a value the command line set carries origin: the reference as written, as in x=/usr/bin/jq; $x -n 1 where the Exec names /usr/bin/jq and origin is $x. Absent when the target is what the word says. It is rendered the way a hole is, so a caller can match it against the command text",
+      ),
       "candidates": Json::string(
         "an effect may carry candidates: the paths its hole could be, when the input left a name with several possible values (if c; then x=a; else x=b; fi; rm $x). They are possibilities, not facts — target stays the hole and dynamic stays true, so a caller deciding on facts keeps using target plus vars. The list is exhaustive or absent: a value a while body may have set carries none, a set past eight paths is left out rather than truncated, and a possibility that names no path (an unset or empty name) is not listed",
       ),
