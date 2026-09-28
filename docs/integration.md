@@ -90,7 +90,7 @@ PreShell 的 GitHub Release 页面是变更记录，不重复 README 的项目�
 `--version` 给出工具版本：
 
 ```json
-{"tool":"preshell","version":"0.4.1"}
+{"tool":"preshell","version":"0.5.0"}
 ```
 
 **兼容性只由版本号表示。** 遵循语义化版本：
@@ -319,7 +319,7 @@ stdin 没有这些问题：命令原样进去，原样分析。
 ### 直接用发布版（不想装工具链）
 
 ```bash
-TAG=v0.4.1
+TAG=v0.5.0
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell && sha256sum -c SHA256SUMS
 install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell
