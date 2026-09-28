@@ -26,7 +26,8 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
     `cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化；`dialect.mbt` 两个方言
   - 影响层：`effects.mbt` 效果模型与去重（对外的核心答案）；`walk.mbt` 走语法树；`classify.mbt`
     命令分派（只分派，不带语义）；`programs.mbt` 每个命令族的语义；`archive.mbt` tar 与压缩器；
-    `wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序（find/sqlite3/make/容器/运行器/包管理器）；
+    `wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序（find/sqlite3/make/包管理器）；
+    `tools_container.mbt` 容器与挂载；`tools_runner.mbt` 运行器与交接对象；
     `facts.mbt` 程序分类表；`opt_tables.mbt` 选项值语义表；`opts.mbt` 拿表扫参数；
     `git.mbt` git 子命令实测表
   - 变量值：`bind.mbt` 值的表与作用域；`bind_subst.mbt` 把值代回词里；`bind_writes.mbt` 谁写了
@@ -42,8 +43,10 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 - `docs/example-policy.md` — 调用方怎么用这份 JSON（不是本工具的一部分）
 
 新函数该放哪：共用的小工具进 `text.mbt`/`names.mbt`/`options.mbt`；对一个程序的行为下断言——
-分类表进 `facts.mbt`，某个命令族的语义进 `programs.mbt`，只有它自己一套扫描的进 `tools.mbt`，
-`classify.mbt` 里只加分派那一行；上限进 `limits.mbt`；效果本身的字段与去重进 `effects.mbt`。拆分的目的是让「同一件事」只有一处定义：两份实现迟早
+分类表进 `facts.mbt`，某个命令族的语义进 `programs.mbt`，只有它自己一套扫描的进 `tools.mbt`
+（容器与运行器各自在 `tools_container.mbt`、`tools_runner.mbt`），`classify.mbt` 里只加分派那一行；
+上限进 `limits.mbt`；效果本身的字段与去重进 `effects.mbt`。
+拆分的目的是让「同一件事」只有一处定义：两份实现迟早
 给出两个答案，而两个答案就是对一个命令的含义有分歧。
 
 ## 不可退让的约束
