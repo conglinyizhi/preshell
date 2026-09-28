@@ -179,7 +179,7 @@ Splitting" 与 subst.c 的 `list_string`（`word_split`，subst.c:12362），逐
 
 ## 已知缺口
 
-**两套语料的缺口都是 0。**
+**三套语料的缺口都是 0**（bash 451 个 .sub、zsh 1308 个文件、机器上 1395 个真实脚本）。
 
 bash 语料（451 个 .sub）：434 通过 / 0 缺口 / 2 太宽松（都是 oracle 局限）/
 15 两边都报错 / 0 崩溃。
@@ -246,8 +246,9 @@ zsh 语料（Completion + Functions 共 1308 个文件）：**1301 通过 / 0 �
 `tools/corpus/find_scripts.sh` 采集机器上真实脚本，`run.sh --list` 拿它们做差分。
 实测 1395 个文件（/usr/bin /usr/share /etc /opt + 本仓库）：
 
-- 两边都通过 1359（97.4%）
-- 我们的缺口 7，以 autotools 生成的 `libtool` / `configure` 为主，加两个系统脚本
+- 两边都通过 1366（97.9%）
+- 我们的缺口 0（从 29 一路下来：相邻括号合并修完剩 12，`cmd; ;;` 修完剩 5，
+  bracket 表达式里的 `\"` 修完清零）
 - 我们太宽松 5，全部已归类：2 个是 polyglot（`#!/bin/sh` 开头、正文是 Scheme，
   `/usr/bin/guild` 与 `/usr/bin/guile-config`，bash -n 拒是因为它把整文件当 shell），
   3 个是 extglob（`fcitx5-diagnose`、`mkarchiso`、`paccache`，`bash -O extglob -n` 三条全过）
