@@ -18,8 +18,9 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
 - `lib/` — 核心库（纯函数：不读文件系统、不起子进程、不发网络请求）
   - 语法层：`lexer.mbt` 词法主体（token 化）；`lexer_parts.mbt` 词部件（引号、glob、反引号、转义）；
     `lexer_expand.mbt` 展开与词形状（波浪号、`$`、算术、数字范围 glob）；`lexer_heredoc.mbt`
-    立即文档正文；`parser.mbt` 门面与序列；`parser_compound.mbt` 复合命令（if/for/case/函数）；
-    `parser_redirect.mbt` 重定向；`parser_simple.mbt` 简单命令与赋值
+    立即文档正文；`parser.mbt` 门面与序列；`parser_compound.mbt` 复合命令（if/while/for/函数）；
+    `parser_case.mbt` 的 `case` 与它的两个 zsh 专属形状；`parser_redirect.mbt` 重定向；
+    `parser_simple.mbt` 简单命令与赋值
   - 语法树与基础：`ast.mbt` 语法树；`word.mbt` word 分类与 `PathArg`；`subscript.mbt` 数组下标；
     `cwd.mbt` 工作目录跟踪；`paths.mbt` 路径归一化；`dialect.mbt` 两个方言
   - 影响层：`effects.mbt` 效果模型与去重（对外的核心答案）；`walk.mbt` 走语法树；`classify.mbt`
