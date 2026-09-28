@@ -179,11 +179,22 @@ printf "python3 -c 'import os\\nprint(os.getcwd())'\n" | preshell --cwd=/tmp --p
  "payload":{"source":"flag","flag":"-c","text":"import os\nprint(os.getcwd())","bytes":29,"truncated":false}}
 ```
 
-- `source` is `flag` when the text was an option's value, and `heredoc` when it was a here-document body; a here-document payload carries `delimiter` (the word that ends it) instead of `flag`.
+An interpreter whose program is an operand looks the same, with no `flag`:
+
+```bash
+printf "awk '{print \\$1}' f.txt\n" | preshell --cwd=/tmp --payload
+```
+
+```json
+{"kind":"Exec","target":"awk","modeled":true,"line":1,
+ "payload":{"source":"operand","text":"{print $1}","bytes":10,"truncated":false}}
+```
+
+- `source` says where the text came from: `flag` when it was an option's value, `heredoc` when it was a here-document body, `operand` when the program sits where a file name usually goes. A here-document payload carries `delimiter` (the word that ends it) instead of `flag`; an `operand` one carries neither.
 - `text` is the text as written: quotes and escapes resolved, expansions left alone (`$HOME` stays `$HOME`). Nothing is interpreted, and `modeled` keeps its meaning: the report still says nothing about what the text does.
 - `bytes` is the whole text's length in UTF-8 bytes even when `text` is a prefix of it, and `truncated` says which of the two `text` is. The cut lands on a character boundary.
 - The payload belongs to the program that runs, wherever it was found: inside a loop body, behind a wrapper (`env python3 -c …`), behind a runner (`uv run --with X python3 -c …`) or behind a container runtime (`docker run --rm node -e …`).
-- Only programs whose arguments *are* their source get one. The table is short on purpose: `awk` and `sed` are not in it, because what they take is a language of their own rather than the program's source.
+- Only programs whose arguments *are* their source get one, and the list stays short on purpose. Two shapes are read: an option's value (`python3 -c …`, `sh -c …`, `node -e …`) and an operand (`awk '{print}' f`, `sed 's/a/b/' f`). For the second, `-f` ends the search with nothing to report in both programs — `awk -f p.awk` and `sed -f s.sed` name a file, and a file is not this command line. Several `sed -e` values are joined with a newline, which is what sed itself does with them.
 - It is off by default and capped when on: a here-document body can be kilobytes, and a command line can hold several.
 
 ## What PreShell does not decide

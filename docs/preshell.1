@@ -1,4 +1,4 @@
-.TH PreShell 1 "" "preshell 0.5.0" "User Commands"
+.TH PreShell 1 "" "preshell 0.6.0" "User Commands"
 .SH NAME
 preshell \- report what a shell command touches, as JSON
 .PP
@@ -224,8 +224,19 @@ printf \"python3 -c 'import os\\\\nprint(os.getcwd())'\\n\" | preshell --cwd=/tm
  \"payload\":{\"source\":\"flag\",\"flag\":\"-c\",\"text\":\"import os\\nprint(os.getcwd())\",\"bytes\":29,\"truncated\":false}}
 .fi
 .PP
+An interpreter whose program is an operand looks the same, with no \fBflag\fR:
+.PP
+.nf
+printf \"awk '{print \\\\$1}' f.txt\\n\" | preshell --cwd=/tmp --payload
+.fi
+.PP
+.nf
+{\"kind\":\"Exec\",\"target\":\"awk\",\"modeled\":true,\"line\":1,
+ \"payload\":{\"source\":\"operand\",\"text\":\"{print $1}\",\"bytes\":10,\"truncated\":false}}
+.fi
+.PP
 .IP "\(bu" 4
-\fBsource\fR is \fBflag\fR when the text was an option's value, and \fBheredoc\fR when it was a here-document body; a here-document payload carries \fBdelimiter\fR (the word that ends it) instead of \fBflag\fR.
+\fBsource\fR says where the text came from: \fBflag\fR when it was an option's value, \fBheredoc\fR when it was a here-document body, \fBoperand\fR when the program sits where a file name usually goes. A here-document payload carries \fBdelimiter\fR (the word that ends it) instead of \fBflag\fR; an \fBoperand\fR one carries neither.
 .IP "\(bu" 4
 \fBtext\fR is the text as written: quotes and escapes resolved, expansions left alone (\fB$HOME\fR stays \fB$HOME\fR). Nothing is interpreted, and \fBmodeled\fR keeps its meaning: the report still says nothing about what the text does.
 .IP "\(bu" 4
@@ -233,7 +244,7 @@ printf \"python3 -c 'import os\\\\nprint(os.getcwd())'\\n\" | preshell --cwd=/tm
 .IP "\(bu" 4
 The payload belongs to the program that runs, wherever it was found: inside a loop body, behind a wrapper (\fBenv python3 -c …\fR), behind a runner (\fBuv run --with X python3 -c …\fR) or behind a container runtime (\fBdocker run --rm node -e …\fR).
 .IP "\(bu" 4
-Only programs whose arguments *are* their source get one. The table is short on purpose: \fBawk\fR and \fBsed\fR are not in it, because what they take is a language of their own rather than the program's source.
+Only programs whose arguments *are* their source get one, and the list stays short on purpose. Two shapes are read: an option's value (\fBpython3 -c …\fR, \fBsh -c …\fR, \fBnode -e …\fR) and an operand (\fBawk '{print}' f\fR, \fBsed 's/a/b/' f\fR). For the second, \fB-f\fR ends the search with nothing to report in both programs — \fBawk -f p.awk\fR and \fBsed -f s.sed\fR name a file, and a file is not this command line. Several \fBsed -e\fR values are joined with a newline, which is what sed itself does with them.
 .IP "\(bu" 4
 It is off by default and capped when on: a here-document body can be kilobytes, and a command line can hold several.
 .PP

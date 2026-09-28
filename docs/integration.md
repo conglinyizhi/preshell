@@ -90,7 +90,7 @@ PreShell 的 GitHub Release 页面是变更记录，不重复 README 的项目�
 `--version` 给出工具版本：
 
 ```json
-{"tool":"preshell","version":"0.5.0"}
+{"tool":"preshell","version":"0.6.0"}
 ```
 
 **兼容性只由版本号表示。** 遵循语义化版本：
@@ -319,7 +319,7 @@ stdin 没有这些问题：命令原样进去，原样分析。
 ### 直接用发布版（不想装工具链）
 
 ```bash
-TAG=v0.5.0
+TAG=v0.6.0
 gh release download "$TAG" -R conglinyizhi/preshell -D /tmp/preshell
 cd /tmp/preshell && sha256sum -c SHA256SUMS
 install -Dm755 preshell-$TAG-*.linux ~/.local/bin/preshell
@@ -486,10 +486,12 @@ def analyze(command: str, timeout: float = 2.0) -> dict:
     拿它当解释器归属的依据时，注意 `Spawn` 的 `uncertain` 始终为真
   - `Unknown` — 有个洞（动态路径、没建模的程序、here-doc 正文之类）
   - 载荷不在 `kind` 里：`Exec`/`Spawn` 可以带一个 `payload` 字段，那是这个程序当成
-    自己源码来读的文本（`python3 -c '<代码>'`、`python3 - <<'PY'`）。**默认不出现**，
-    用 `--payload` / `--payload-max=N` 打开；`source` 区分 `flag` 与 `heredoc`，`text`
-    是照写的文本（引号与转义已解开，`$HOME` 这类展开原样保留），`bytes`/`truncated`
-    说明回来的是不是全文。工具不解释这段文本，`modeled` 的含义不变
+    自己源码来读的文本（`python3 -c '<代码>'`、`python3 - <<'PY'`、`awk '{print}' f`）。
+    **默认不出现**，用 `--payload` / `--payload-max=N` 打开；`source` 有三个取值 ——
+    `flag`（选项的值）、`heredoc`（here-doc 正文）、`operand`（程序在操作数位置），
+    `text` 是照写的文本（引号与转义已解开，`$HOME` 这类展开原样保留），
+    `bytes`/`truncated` 说明回来的是不是全文。工具不解释这段文本，`modeled` 的含义不变。
+    解析 `source` 时留一个 `_` 分支：这是一份还会长的取值表
 - `impact.write_roots` — 会被改到的目录。目录名本身可能带变量（`rm -rf $HOME/x` 的父目录
   就是 `$HOME`），判断前先按 `vars` 替换，或者干脆当洞
 - `impact.vars` — 这份报告里所有效果读到的变量名，去重后的并集；每条效果另有自己的
