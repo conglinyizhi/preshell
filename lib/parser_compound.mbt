@@ -448,6 +448,49 @@ fn Parser::parse_csh_body(self : Parser) -> Seq {
 }
 
 ///|
+/// True when the pattern list we just read is zsh's parenthesised pattern: the
+/// whole pattern is one balanced `(...)` group, so the `)` that just closed the
+/// group does double duty as the list's own closing paren.
+///
+/// Measured: zsh 5.9.2 accepts `case $x in (gnu) echo hi ;; esac` and
+/// `case $x in (net|open)bsd*) echo hi ;; esac` — `(gnu)` and `gnu` mean the
+/// same thing there. Its parser has a branch for exactly this shape (Src/parse.c
+/// marks it "Hack here"): it fires when the first pattern is one balanced
+/// `(...)` and what follows is neither `)` nor `|`, and strips the outer pair.
+/// bash reads the same text as the pattern list's own paren, so this stays
+/// zsh-only.
+fn Parser::pattern_is_group(self : Parser, patterns : Array[Word]) -> Bool {
+  if !(self.lex.dialect is Zsh) || patterns.length() != 1 {
+    return false
+  }
+  let parts = patterns[0].parts
+  if parts.length() < 2 {
+    return false
+  }
+  let opens = match parts[0] {
+    Glob("(") => true
+    _ => false
+  }
+  if !opens {
+    return false
+  }
+  let mut depth = 0
+  for p in parts {
+    match p {
+      Glob("(") => depth += 1
+      Glob(")") => {
+        depth -= 1
+        if depth < 0 {
+          return false
+        }
+      }
+      _ => ()
+    }
+  }
+  depth == 0
+}
+
+///|
 /// Skip the separators zsh allows between a `case` subject and its `in`.
 fn Parser::skip_case_separators(self : Parser) -> Unit {
   for ;; {
@@ -535,6 +578,13 @@ fn Parser::parse_case(self : Parser) -> Cmd {
     self.lex.in_casepat = false
     if self.cur is TOp(")") {
       self.advance()
+    } else if !self.pattern_is_group(patterns) {
+      // Measured on bash 5.3 and zsh 5.9.2: both refuse a pattern list whose
+      // `)` is missing. `case x in a : ;; esac` and `case x in a) :;; junk
+      // esac` are the same defect — the trailing `junk` is read as the next
+      // pattern list — so one rule covers both shapes. The one exception is
+      // zsh's parenthesised pattern, see `pattern_is_group`.
+      self.lex.fail("expected ) to close the case pattern")
     }
     let body = self.parse_seq_in(
       { words: ["esac"], ops: [";;", ";&", ";;&", ";|"], },

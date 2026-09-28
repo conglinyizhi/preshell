@@ -111,3 +111,69 @@ test "quoted brackets are not subscripts" {
   // `touch '[a' '[x'`: the bracket is inside quotes, so nothing to scan.
   debug_inspect(status_of_construct("touch '[a' '[x'"), content="Complete")
 }
+
+///|
+test "a case pattern list has to be closed by a paren" {
+  // Measured on bash 5.3 and zsh 5.9.2: both refuse a pattern list whose `)`
+  // is missing. `case x in a : ;; esac` and `case x in a) :;; junk esac` are
+  // the same defect — the trailing `junk` is read as the next pattern list —
+  // so one rule covers both shapes.
+  for src in [
+    "case x in a : ;; esac",
+    "case x in a) :;; junk esac",
+    "case x in a) :;; es esac",
+    "case x in a|b : ;; esac",
+  ] {
+    debug_inspect(status_of_construct(src), content="Unsupported")
+  }
+  // A case with no pattern list at all is fine: `esac` closes it directly.
+  debug_inspect(status_of_construct("case x in esac"), content="Complete")
+  debug_inspect(status_of_construct("case x in a) : ;; esac"), content="Complete")
+  // The `;` before `in` is one of the spellings only zsh takes, so it is the
+  // dialect that decides: bash refuses it, zsh runs it.
+  debug_inspect(status_of_construct("case x; in a) : ;; esac"), content="Unsupported")
+  debug_inspect(
+    @lib.analyze_dialect("case x; in a) : ;; esac", Zsh).status,
+    content="Complete",
+  )
+  // zsh's parenthesised pattern needs no closing paren of its own: the group's
+  // own `)` does double duty. bash reads the `(` as the list's paren instead.
+  for src in ["case $x in\n  (gnu) echo hi ;;\nesac",
+    "case $x in\n  (net|open)bsd*) echo hi ;;\nesac",
+    "case $x in\n  (<1->|\\*) a[1]=$1;;\nesac"] {
+    debug_inspect(zstatus(src), content="Complete")
+  }
+}
+
+///|
+test "an array assignment body is a word list, not a command list" {
+  // Measured: bash 5.3 and zsh 5.9.2 both refuse a redirect, `&`, `&&`, `|` or
+  // a bare `(` between the parentheses — `x=(a > f)`, `x=(a && b)`, `x=(a (b))`
+  // — while `;` is refused by bash only (`x=(a;b)` runs in zsh).
+  for src in [
+    "x=(a > f)",
+    "x=(a 2>&1)",
+    "x=(a < f)",
+    "x=(a <<< hi)",
+    "x=(a && b)",
+    "x=(a | b)",
+    "x=(&)",
+    "x=(a &)",
+    "arr=(1 arr=(1 2 3)",
+    "x=(a <<EOF\nhi\nEOF\n)",
+  ] {
+    debug_inspect(status_of_construct(src), content="Unsupported")
+  }
+  // `;` splits commands, not words: bash refuses it here, zsh takes it.
+  debug_inspect(status_of_construct("x=(a;b)"), content="Unsupported")
+  debug_inspect(status_of_construct("x=(a b;)"), content="Unsupported")
+  debug_inspect(status_of_construct("x=(a\\;;b)"), content="Unsupported")
+  debug_inspect(@lib.analyze_dialect("x=(a;b)", Zsh).status, content="Complete")
+  debug_inspect(@lib.analyze_dialect("x=(a b;)", Zsh).status, content="Complete")
+  debug_inspect(@lib.analyze_dialect("x=(a\\;;b)", Zsh).status, content="Complete")
+  // And the shapes that are a plain word list stay accepted.
+  for src in ["x=(a b)", "x=()", "x=(a\nb)", "x=(a # c\nb)", "x=([0]=a [1]=b)",
+    "x=($(echo 1) b)", "x=(a $((1+2)))", "x=({a,b})", "x=(\"a;b\")", "x=('a;b')"] {
+    debug_inspect(status_of_construct(src), content="Complete")
+  }
+}

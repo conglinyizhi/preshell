@@ -227,6 +227,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
               if from_array {
                 self.advance()
                 let mut closed = false
+                let mut stray = false
                 for ;; {
                   match self.cur {
                     TWord(item) => {
@@ -241,10 +242,41 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                       break
                     }
                     TEof => break
+                    // An array body is a word list, not a command list:
+                    // measured on bash 5.3 and zsh 5.9.2, both refuse a bare
+                    // `(`, `&`, `&&` or `|` in there (`x=(a && b)`,
+                    // `x=(a (b))`), and both refuse a redirect
+                    // (`x=(a > f)`). Newlines and comments stay fine.
+                    TOp(";") => {
+                      // `;` separates commands, not words, so this one is
+                      // dialect-bound: bash refuses `x=(a;b)`, zsh runs it.
+                      if self.lex.dialect is Zsh {
+                        self.advance()
+                      } else {
+                        stray = true
+                        break
+                      }
+                    }
+                    TOp("(") | TOp("&") | TOp("&&") | TOp("||") | TOp("|") => {
+                      stray = true
+                      break
+                    }
+                    TOp(op) =>
+                      if is_redirect_op(op) {
+                        stray = true
+                        break
+                      } else {
+                        self.advance()
+                      }
+
                     _ => self.advance()
                   }
                 }
-                if !closed {
+                if stray {
+                  // A word list that ran into a command operator: naming the
+                  // word list is more use than blaming the missing `)`.
+                  self.lex.fail("expected a word list in the array assignment")
+                } else if !closed {
                   // `arr=(1` never closes: both shells refuse it, so accepting
                   // it would report a command that cannot run.
                   self.lex.fail("expected ) to close the array assignment")
