@@ -305,6 +305,12 @@ fn Lexer::read_braced(self : Lexer, in_dquote : Bool) -> String {
     }
   }
   let body = self.slice(start, self.pos)
+  // zsh has a grammar for the body and refuses shapes bash shrugs at; see
+  // braced_body.mbt. bash's `-n` does not expand parameters at all, so asking
+  // there would report commands that run fine.
+  if self.dialect is Zsh && braced_body_is_malformed(body, in_dquote) {
+    self.fail("bad substitution")
+  }
   if self.peek() == Some('}') {
     self.advance(1)
   }

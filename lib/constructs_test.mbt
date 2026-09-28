@@ -246,3 +246,42 @@ test "zsh's for may have an empty body once a separator closes the list" {
     debug_inspect(zstatus(src), content="Unsupported")
   }
 }
+
+///|
+test "zsh refuses a braced body it cannot read" {
+  // zsh gives `${...}` a grammar of its own and it is stricter than bash's:
+  // measured on zsh 5.9.2 and bash 5.3, every shape below is refused by zsh
+  // and accepted by bash, so the check only runs in the zsh dialect.
+  for
+    src in [
+      "echo ${a b}", "echo ${a }", "echo ${a;b}", "echo ${a|b}", "echo ${a(b)}",
+      "echo ${a]}", "echo ${a[1}", "echo ${(}", "echo ${1a}", "echo ${@x}", "echo ${!a}",
+      "echo ${ }", "echo ${a[1]b}", "echo ${a\n}", "echo ${a:-b{c}",
+    ] {
+    debug_inspect(zstatus(src), content="Unsupported")
+  }
+  // The shapes that have to keep working, in both dialects: a modifier's tail
+  // is ordinary text (`${a:-hello world}`), a subscript may hold anything
+  // balanced, and `#`/`##`/`!`/digits are names of their own.
+  for
+    src in [
+      "echo ${a}", "echo ${}", "echo ${1}", "echo ${@}", "echo ${#}", "echo ${?}",
+      "echo ${$}", "echo ${!}", "echo ${a:-hello world}", "echo ${a#* }", "echo ${a[b c]}",
+      "echo ${(f)a}", "echo ${a[$(echo 1)]}", "echo ${a[1]:-b}", "echo ${#a}", "echo ${##a}",
+      "echo ${a[\"b\"]}",
+      // zsh refuses `${"a"}` and `${"a b"}`, and telling those from the
+      // `${"${x}"[1]}` that the corpus is full of needs the shape of what is
+      // inside the quotes. Left alone on purpose: under-reporting beats blocking
+      // a valid expansion.
+       "echo ${\"a\"}", "echo ${\"a b\"}", "echo ${\"${x}\"[1]}",
+      // Braces, quotes and escapes can hold anything, so a body with one is left
+      // unread — see braced_body_is_hard for why. Both of these really are refused
+      // by zsh; they are listed here so the day this gets read properly is visible
+      // as a change rather than as a surprise.
+       "echo ${'a'}", "echo ${a:-b{c}}", "echo ${a:-${b}}", "echo ${a:-$(echo 1)}",
+      "echo ${a//b/X{Y}/Z}",
+    ] {
+    debug_inspect(zstatus(src), content="Complete")
+    debug_inspect(status_of_construct(src), content="Complete")
+  }
+}
