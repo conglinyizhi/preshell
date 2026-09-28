@@ -19,9 +19,6 @@
 /// between the braces, with the braces themselves already consumed, and
 /// `in_dquote` says whether the expansion sat inside a `"..."`.
 fn braced_body_is_malformed(body : String, in_dquote : Bool) -> Bool {
-  if braced_body_is_hard(body) {
-    return false
-  }
   let n = body.length()
   let mut i = 0
   // `${(f)a}`: the flags are a parenthesised list, and leaving it unclosed is
@@ -60,7 +57,13 @@ fn braced_body_is_malformed(body : String, in_dquote : Bool) -> Bool {
             }
           Some('{') =>
             match match_brace_pair(body, i + 1, '{', '}') {
-              None => return true
+              // A nested `${` that does not close inside the body is read as
+              // truncation rather than as an error: measured, `_rpm` and
+              // `_ps1234` carry shapes deeper than the lexer's own scan models,
+              // so the body really is a prefix there. The `[` case below stays
+              // reported — nothing truncates a subscript, and `${a[1}` is
+              // exactly what zsh refuses.
+              None => return false
               Some(j) => {
                 i = j + 1
                 prefixed = true
@@ -118,29 +121,15 @@ fn braced_body_is_malformed(body : String, in_dquote : Bool) -> Bool {
 }
 
 ///|
-/// Whether the body carries more of the expansion grammar than this file reads.
-///
-/// A nested substitution, a quote or an escape can hold braces, brackets and
-/// parens that belong to something else: `${${(f)"$(cmd)"}#refs/tags/}` and
-/// `${"${x}"[1]}` are both ordinary lines in the completion corpus, and telling
-/// them apart needs the whole grammar rather than the shape of the body. Those
-/// are left alone — measured, guessing at them cost 45 of the 1308 corpus files
-/// — because refusing an expansion that runs is worse than missing one.
-fn braced_body_is_hard(body : String) -> Bool {
-  for _, c in body {
-    match c {
-      '$' | '"' | '\'' | '\\' | '{' | '}' => return true
-      _ => ()
-    }
-  }
-  false
-}
-
-///|
 /// The parameters that are one character and are not followed by a name.
+///
+/// `#` is not one of them here even though `$#` is a parameter: the length
+/// prefix above already consumed it, so a `#` left at this point is the
+/// modifier that removes a suffix (`${${x}#a}`), and reading it as a parameter
+/// made the scan choke on the `a` after it.
 fn is_single_char_param(c : Char) -> Bool {
   match c {
-    '@' | '*' | '#' | '?' | '-' | '$' | '!' => true
+    '@' | '*' | '?' | '-' | '$' | '!' => true
     _ => false
   }
 }
@@ -157,26 +146,58 @@ fn is_modifier_start(c : Char) -> Bool {
 }
 
 ///|
+/// Like `skip_quoted`, but a newline does not end the search.
+///
+/// A quoted string inside `${...}` may span lines: measured, several completion
+/// files have `"$(lsof ... -w` broken across two, and stopping at the newline
+/// left the closing `"` outside the string, which threw off every `}` count
+/// after it. The version in subscript.mbt stops at the newline on purpose — a
+/// subscript's quote cannot span one — so the two are kept apart.
+fn skip_quoted_any_line(s : String, i : Int, q : Char) -> Int {
+  let n = s.length()
+  let mut j = i + 1
+  while j < n {
+    let c = s.get_char(j).unwrap()
+    if c == q {
+      return j + 1
+    }
+    if c == '\\' && q == '"' {
+      j += 2
+    } else {
+      j += 1
+    }
+  }
+  j
+}
+
+///|
 /// The index of the character closing the one at `start`, or None when the text
-/// ends first. Only the nesting of that same pair is counted: an unmatched `[`
-/// is what makes `${a[1}` malformed, while what sits inside the brackets is the
-/// subscript's own business (`${a[b c]}`, `${a[$(echo 1)]}` and `${a["b"]}` are
-/// all accepted).
+/// ends first. Quoted strings and escapes are stepped over, so a `}` inside
+/// `"..."` or a `\{` does not count: measured, `#*UserInfo\{}` and
+/// `--format='"%(refname)"'` both appear inside real `${...}` bodies, and
+/// counting their braces made the scan lose its place.
 fn match_brace_pair(s : String, start : Int, open : Char, close : Char) -> Int? {
   let n = s.length()
   let mut depth = 0
   let mut i = start
   while i < n {
     let c = s.get_char(i).unwrap()
-    if c == open {
+    if c == '\\' {
+      i += 2
+    } else if c == '\'' || c == '"' {
+      i = skip_quoted_any_line(s, i, c)
+    } else if c == open {
       depth += 1
+      i += 1
     } else if c == close {
       depth -= 1
       if depth == 0 {
         return Some(i)
       }
+      i += 1
+    } else {
+      i += 1
     }
-    i += 1
   }
   None
 }
@@ -235,10 +256,14 @@ fn modifier_tail_is_balanced(s : String, start : Int, in_dquote : Bool) -> Bool 
         i += 1
       }
       '}' => {
-        if depth == 0 {
-          return false
+        // A `}` with nothing open is read as truncation rather than as an
+        // error: the body handed here is what the lexer's own scan produced, and
+        // that scan stops at the `}` it takes for the expansion's end. Several
+        // completion files nest deeper than it models, so a stray `}` in the
+        // tail is expected. Under-reporting again, on purpose.
+        if depth > 0 {
+          depth -= 1
         }
-        depth -= 1
         i += 1
       }
       _ => i += 1

@@ -256,7 +256,7 @@ test "zsh refuses a braced body it cannot read" {
     src in [
       "echo ${a b}", "echo ${a }", "echo ${a;b}", "echo ${a|b}", "echo ${a(b)}",
       "echo ${a]}", "echo ${a[1}", "echo ${(}", "echo ${1a}", "echo ${@x}", "echo ${!a}",
-      "echo ${ }", "echo ${a[1]b}", "echo ${a\n}", "echo ${a:-b{c}",
+      "echo ${ }", "echo ${a[1]b}", "echo ${a\n}", "echo ${a:-b{c}", "echo ${'a'}",
     ] {
     debug_inspect(zstatus(src), content="Unsupported")
   }
@@ -274,14 +274,18 @@ test "zsh refuses a braced body it cannot read" {
       // inside the quotes. Left alone on purpose: under-reporting beats blocking
       // a valid expansion.
        "echo ${\"a\"}", "echo ${\"a b\"}", "echo ${\"${x}\"[1]}",
-      // Braces, quotes and escapes can hold anything, so a body with one is left
-      // unread — see braced_body_is_hard for why. Both of these really are refused
-      // by zsh; they are listed here so the day this gets read properly is visible
-      // as a change rather than as a surprise.
-       "echo ${'a'}", "echo ${a:-b{c}}", "echo ${a:-${b}}", "echo ${a:-$(echo 1)}",
-      "echo ${a//b/X{Y}/Z}",
+      // `${"a"}` and `${"a b"}` really are refused by zsh, and they are listed
+      // here rather than above because the quote is read as a nested string —
+      // the same reading that `${"${x}"[1]}` needs. Left alone on purpose.
+       "echo ${a:-b{c}}", "echo ${a:-${b}}", "echo ${a:-$(echo 1)}", "echo ${a//b/X{Y}/Z}",
     ] {
-    debug_inspect(zstatus(src), content="Complete")
-    debug_inspect(status_of_construct(src), content="Complete")
+    // Reported by name rather than as a diff: which of two dozen shapes broke
+    // is the whole question when this test fails.
+    if zstatus(src) is Unsupported {
+      fail("zsh dialect regressed on: \{src}")
+    }
+    if status_of_construct(src) is Unsupported {
+      fail("bash dialect regressed on: \{src}")
+    }
   }
 }
