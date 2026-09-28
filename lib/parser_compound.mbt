@@ -243,6 +243,10 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   // Whether the word list came from the csh spelling's parens. In zsh that is
   // also what allows a body with no `do` after it.
   let mut in_parens = false
+  // Whether a separator closed the word list. zsh makes an empty body legal
+  // once one did (`for i in a;`), and refuses the same text without it
+  // (`for i in a`), so this is what tells the two apart at the end.
+  let mut closed_by_separator = false
   // `for x` and its `in` may sit on different lines: measured, bash and zsh
   // both accept `for x\nin x\ndo ... done`.
   self.skip_newlines()
@@ -326,6 +330,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
       }
     }
     if self.cur is TOp(";") {
+      closed_by_separator = true
       self.advance()
     }
   }
@@ -337,6 +342,7 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
   let before_seps = self.mark()
   for ;; {
     if self.cur is TNewline || self.cur is TOp(";") {
+      closed_by_separator = true
       self.advance()
     } else {
       break
@@ -384,9 +390,10 @@ fn Parser::parse_for(self : Parser, foreach? : Bool = false) -> Cmd {
     self.parse_csh_body()
   } else {
     // A `for` that named a word list has to say what to do with it: measured,
-    // both shells refuse `for i in a` and `for i in`. Without a word list the
-    // shells disagree, so that case is split by dialect.
-    if !(self.lex.dialect is Zsh && !had_words) {
+    // both shells refuse `for i in a` and `for i in`. zsh is the exception once
+    // a separator closed the list, where an empty body is legal. Without a word
+    // list the shells disagree, so that case is split by dialect too.
+    if !(self.lex.dialect is Zsh && (!had_words || closed_by_separator)) {
       self.lex.fail("expected do...done after for")
     }
     Seq::empty()

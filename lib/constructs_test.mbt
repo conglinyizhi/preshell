@@ -231,3 +231,18 @@ test "a backslash inside a bracket expression escapes the quote" {
     content="Unsupported",
   )
 }
+
+///|
+test "zsh's for may have an empty body once a separator closes the list" {
+  // SHORTLOOPS is on by default there: measured, `for i in a;`, `for i in a b;`
+  // and `for i in;` all run in zsh 5.9.2 with an empty body, while the same
+  // text without the `;` is refused by both shells. bash refuses every one of
+  // them, so this stays zsh-only.
+  for src in ["for i in a;", "for i in a b;", "for i in;"] {
+    debug_inspect(zstatus(src), content="Complete")
+    debug_inspect(status_of_construct(src), content="Unsupported")
+  }
+  for src in ["for i in a", "for i in a b", "for i in"] {
+    debug_inspect(zstatus(src), content="Unsupported")
+  }
+}
