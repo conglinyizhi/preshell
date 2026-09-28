@@ -149,8 +149,14 @@ test "zsh wants a separator after a keyword-closed construct" {
     zstatus("if for i in a; do :; done then :; fi"),
     content="Unsupported",
   )
-  debug_inspect(zstatus("if while :; do :; done then :; fi"), content="Unsupported")
-  debug_inspect(zstatus("if if :; then :; fi then :; fi"), content="Unsupported")
+  debug_inspect(
+    zstatus("if while :; do :; done then :; fi"),
+    content="Unsupported",
+  )
+  debug_inspect(
+    zstatus("if if :; then :; fi then :; fi"),
+    content="Unsupported",
+  )
   // A redirect after the construct does not change the answer: it is the
   // construct that ends there, and the diagnostic from the differential run was
   // exactly this shape.
@@ -160,5 +166,8 @@ test "zsh wants a separator after a keyword-closed construct" {
   )
   debug_inspect(zstatus("if { :; } then :; fi"), content="Complete")
   debug_inspect(zstatus("if ( : ) then :; fi"), content="Complete")
-  debug_inspect(zstatus("if for i in a; do :; done; then :; fi"), content="Complete")
+  debug_inspect(
+    zstatus("if for i in a; do :; done; then :; fi"),
+    content="Complete",
+  )
 }
