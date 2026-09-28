@@ -24,6 +24,22 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
+      - name: Toolchain version
+        # 缓存键要跟工具链走：每夜版换了产物就可能不兼容，拿旧缓存去增量反而出
+        # 假失败。版本要在装完之后才拿得到，所以单独一步。
+        id: toolchain
+        run: echo "version=$(moon version --all | head -1 | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the build directory
+        # 两处收益：依赖（moonbitlang/async 那个大包）不用重编，源文件改动后
+        # restore-keys 会给一份旧产物做增量。_build 约 65M。
+        uses: actions/cache@v4
+        with:
+          path: _build
+          key: build-${{ runner.os }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('moon.mod') }}
+          restore-keys: |
+            build-${{ runner.os }}-${{ steps.toolchain.outputs.version }}-
+
       - name: Update registry
         # 新装的工具链带的注册表索引是旧的，直接 build 会报
         # "module was not found in the registry"（moonbitlang/async）。
