@@ -238,13 +238,17 @@ zsh 语料（Completion + Functions 共 1308 个文件）：**1301 通过 / 0 �
 ## 真实脚本语料（第一步加固）
 
 `tools/corpus/find_scripts.sh` 采集机器上真实脚本，`run.sh --list` 拿它们做差分。
-实测 1384 个文件（/usr/bin /usr/share /etc /opt + 本仓库）：
+实测 1395 个文件（/usr/bin /usr/share /etc /opt + 本仓库）：
 
-- 两边都通过 1326（95.8%）
-- 我们的缺口 29
-- 我们太宽松 6，全部已归类：2 个是 polyglot（\`#!/bin/sh\` 开头、正文是 Scheme，
-  bash -n 拒是因为它把整文件当 shell），4 个是 extglob（bash -n 不执行 shopt）
+- 两边都通过 1359（97.4%）
+- 我们的缺口 7，以 autotools 生成的 `libtool` / `configure` 为主，加两个系统脚本
+- 我们太宽松 5，全部已归类：2 个是 polyglot（`#!/bin/sh` 开头、正文是 Scheme，
+  `/usr/bin/guild` 与 `/usr/bin/guile-config`，bash -n 拒是因为它把整文件当 shell），
+  3 个是 extglob（`fcitx5-diagnose`、`mkarchiso`、`paccache`，`bash -O extglob -n` 三条全过）
 - 崩溃/超时 0
+
+这套语料的文件数随机器变，所以数字只跟自己前后比。仓库内那套 bash-tests 跑的是另一个
+数（451 个 .sub，见上面记分牌），两套不要混。
 
 差分脚本必须用 stdin 喂文件，不能用 argv：libtool、configure 这类几百 KB 的脚本
 会撞 ARG_MAX，看起来像崩溃其实是 E2BIG。这条踩过一次。
@@ -309,23 +313,33 @@ tools/fuzz/differential.js 拿**真 shell 当 oracle**，检查两个方向：sh
   node tools/fuzz/differential.js --shell zsh --n 600 --seed 1
 每条失败都附 oracle 原文（oracle 本身有已知噪声，由人判断）。
 
-已知还没修的一类：二元算符后面又跟一个算符（`cmd &&& x`、`2>>&1`），两个 shell 都拒，
-我们接受。修法是在算符序列上做检查，属于下一个工作日。
+先前记的「二元算符后接算符（`cmd &&& x`、`2>>&1`）我们接受」已不复现：两条现在都是
+Unsupported，实测两个 shell 也都拒。
 
-再扫一遍（bash `--n 1500 --seed 7`、zsh `--n 800 --seed 11`）分类出来的、**还没修**的：
+再扫一遍（bash `--n 1500 --seed 7`：一致 1483 / 缺口 2 / 太宽松 6 / 崩溃 0；
+zsh `--n 800 --seed 11`：一致 785 / 缺口 6 / 太宽松 4 / 崩溃 0）分类出来的、**还没修**的：
 
-- **`${ ... }` 的本体不校验**（两边都拒而我们收：`echo ${ arr}`、`echo ${ find . -name x}`）。
-  注意 `echo ${arr]}` 是 bash 收、zsh 拒，所以这条规则必须分方言，否则会把 bash 认的
-  写成 Gap
-- **数组赋值括号里的东西不校验**（`arr=(1 arr=(1 2 3)`、`arr=(1 2 3 cat <<EOF … EOF )`）
-- **case 体在 `;;` 之后到 `esac` 之间的垃圾不校验**（`case $x in a) :;; es esac`）
+- **`${ ... }` 的本体不校验**。这一条比先前记的宽：`${` 后跟空白的形状
+  （`echo ${ arr}`、`echo ${ find . -name x}`）是**两个 shell 都拒**而我们收；zsh 另外还拒一批
+  bash 认的（`${a b}`、`${arr]}`、`${a[0}`、`${!a}`），所以规则必须分方言，否则会把 bash
+  认的写成 Gap。要修得先实现 zsh 的参数展开语法（`${(f)a}`、`${a[0]}`、`${a/b/c}` 都合法），
+  代价与误报风险都不小，先挂着
+- **复合命令之后的保留字没有分隔符检查**。`if [[ -f x ]]; for i in a b; do echo $i; done > /tmp/o  then echo y; fi`
+  两个 shell 都拒而我们报 Complete：`then` 跟在复合命令（带尾随重定向）后面，前面缺 `;`
+  或换行。注意不能把命令位置的保留字一律收紧——`<简单命令> then` 是合法的
+  （`x > /tmp/o then` 实测两边都收，`then` 只是参数），判据是「前一个命令是复合命令」
 - **`[[ ]]` 整块不透明**是刻意取舍（见上面「刻意保留的取舍」），这几个样例属于那一类，
   不打算修
-- 缺口那侧只剩两例且都是病理形状：zsh 的 `for i in a b;`（带尾分号的空体，zsh 收）、
-  bash 的 `` x=`() { echo anon; } arg` `` 与 `echo $((1 + 2) f() { echo body; } )`
+- 缺口那侧只剩这些病理形状：zsh 的 `for i in a b;`（带尾分号的空体，zsh 收）、
+  bash 的 `` x=`() { echo anon; } arg` `` 与 `echo $((1 + 2) f() { echo body; } )`、
+  zsh 的 `echo [[: arr+=(4); echo ${arr[2]} alpha:]]`
 
 已经修掉的：`f()` 与 `f() echo hi`（bash 拒、zsh 收，见 `fix(parser)` 那笔）、
-zsh csh 形式的裸体 `for x (a b) rm $x`。
+zsh csh 形式的裸体 `for x (a b) rm $x`、数组赋值括号里的垃圾（`arr=(1 arr=(1 2 3)`、
+`x=(a > f)`）、case 体在 `;;` 之后到 `esac` 之间的垃圾（`case $x in a) :;; junk esac`）。
+后两笔见 `fix(parser): case 模式与数组体不再放行非法形状`，那里逐条拿 bash 5.3 与
+zsh 5.9.2 实测过，两处分方言的形状（`;` 只在 bash 下非法、zsh 的括号模式 `(gnu)`）也写在
+测试注释里。
 
 ## 编译警告保持为 0
 
