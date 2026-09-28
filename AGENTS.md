@@ -26,7 +26,8 @@ shell 命令分析器：**只报告事实，不做判断**。主语言 MoonBit�
   - 影响层：`effects.mbt` 效果模型与去重（对外的核心答案）；`walk.mbt` 走语法树；`classify.mbt`
     命令分派（只分派，不带语义）；`programs.mbt` 每个命令族的语义；`archive.mbt` tar 与压缩器；
     `wrapper.mbt` 包装器；`tools.mbt` 有专用表的程序（find/sqlite3/make/容器/运行器/包管理器）；
-    `facts.mbt` 程序分类表；`opts.mbt` 选项值语义表；`git.mbt` git 子命令实测表
+    `facts.mbt` 程序分类表；`opt_tables.mbt` 选项值语义表；`opts.mbt` 拿表扫参数；
+    `git.mbt` git 子命令实测表
   - 变量值：`bind.mbt` 值的表与作用域；`bind_subst.mbt` 把值代回词里；`bind_writes.mbt` 谁写了
     什么名字；`brace.mbt` 花括号展开；`fields.mbt` 分词；`payload.mbt` 解释器的源码文本；
     `shell.mbt`/`bashism.mbt` 方言边界
