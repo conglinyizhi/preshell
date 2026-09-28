@@ -193,12 +193,17 @@ test "a case terminator may follow a semicolon or an ampersand" {
   // and `case x in a) : & ;; esac` — the `;;` closes the branch right after a
   // separator, with no command in between. `&&`, `||` and `|` in the same
   // place are refused by both, because those demand a right-hand side.
-  for src in ["case x in a) : ; ;; esac", "case x in a) : & ;; esac",
-    "case $# in\n0) help ; exit 1 ; ;;\nesac"] {
+  for
+    src in [
+      "case x in a) : ; ;; esac", "case x in a) : & ;; esac", "case $# in\n0) help ; exit 1 ; ;;\nesac",
+    ] {
     debug_inspect(status_of_construct(src), content="Complete")
   }
-  for src in ["case x in a) : && ;; esac", "case x in a) : | ;; esac",
-    "case x in a) : || ;; esac", "case x in a) : ; | esac"] {
+  for
+    src in [
+      "case x in a) : && ;; esac", "case x in a) : | ;; esac", "case x in a) : || ;; esac",
+      "case x in a) : ; | esac",
+    ] {
     debug_inspect(status_of_construct(src), content="Unsupported")
   }
 }
@@ -210,16 +215,19 @@ test "a backslash inside a bracket expression escapes the quote" {
   // that never closes, so the two spellings really differ and the scan has to
   // honour the backslash. Missing that made the bracket swallow the rest of the
   // pattern list and, with a quote in the body, leak the quote state into it.
-  for src in [
-    "case x in\n  *[\\\"]*)\n    :;;\nesac",
-    "case x in\n  *[\\\"]*)\n    x=\"abc\"\n    ;;\nesac",
-    "case x in\n  *[\\\\\\`\\\"\\$]*)\n    :;;\nesac",
-    // The quoted region inside a bracket is real, so this one stays accepted.
-    "case x in\n  *[\"a b\"]*)\n    :;;\nesac",
-  ] {
+  for
+    src in [
+      "case x in\n  *[\\\"]*)\n    :;;\nesac", "case x in\n  *[\\\"]*)\n    x=\"abc\"\n    ;;\nesac",
+      "case x in\n  *[\\\\\\`\\\"\\$]*)\n    :;;\nesac",
+      // The quoted region inside a bracket is real, so this one stays accepted.
+       "case x in\n  *[\"a b\"]*)\n    :;;\nesac",
+    ] {
     debug_inspect(status_of_construct(src), content="Complete")
   }
   // Without the backslash the quote really does open a region, and both shells
   // refuse the result.
-  debug_inspect(status_of_construct("case x in\n  *[\"]*)\n    :;;\nesac"), content="Unsupported")
+  debug_inspect(
+    status_of_construct("case x in\n  *[\"]*)\n    :;;\nesac"),
+    content="Unsupported",
+  )
 }
