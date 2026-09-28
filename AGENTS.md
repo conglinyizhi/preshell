@@ -340,9 +340,10 @@ zsh `--n 800 --seed 11`：一致 785 / 缺口 6 / 太宽松 4 / 崩溃 0）分�
   then echo y; fi` 报 Complete，两个 shell 都拒
 - **`[[ ]]` 整块不透明**是刻意取舍（见上面「刻意保留的取舍」），这几个样例属于那一类，
   不打算修
-- 缺口那侧只剩这些病理形状：zsh 的 `for i in a b;`（带尾分号的空体，zsh 收）、
-  bash 的 `` x=`() { echo anon; } arg` `` 与 `echo $((1 + 2) f() { echo body; } )`、
-  zsh 的 `echo [[: arr+=(4); echo ${arr[2]} alpha:]]`
+- 缺口那侧只剩病理形状，全是变异体、真实代码里不出现：bash 的 `` x=`() { echo anon; } arg` ``
+  与 `echo $((1 + 2) f() { echo body; } )`；zsh 的 `echo [[: arr+=(4); echo ${arr[2]} alpha:]]`、
+  `cat < f() { echo body; } <EOF`、`echo a >> log.txt 2>& arr+=(4)`，以及两条实参位置的数组
+  赋值（`echo arr=(1 2 3)`，那是上面「实参位置的赋值保守拒绕」那条取舍，不是待修的洞）
 
 已经修掉的：`f()` 与 `f() echo hi`（bash 拒、zsh 收，见 `fix(parser)` 那笔）、
 zsh csh 形式的裸体 `for x (a b) rm $x`、数组赋值括号里的垃圾（`arr=(1 arr=(1 2 3)`、
@@ -566,7 +567,25 @@ docs/zsh-plan.md；这里只放记分牌和口径。**缺口已经到零。**
 - `zsh -n` **不是纯语法 oracle**：它仍会做部分求值（除零、fd 号都会报），
   所以在「我们太宽松」那一栏出现条目时先怀疑 oracle
 - zsh 有一批选项会改变解析（SHGLOB/KSHGLOB/IGNOREBRACES/RC_QUOTES/ALIASES/SHORTLOOPS...），
-  按默认值假设并在报告中注明，这条和 bash 的 extglob 是同一类问题
+  按默认值假设并在报告中注明，这条和 bash 的 extglob 是同一类问题。SHORTLOOPS 默认开着，
+  所以 `for i in a;`（词表用分号收尾、空体）在 zsh 能跑而在 bash 是语法错；没有那个分号
+  的 `for i in a` 两个 shell 都拒，判据就是「词表有没有被分隔符收尾」
+
+### zsh 侧剩下的账
+
+差分（`--shell zsh --n 800 --seed 11`）与语料跑下来，剩下的每一类都判断过：
+
+- **太宽松 4 例里 3 例是 `${ ... }` 的本体不校验**（`echo ${arr]}`、`echo ${# if ... x}`、
+  `echo ${ find . -name x}`）。zsh 在 `-n` 下就会报 `bad substitution`，它拒的形状包括
+  `${` 后跟空白、名字后有空白、`]` 不配对。要修得先实现 zsh 的参数展开语法（`${(f)a}`、
+  `${a[0]}`、`${a/b/c}` 都合法），误报代价比收益大，先挂着。注意 `echo ${ arr}` 是**两个
+  shell 都拒**而我们收，这一支不分方言就能收；`${a b}` 那种才是 zsh 专属
+- **第 4 例是复合命令之后的保留字**，见上面差分段里那张实测表（两个方言规则相反）
+- **缺口 5 例全是变异体**，不是真实写法：`echo [[: ...]]`、`cat < f() { ... } <EOF`、
+  `2>& arr+=(4)`，以及两条实参位置的数组赋值——最后这两条是上面「实参位置的赋值保守
+  拒绕」那条刻意取舍，不是待修的洞
+- 语料的 5 个「我们太宽松」全是 oracle 的局限（文件是函数体、`zsh -n` 按顶层脚本读），
+  差分脚本会附上 oracle 原文供当场判断
 
 ## 定位失败时怎么查
 
