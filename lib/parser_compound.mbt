@@ -426,12 +426,12 @@ fn Parser::parse_csh_body(self : Parser) -> Seq {
     let op = match self.cur {
       TOp("&&") => {
         self.advance()
-        self.check_operator_sequence()
+        self.check_operator_sequence("&&")
         And
       }
       TOp("||") => {
         self.advance()
-        self.check_operator_sequence()
+        self.check_operator_sequence("||")
         Or
       }
       _ => {

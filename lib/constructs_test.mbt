@@ -186,3 +186,20 @@ test "an array assignment body is a word list, not a command list" {
     debug_inspect(status_of_construct(src), content="Complete")
   }
 }
+
+///|
+test "a case terminator may follow a semicolon or an ampersand" {
+  // Measured on bash 5.3 and zsh 5.9.2: both run `case x in a) : ; ;; esac`
+  // and `case x in a) : & ;; esac` — the `;;` closes the branch right after a
+  // separator, with no command in between. `&&`, `||` and `|` in the same
+  // place are refused by both, because those demand a right-hand side.
+  for src in ["case x in a) : ; ;; esac", "case x in a) : & ;; esac",
+    "case $# in\n0) help ; exit 1 ; ;;\nesac"] {
+    debug_inspect(status_of_construct(src), content="Complete")
+  }
+  for src in ["case x in a) : && ;; esac", "case x in a) : | ;; esac",
+    "case x in a) : || ;; esac", "case x in a) : ; | esac"] {
+    debug_inspect(status_of_construct(src), content="Unsupported")
+  }
+}
+

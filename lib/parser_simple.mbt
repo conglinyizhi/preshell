@@ -497,17 +497,37 @@ fn is_control_operator(op : String) -> Bool {
 }
 
 ///|
+/// The operators that close a `case` branch: bash spells the plain one `;;` and
+/// adds `;;&` for "keep testing the next pattern", zsh spells those `;|` and
+/// `;&`.
+fn is_case_terminator(op : String) -> Bool {
+  match op {
+    ";;" | ";&" | ";;&" | ";|" => true
+    _ => false
+  }
+}
+
+///|
 /// A connector has to be followed by a command. Measured: both shells refuse
 /// `cmd &&& x`, `cmd ||| x`, `cmd && || x`, `cmd | | x` and `cmd & & x`.
 /// zsh is the lenient one here: it takes `cmd && ; x` and `cmd ; ; x`, so an
 /// empty command between separators is allowed there and nowhere else.
-fn Parser::check_operator_sequence(self : Parser) -> Unit {
+///
+/// `after` is the connector that was just consumed, and it settles one shape:
+/// a `case` terminator may close the branch straight after a `;` or an `&`
+/// (measured, `case x in a) : ; ;; esac` and `case x in a) : & ;; esac` both
+/// run there), while `&&`, `||` and `|` in that place are refused by both
+/// shells. Same reading as the zsh exception above: an empty command is fine
+/// only where the shell does not demand a right-hand side.
+fn Parser::check_operator_sequence(self : Parser, after : String) -> Unit {
   if self.cur is TNewline || self.cur is TEof {
     return
   }
   match self.cur {
     TOp(op) =>
-      if is_control_operator(op) && !(self.lex.dialect is Zsh && op == ";") {
+      if is_control_operator(op) &&
+        !(self.lex.dialect is Zsh && op == ";") &&
+        !(is_case_terminator(op) && (after == ";" || after == "&")) {
         self.lex.fail("unexpected operator after operator")
       }
     _ => ()

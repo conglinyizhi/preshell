@@ -278,22 +278,22 @@ fn Parser::parse_separator(self : Parser) -> BinOp? {
   match self.cur {
     TOp("&&") => {
       self.advance()
-      self.check_operator_sequence()
+      self.check_operator_sequence("&&")
       Some(And)
     }
     TOp("||") => {
       self.advance()
-      self.check_operator_sequence()
+      self.check_operator_sequence("||")
       Some(Or)
     }
     TOp("&") => {
       self.advance()
-      self.check_operator_sequence()
+      self.check_operator_sequence("&")
       Some(Amp)
     }
     TOp(";") => {
       self.advance()
-      self.check_operator_sequence()
+      self.check_operator_sequence(";")
       Some(Semi)
     }
     TNewline => {
@@ -334,7 +334,7 @@ fn Parser::parse_pipeline(self : Parser) -> Pipeline {
     match self.cur {
       TOp("|") | TOp("|&") => {
         self.advance()
-        self.check_operator_sequence()
+        self.check_operator_sequence("|")
         self.skip_newlines()
         cmds.push(self.parse_command())
       }
