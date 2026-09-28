@@ -203,3 +203,23 @@ test "a case terminator may follow a semicolon or an ampersand" {
   }
 }
 
+///|
+test "a backslash inside a bracket expression escapes the quote" {
+  // Measured: bash 5.3 and zsh 5.9.2 both run `case x in *[\"]*) : ;; esac`
+  // while the bare `*["]*)` is refused by both — there the `"` opens a region
+  // that never closes, so the two spellings really differ and the scan has to
+  // honour the backslash. Missing that made the bracket swallow the rest of the
+  // pattern list and, with a quote in the body, leak the quote state into it.
+  for src in [
+    "case x in\n  *[\\\"]*)\n    :;;\nesac",
+    "case x in\n  *[\\\"]*)\n    x=\"abc\"\n    ;;\nesac",
+    "case x in\n  *[\\\\\\`\\\"\\$]*)\n    :;;\nesac",
+    // The quoted region inside a bracket is real, so this one stays accepted.
+    "case x in\n  *[\"a b\"]*)\n    :;;\nesac",
+  ] {
+    debug_inspect(status_of_construct(src), content="Complete")
+  }
+  // Without the backslash the quote really does open a region, and both shells
+  // refuse the result.
+  debug_inspect(status_of_construct("case x in\n  *[\"]*)\n    :;;\nesac"), content="Unsupported")
+}

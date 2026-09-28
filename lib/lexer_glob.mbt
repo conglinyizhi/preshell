@@ -121,6 +121,15 @@ fn Lexer::bracket_end(self : Lexer) -> Int? {
       i += 1
       continue
     }
+    // A backslash escapes what follows, so `\"` is a literal quote and does
+    // not open a region: measured, `case x in *[\"]*) : ;; esac` runs in both
+    // shells while the bare `*["]*)` is refused by both. Without this the scan
+    // read on to the next quote in the command and swallowed the rest of the
+    // pattern list with it.
+    if c == '\\' && quote == '\u{0}' {
+      i += 2
+      continue
+    }
     if c == '"' || c == '\'' {
       if quote == c {
         quote = '\u{0}'
