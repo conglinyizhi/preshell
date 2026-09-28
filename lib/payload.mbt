@@ -13,9 +13,10 @@
 /// back.
 pub(all) struct Payload {
   /// Where the text came from. `flag` — an option's value (`python3 -c '…'`);
-  /// `heredoc` — a here-document body (`python3 - <<'PY' … PY`). A pipe is not
-  /// a source: the text of `cat f | python3` is not in this command line at
-  /// all, and an empty payload would be worse than none.
+  /// `heredoc` — a here-document body (`python3 - <<'PY' … PY`); `operand` —
+  /// the word where a file name usually goes (`awk '{print}' f`, `sed 's/a/b/'
+  /// f`). A pipe is not a source: the text of `cat f | python3` is not in this
+  /// command line at all, and an empty payload would be worse than none.
   source : String
   /// The option the text was handed to. Present when `source` is `flag`.
   flag : String?
@@ -37,9 +38,10 @@ pub(all) struct Payload {
 ///
 /// A name in this table is a claim about the program, so it stays short: only
 /// the cases where "this option carries its source" is not in question. `awk`
-/// and `sed` are absent on purpose — what they take is a small language of
-/// their own rather than the program's source, and the option that names a file
-/// carries no text.
+/// and `sed` are not here because their program is not an option's value at all
+/// — it sits where a file name usually goes, and `payload_operand_of` reads that
+/// shape. The option that names a file (`awk -f p.awk`) carries no text in
+/// either case.
 fn payload_source_flags(program : String) -> Array[String] {
   match payload_stem(program) {
     "python" | "pypy" => ["-c"]
@@ -50,6 +52,114 @@ fn payload_source_flags(program : String) -> Array[String] {
     "php" => ["-r"]
     "lua" => ["-e"]
     _ => []
+  }
+}
+
+///|
+/// Programs whose own source is an *operand* rather than an option's value.
+///
+/// `awk '{print}' f` and `sed 's/a/b/' f` put the program where a file name
+/// usually goes, which is the shape the option table cannot express. Both have
+/// an escape hatch worth naming: `-f` reads the program from a file, and a file
+/// is not this command line.
+fn payload_operand_programs(program : String) -> Bool {
+  match payload_stem(program) {
+    "awk" | "gawk" | "mawk" | "nawk" | "sed" | "gsed" => true
+    _ => false
+  }
+}
+
+///|
+/// The options that take a value of their own, so the operand search has to step
+/// over it. `awk -F: '{print}'` hands `:` to `-F`; without this the program
+/// would be read as `:`.
+fn payload_operand_value_opts(stem : String) -> Array[String] {
+  match stem {
+    "awk" | "gawk" | "mawk" | "nawk" => ["-F", "-v"]
+    _ => []
+  }
+}
+
+///|
+/// The option that hands the program over itself, when the program has one.
+/// `sed -e 's/a/b/'` spells the script out; `sed 's/a/b/'` leaves it as the
+/// operand, and both mean the same thing.
+fn payload_script_opt(stem : String) -> String? {
+  match stem {
+    "sed" | "gsed" => Some("-e")
+    _ => None
+  }
+}
+
+///|
+/// The payload of an operand-shaped program, or None when there is none.
+///
+/// Three things end the search with nothing: a `-f` (the program is in a file),
+/// a trailing option that expects a value, and reaching the end without an
+/// operand. Several `-e` values are joined with a newline, which is what sed
+/// itself does with them.
+fn payload_operand_of(
+  program : String,
+  args : ArrayView[Word],
+  max : Int,
+) -> Payload? {
+  let stem = payload_stem(program)
+  let value_opts = payload_operand_value_opts(stem)
+  let script_opt = payload_script_opt(stem)
+  let scripts : Array[String] = []
+  let mut operand : String? = None
+  let mut i = 0
+  let mut after_ddash = false
+  while i < args.length() {
+    let t = args[i].literal_text()
+    if !after_ddash && t == "--" {
+      after_ddash = true
+      i += 1
+      continue
+    }
+    if !after_ddash && t.length() > 0 && t.get_char(0) == Some('-') && t != "-" {
+      // `-f` and its long spellings name a file: the text is not here.
+      if t == "-f" || t == "--file" || t.has_prefix("--file=") {
+        return None
+      }
+      let mut handled = false
+      match script_opt {
+        Some(s) =>
+          if t == s {
+            if i + 1 >= args.length() {
+              return None
+            }
+            scripts.push(args[i + 1].literal_text())
+            handled = true
+          }
+        None => ()
+      }
+      if handled {
+        i += 2
+        continue
+      }
+      if value_opts.contains(t) {
+        if i + 1 >= args.length() {
+          return None
+        }
+        i += 2
+        continue
+      }
+      // `-F:` and anything else option-shaped: no value to step over.
+      i += 1
+      continue
+    }
+    if operand is None {
+      operand = Some(t)
+    }
+    i += 1
+  }
+  if scripts.length() > 0 {
+    return Some(payload_make("operand", None, None, scripts.join("\n"), max))
+  }
+  match operand {
+    Some(t) => Some(payload_make("operand", None, None, t, max))
+    None => None
   }
 }
 
@@ -122,6 +232,11 @@ fn payload_of(
 ) -> Payload? {
   let flags = payload_source_flags(program)
   if flags.length() == 0 {
+    // `awk` and `sed` spell their program as an operand; there is no option to
+    // look for.
+    if payload_operand_programs(program) {
+      return payload_operand_of(program, args, max)
+    }
     return None
   }
   // An option that carries the source wins over a here-document: `python3 -c

@@ -134,7 +134,8 @@ test "the interpreter is recognised through its path and version" {
   inspect(payload_of_one("luajit -e 'x'"), content="<none>")
   inspect(payload_of_one("pypy3x -c 'x'"), content="<none>")
   inspect(payload_of_one("git -c user.name=x status"), content="<none>")
-  inspect(payload_of_one("awk '{print $1}' f.txt"), content="<none>")
+  // awk is not one of them either, but it is not "none": its program is an
+  // operand, and that shape is read below.
 }
 
 ///|
@@ -236,5 +237,52 @@ test "the payload is part of what makes two effects the same" {
   inspect(
     @lib.analyze("python3 -c a; python3 -c b").impact.effects.length(),
     content="1",
+  )
+}
+
+///|
+/// `awk` and `sed` put their program where a file name usually goes, which is
+/// the shape an option table cannot express. Their text is still the command
+/// line's own — `-f` is the exception in both, and a file is not this command
+/// line.
+test "awk and sed carry their program as an operand" {
+  inspect(
+    payload_of_one("awk '{print}' f.txt"),
+    content="awk operand  [{print}] bytes=7 truncated=false",
+  )
+  // `-F` takes a value of its own, so the program is the word after it.
+  inspect(
+    payload_of_one("awk -F: '{print $1}' f.txt"),
+    content="awk operand  [{print $1}] bytes=10 truncated=false",
+  )
+  inspect(
+    payload_of_one("awk -F : '{print}' f.txt"),
+    content="awk operand  [{print}] bytes=7 truncated=false",
+  )
+  inspect(
+    payload_of_one("sed 's/a/b/' f.txt"),
+    content="sed operand  [s/a/b/] bytes=6 truncated=false",
+  )
+  // `-n` takes no value, so the script is still the first operand.
+  inspect(
+    payload_of_one("sed -n '1p' f.txt"),
+    content="sed operand  [1p] bytes=2 truncated=false",
+  )
+  // Several `-e` values are one program; sed joins them with a newline.
+  inspect(
+    payload_of_one("sed -e 's/a/b/' -e 's/c/d/' f.txt"),
+    content="sed operand  [s/a/b/\ns/c/d/] bytes=13 truncated=false",
+  )
+  // A program that lives in a file is not in this command line.
+  for
+    src in [
+      "awk -f p.awk f.txt", "sed -f s.sed f.txt", "sed --file=s.sed f.txt",
+    ] {
+    inspect(payloads_of(src), content="")
+  }
+  // The size pair follows the text, and the source is the operand.
+  inspect(
+    payload_of_one("awk 'BEGIN{print 1}' f", max=4),
+    content="awk operand  [BEGI] bytes=14 truncated=true",
   )
 }
