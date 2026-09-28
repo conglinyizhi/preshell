@@ -89,6 +89,8 @@ ok_msgs="$(mktemp)"
 permissive_files="$(mktemp)"
 gap_files="$(mktemp)"
 crash_files="$(mktemp)"
+file_list="$(mktemp)"
+scan_rows="$(mktemp)"
 t0=$(date +%s%N)
 
 list_files() {
@@ -98,21 +100,41 @@ list_files() {
   esac
 }
 
+# 扫描先批量做完：`--stream` 是一个进程吃一整份列表，而逐个文件调要起上千次
+# 进程。契约是一行输入一行输出、顺序不变，所以下面按下标取回每个文件的结论。
+# PFLAGS lets a caller pick the dialect: zsh code in this tree carries no
+# shebang (it is sourced), so auto-detection cannot see it.
+list_files >"$file_list"
+scan_err="$(mktemp)"
+# shellcheck disable=SC2086
+if ! node "$root/tools/corpus/scan_batch.mjs" "$bin" --cwd="$root" ${PFLAGS:-} \
+  <"$file_list" >"$scan_rows" 2>"$scan_err"; then
+  # 行数对不上或工具有问题：这是「工具没了」，不是「每个文件都判定失败」。
+  # 照样往下走，缺的行会落进 crash 那一栏，但先把原话打出来。
+  echo "扫描没跑完（下面的 crash 计数会偏高）：" >&2
+  head -5 "$scan_err" >&2
+fi
+declare -A scan_status=() scan_issues=()
+while IFS=$'\t' read -r p s i; do
+  scan_status["$p"]="$s"
+  scan_issues["$p"]="$i"
+done <"$scan_rows"
+
 while IFS= read -r f; do
   [ -f "$f" ] || continue
-  # PFLAGS lets a caller pick the dialect: zsh code in this tree carries no
-  # shebang (it is sourced), so auto-detection cannot see it.
-  # shellcheck disable=SC2086
-  out="$(timeout 20 "$bin" --cwd="$root" ${PFLAGS:-} --scan <"$f" 2>/dev/null)" || out=""
-  line="$(printf '%s\n' "$out" | head -1)"
-  ours="${line%% *}"
-  ours="${ours#status=}"
-  if [ -z "$ours" ]; then
-    # 没有输出 = 崩了或超时。这类必须单独记账：不是「判定错了」，是工具没了
-    ours="CRASH"
-    echo "$f" >>"$crash_files"
-  fi
-  msgs="$(printf '%s\n' "$out" | tail -n +2 | sed 's/^issue: //; s/ (line [0-9]*)$//')"
+  ours="${scan_status[$f]-}"
+  case "$ours" in
+    "" | ERROR:*)
+      # 没有输出 = 崩了或超时。这类必须单独记账：不是「判定错了」，是工具没了
+      ours="CRASH"
+      echo "$f" >>"$crash_files"
+      ;;
+  esac
+  # issues 用 US 分隔、消息里的换行写成 RS；这里换回多行文本，与逐文件调用时
+  # 的 `msgs` 同形（都是每行一条消息，不含 `issue: ` 前缀与行号）。
+  msgs="${scan_issues[$f]-}"
+  msgs="${msgs//$'\x1f'/$'\n'}"
+  msgs="${msgs//$'\x1e'/$'\n'}"
 
   # The verdict is the exit code; the message is for the reader. Some inputs
   # make the oracle exit non-zero without printing anything at all.
@@ -140,7 +162,7 @@ while IFS= read -r f; do
       printf '%s\n' "$msgs" >>"$ok_msgs"
     fi
   fi
-done < <(list_files)
+done <"$file_list"
 t1=$(date +%s%N)
 
 total=$((both_ok + we_gap + we_permissive + corroborated))

@@ -58,20 +58,21 @@ else
 fi
 
 # 每个文件一行：<flagged><oracle_ok>\t<我们的 status>\t<是否标注了语义差异>\t<路径>
+#
+# 我们这一侧的结论来自下面那份批量扫描（`--stream` 一次进程吃完整份列表），
+# 不再逐文件起进程。剩下的可变成本只有真 oracle 那次调用。
 classify_one() {
-  local f="$1" firstline="" scan rest ours flagged=0 odiff=0 key oracle_ok=1
+  local f="$1" firstline="" ours flagged=0 odiff=0 key oracle_ok=1
   [ -f "$f" ] || return 0
   IFS= read -r firstline <"$f" || firstline=""
   [[ "$firstline" =~ $shebang_re ]] || return 0
-  scan="$("$bin" --cwd="$root" --scan <"$f" 2>/dev/null)"
-  # 去掉第一行（`status=…`），其余是我们报的原文。用参数展开而不是管道加 tail。
-  ours="${scan%% *}"
-  ours="${ours#status=}"
-  rest="${scan#*$'\n'}"
-  case "$rest" in
+  ours="${scan_status[$f]-}"
+  # 报错原文里 `would not run under` 与 `reads differently` 是两条断言的分界，
+  # 判据是原文里的字，不是工具的状态值。
+  case "${scan_issues[$f]-}" in
     *"would not run under"*) flagged=1 ;;
   esac
-  case "$rest" in
+  case "${scan_issues[$f]-}" in
     *"reads differently"*) odiff=1 ;;
   esac
   $oracle "$f" >/dev/null 2>&1 || oracle_ok=0
@@ -85,6 +86,19 @@ case "$procs" in
   '' | *[!0-9]*) procs=1 ;;
 esac
 [ "$procs" -lt 1 ] && procs=1
+
+# 批量扫描放在分片之前：一次进程吃完整份列表，与分几片无关。
+scan_err="$tmp/scan.err"
+if ! node "$root/tools/corpus/scan_batch.mjs" "$bin" --cwd="$root" \
+  <"$list" >"$tmp/scans" 2>"$scan_err"; then
+  echo "扫描没跑完（下面的判定会偏保守）：" >&2
+  head -5 "$scan_err" >&2
+fi
+declare -A scan_status=() scan_issues=()
+while IFS=$'\t' read -r p s i; do
+  scan_status["$p"]="$s"
+  scan_issues["$p"]="$i"
+done <"$tmp/scans"
 
 # 分片：`split -n l/N` 按行均分，每片一个后台 shell。
 if [ "$procs" -gt 1 ]; then
