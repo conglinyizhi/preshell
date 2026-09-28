@@ -247,7 +247,7 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                     // `(`, `&`, `&&` or `|` in there (`x=(a && b)`,
                     // `x=(a (b))`), and both refuse a redirect
                     // (`x=(a > f)`). Newlines and comments stay fine.
-                    TOp(";") => {
+                    TOp(";") =>
                       // `;` separates commands, not words, so this one is
                       // dialect-bound: bash refuses `x=(a;b)`, zsh runs it.
                       if self.lex.dialect is Zsh {
@@ -256,7 +256,6 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                         stray = true
                         break
                       }
-                    }
                     TOp("(") | TOp("&") | TOp("&&") | TOp("||") | TOp("|") => {
                       stray = true
                       break
@@ -268,7 +267,6 @@ fn Parser::parse_simple(self : Parser) -> Cmd {
                       } else {
                         self.advance()
                       }
-
                     _ => self.advance()
                   }
                 }
