@@ -6,6 +6,16 @@ import {
 }
 
 ///|
+/// 步骤分两段跑，因为它们的依赖不同：
+///
+/// - `sequential` 里有编译、`moon fmt`（会改文件）与生成物校验，彼此争同一份
+///   源码树，只能一个接一个。
+/// - `parallel` 的几步只读编译出来的二进制，互不相干，并发跑。它们的耗时并不
+///   相等（语料与方言对照最慢），所以并行的收益是「总和 → 最慢的那一步」。
+///
+/// 并行的步骤不能直接往 stdout 写：几路的输出会交错，失败的诊断会拼到别人的
+/// 题头下面。所以输出先收进内存，等这一批全部结束再按数组顺序打印——日志的
+/// 顺序与串行时一致，读起来不用重新找。
 fn wanted(name : String, filters : ArrayView[String]) -> Bool {
   if filters.length() == 0 {
     true
@@ -15,14 +25,30 @@ fn wanted(name : String, filters : ArrayView[String]) -> Bool {
 }
 
 ///|
-async fn run_step(name : String, cmd : String, args : Array[String]) -> Bool {
+/// 跑一步，拿回退出码与合并后的输出（stdout + stderr）。
+async fn step_output(cmd : String, args : Array[String]) -> (Int, String) {
+  let (code, data) = @process.collect_output_merged(cmd, args)
+  let text = try {
+    data.text()
+  } catch {
+    _ => ""
+  }
+  (code, text)
+}
+
+///|
+/// 打印一步的结果，并回一句它成没成。
+fn report(name : String, code : Int, text : String) -> Bool {
   println("--- \{name}")
-  let code = @process.run(cmd, args)
   if code == 0 {
     println("    通过")
+    if text.length() > 0 {
+      println(text)
+    }
     true
   } else {
     println("    失败（退出码 \{code}）")
+    println(text)
     false
   }
 }
@@ -31,32 +57,18 @@ async fn run_step(name : String, cmd : String, args : Array[String]) -> Bool {
 async fn main {
   let filters = @env.args()[1:].to_owned()
   let failures = []
-  let steps : Array[(String, String, Array[String])] = [
-    (
-      "Versions",
-      "moon",
-      ["version", "--all"],
-    ),
-    (
-      "Build",
-      "moon",
-      ["build", "--release", "--target", "native"],
-    ),
-    (
-      "Unit tests",
-      "moon",
-      ["test", "--target", "native"],
-    ),
+  let sequential : Array[(String, String, Array[String])] = [
+    ("Versions", "moon", ["version", "--all"]),
+    ("Build", "moon", ["build", "--release", "--target", "native"]),
+    ("Unit tests", "moon", ["test", "--target", "native"]),
     (
       "Format and check",
       "bash",
       ["-e", "-o", "pipefail", "-c", "moon fmt && git diff --exit-code -- '*.mbt' && moon check --target native"],
     ),
-    (
-      "Generated sources",
-      "node",
-      ["tools/codegen.mjs", "--check"],
-    ),
+    ("Generated sources", "node", ["tools/codegen.mjs", "--check"]),
+  ]
+  let parallel : Array[(String, String, Array[String])] = [
     (
       "Differential against bash -n",
       "bash",
@@ -67,31 +79,35 @@ async fn main {
       "bash",
       ["-e", "-o", "pipefail", "-c", "SH_ORACLE=\"dash -n\" bash tools/corpus/posix_oracle.sh --strict"],
     ),
-    (
-      "Malformed input probe",
-      "bash",
-      ["tools/probe/malformed.sh"],
-    ),
-    (
-      "Release notes",
-      "bash",
-      ["tools/test_release_notes.sh"],
-    ),
-    (
-      "Streaming mode",
-      "bash",
-      ["tools/probe/stream.sh"],
-    ),
-    (
-      "Short fuzz",
-      "node",
-      ["tools/fuzz/mutate.js", "--n", "400", "--seed", "1"],
-    ),
+    ("Malformed input probe", "bash", ["tools/probe/malformed.sh"]),
+    ("Release notes", "bash", ["tools/test_release_notes.sh"]),
+    ("Streaming mode", "bash", ["tools/probe/stream.sh"]),
+    ("Short fuzz", "node", ["tools/fuzz/mutate.js", "--n", "400", "--seed", "1"]),
   ]
-  for step in steps {
+  for step in sequential {
     let (name, cmd, args) = step
     if wanted(name, filters) {
-      if !run_step(name, cmd, args) {
+      let (code, text) = step_output(cmd, args)
+      if !report(name, code, text) {
+        failures.push(name)
+      }
+    }
+  }
+  let jobs : Array[async () -> (String, Int, String)] = []
+  for step in parallel {
+    let (name, cmd, args) = step
+    if wanted(name, filters) {
+      jobs.push(() => {
+        let (code, text) = step_output(cmd, args)
+        (name, code, text)
+      })
+    }
+  }
+  if jobs.length() > 0 {
+    let results = @async.all(jobs)
+    for result in results {
+      let (name, code, text) = result
+      if !report(name, code, text) {
         failures.push(name)
       }
     }
