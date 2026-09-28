@@ -247,6 +247,17 @@ pub fn Parser::parse_seq_in(self : Parser, stop : Stop, label : String) -> Seq {
           // corpus shows the two agree (see lib/status.mbt).
           self.lex.fail("unexpected token after command")
           self.advance()
+        } else if self.lex.dialect is Zsh &&
+          self.cur is TWord(_) &&
+          self.reserved() != Some("}") &&
+          pipeline_ends_on_keyword(pipeline) {
+          // zsh wants a separator between a keyword-closed construct and the
+          // word that follows, even when that word closes the outer construct:
+          // measured, `if for i in a; do :; done then :; fi` is refused there
+          // while bash runs it. `{ ... }` and `( ... )` close on punctuation and
+          // need none, which is why they are not in that list — and `}` is the
+          // word that needs none either (`for i in a; do :; done }` runs there).
+          self.lex.fail("unexpected token after command")
         }
         break
       }
@@ -301,6 +312,31 @@ fn Parser::parse_separator(self : Parser) -> BinOp? {
       Some(Semi)
     }
     _ => None
+  }
+}
+
+///|
+/// Whether this command ends on a keyword. zsh needs a separator after such a
+/// construct before any word follows it, while `{ ... }` and `( ... )` need
+/// none — measured, `if { :; } then :; fi` runs there and the same shape with a
+/// `for ...; done` in front is refused.
+fn pipeline_ends_on_keyword(p : Pipeline) -> Bool {
+  match p.cmds {
+    [] => false
+    cmds => cmd_ends_on_keyword(cmds[cmds.length() - 1])
+  }
+}
+
+///|
+/// The same question for one command. A redirect does not change the answer —
+/// `for i in a; do :; done > /tmp/o then` is refused by zsh exactly like the
+/// spelling without it, because it is the construct that ends, not the
+/// redirect — so the wrapper is looked through.
+fn cmd_ends_on_keyword(cmd : Cmd) -> Bool {
+  match cmd {
+    If(..) | Loop(..) | For(..) | Case(..) => true
+    Redirected(inner~, ..) => cmd_ends_on_keyword(inner)
+    _ => false
   }
 }
 

@@ -138,3 +138,27 @@ test "a brace body belongs to an if, a while or an until" {
   inspect(ztouched("echo {a,b}"), content="")
   debug_inspect(zstatus("for i in {a,b}; do :; done"), content="Complete")
 }
+
+///|
+test "zsh wants a separator after a keyword-closed construct" {
+  // Measured: zsh 5.9.2 refuses `if for i in a; do :; done then :; fi` while
+  // bash 5.3 runs it, so this is the zsh side only. `{ ... }` and `( ... )` need
+  // no separator there — neither closes on a keyword — and a `;` fixes the
+  // refused shape in both shells.
+  debug_inspect(
+    zstatus("if for i in a; do :; done then :; fi"),
+    content="Unsupported",
+  )
+  debug_inspect(zstatus("if while :; do :; done then :; fi"), content="Unsupported")
+  debug_inspect(zstatus("if if :; then :; fi then :; fi"), content="Unsupported")
+  // A redirect after the construct does not change the answer: it is the
+  // construct that ends there, and the diagnostic from the differential run was
+  // exactly this shape.
+  debug_inspect(
+    zstatus("if for i in a; do :; done > /tmp/o then :; fi"),
+    content="Unsupported",
+  )
+  debug_inspect(zstatus("if { :; } then :; fi"), content="Complete")
+  debug_inspect(zstatus("if ( : ) then :; fi"), content="Complete")
+  debug_inspect(zstatus("if for i in a; do :; done; then :; fi"), content="Complete")
+}
